@@ -1,0 +1,172 @@
+:root {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  color: #ececec;
+  background: #060606;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 70% 0%, rgba(255, 174, 0, 0.07), transparent 30%),
+    #060606;
+}
+
+button, input { font: inherit; }
+
+.terminal-shell {
+  width: min(1500px, 100%);
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-end;
+  border-bottom: 1px solid #292929;
+  padding-bottom: 18px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #8b8b8b;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.7rem, 4vw, 3.3rem);
+  letter-spacing: -0.055em;
+  font-weight: 600;
+}
+
+.clock { color: #ffb000; font-size: 0.9rem; }
+
+.status-strip {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #292929;
+  color: #aaa;
+  font-size: 0.72rem;
+}
+
+.status-strip span { display: inline-flex; align-items: center; gap: 7px; }
+.status-strip .status-note { margin-left: auto; }
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-dot--ok { background: #8fd14f; box-shadow: 0 0 8px rgba(143, 209, 79, 0.55); }
+.status-dot--off { background: #555; }
+
+.market-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  border-left: 1px solid #292929;
+  margin-top: 22px;
+}
+
+.market-card {
+  min-height: 150px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border-top: 1px solid #292929;
+  border-right: 1px solid #292929;
+  border-bottom: 1px solid #292929;
+}
+
+.market-label { color: #ffb000; font-size: 0.75rem; }
+.market-card strong { font-size: 2rem; font-weight: 500; }
+.market-card small { color: #6f6f6f; line-height: 1.4; }
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr;
+  gap: 22px;
+  margin-top: 22px;
+}
+
+.panel { border: 1px solid #292929; background: rgba(12, 12, 12, 0.78); }
+.panel-heading {
+  min-height: 42px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 14px;
+  border-bottom: 1px solid #292929;
+  color: #ffb000;
+  font-size: 0.76rem;
+}
+.muted { color: #606060; }
+
+.chart-placeholder {
+  min-height: 300px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  color: #666;
+  overflow: hidden;
+}
+
+.chart-line {
+  height: 150px;
+  margin-bottom: 24px;
+  opacity: 0.45;
+  background:
+    linear-gradient(175deg, transparent 0 24%, #ffb000 24.5% 25%, transparent 25.5% 41%, #ffb000 41.5% 42%, transparent 42.5% 57%, #ffb000 57.5% 58%, transparent 58.5% 72%, #ffb000 72.5% 73%, transparent 73.5%);
+}
+
+table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+td { padding: 15px 14px; border-bottom: 1px solid #1c1c1c; }
+td:first-child { color: #ffb000; }
+td:nth-child(2) { color: #888; }
+td:last-child { text-align: right; }
+
+.command-panel { margin-top: 22px; }
+.command-suggestions { padding: 16px; display: flex; flex-wrap: wrap; gap: 9px; }
+.command-suggestions code { color: #8c8c8c; border: 1px solid #252525; padding: 6px 8px; font-size: 0.7rem; }
+.command-line {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  padding: 16px;
+  border-top: 1px solid #292929;
+  color: #ffb000;
+}
+.command-line input {
+  border: 0;
+  outline: 0;
+  color: #f4f4f4;
+  background: transparent;
+  text-transform: uppercase;
+}
+.command-line input::placeholder { color: #454545; }
+
+@media (max-width: 1000px) {
+  .market-grid { grid-template-columns: repeat(3, 1fr); }
+  .workspace-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  .terminal-shell { padding: 16px; }
+  .topbar { align-items: flex-start; }
+  .market-grid { grid-template-columns: repeat(2, 1fr); }
+  .status-strip .status-note { width: 100%; margin-left: 0; padding-bottom: 10px; }
+}
