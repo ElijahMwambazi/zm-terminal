@@ -1,10 +1,23 @@
+import httpx
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
 
 from app.db import database_is_ready, get_engine
+from app.schemas.fx import FxQuote
+from app.services.boz import get_boz_fx_quote
 from app.services.openbb import get_openbb_coverage, openbb_is_ready
 
 router = APIRouter(prefix="/api/v1")
+
+
+@router.get("/fx/USDZMW", response_model=FxQuote)
+async def usd_zmw_quote() -> FxQuote:
+    try:
+        return await get_boz_fx_quote()
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="Bank of Zambia request timed out") from exc
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Bank of Zambia data unavailable or invalid") from exc
 
 
 @router.get("/health")

@@ -1,0 +1,26 @@
+[
+  {
+    "buying": "19.8000",
+    "mid_rate": "19.8251",
+    "selling": "19.8500",
+    "time": "<time datetime=\"2026-10-09T07:30:00Z\" class=\"datetime\">9 Oct 2026 - 09:30</time>\n"
+  },
+  {
+    "buying": "19.8736",
+    "mid_rate": "19.8987",
+    "selling": "19.9236",
+    "time": "<time datetime=\"2026-10-09T14:00:51Z\" class=\"datetime\">9 Oct 2026 - 16:00</time>\n"
+  },
+  {
+    "buying": "19.8500",
+    "mid_rate": "19.8751",
+    "selling": "19.9000",
+    "time": "<time datetime=\"2026-10-09T10:30:00Z\" class=\"datetime\">9 Oct 2026 - 12:30</time>\n"
+  },
+  {
+    "buying": "19.8736",
+    "mid_rate": "19.8987",
+    "selling": "19.9236",
+    "time": "<time datetime=\"2026-10-09T14:00:51Z\" class=\"datetime\">9 Oct 2026 - 16:00</time>\n"
+  }
+]

@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     app_name: str = "ZM Terminal API"
     database_url: str = "postgresql+psycopg://zm_terminal:zm_terminal_dev@postgres:5432/zm_terminal"
     openbb_url: str = "http://openbb:6900"
+    boz_usd_rates_url: str = "https://www.boz.zm/api/v1/views/boz_zmw_usd_daily_exchange_rates"
     cors_origins: str = "http://localhost:5173"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
