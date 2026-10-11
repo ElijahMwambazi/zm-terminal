@@ -2,7 +2,7 @@
 
 A personal, Zambia-first market intelligence terminal built with React, FastAPI, PostgreSQL, OpenBB and Docker.
 
-> Status: **v0.1 scaffold**. The application deliberately does not display fabricated market prices. Live Bank of Zambia, LuSE, crypto and commodity adapters are the next implementation milestone.
+> Status: **v0.1 scaffold with a Bank of Zambia USD/ZMW backend adapter**. The application deliberately does not display fabricated market prices. Frontend FX integration and LuSE, crypto and commodity adapters remain pending.
 
 ## Goals
 
@@ -88,7 +88,24 @@ GET /api/v1/system
 GET /api/v1/instruments
 GET /api/v1/markets/overview
 GET /api/v1/openbb/coverage
+GET /api/v1/fx/USDZMW
 ```
+
+### Bank of Zambia USD/ZMW backend
+
+`GET /api/v1/fx/USDZMW` fetches the official [BoZ USD observations JSON](https://www.boz.zm/api/v1/views/boz_zmw_usd_daily_exchange_rates).
+`BOZ_USD_RATES_URL` configures that request URL; attribution remains the public [BoZ exchange-rate page](https://www.boz.zm/markets-securities/boz-exchange-rates).
+The source labels the pair ZMW/USD; the application symbol `USDZMW` represents ZMW per USD without inversion.
+
+The response preserves published `buy`, `mid`, and `sell` as **JSON decimal strings**. It extracts explicit UTC observation timestamps from each row's `<time datetime>` attribute, preserving seconds, and records a separate UTC `retrieved_at`.
+It selects the latest timestamp across all hours, regardless of response order. The website applies an additional hour filter whose semantics are undocumented; this adapter does not reproduce it.
+Identical duplicates are accepted. Conflicting duplicates at any timestamp, malformed rows, missing values, and future observations fail explicitly rather than silently selecting older data.
+
+`stale` means the observation is **more than 96 hours old** at retrieval. This is an application heuristic that tolerates weekends and some holiday gaps, not a BoZ publication SLA or holiday calendar. Stale quotes still return HTTP 200 with `stale: true`.
+Requests use a 10-second HTTPX timeout and a ZM Terminal User-Agent, without retries. Timeouts return 504; upstream HTTP failures or invalid data return a safe 502 response.
+
+No quotes are persisted or cached. Frontend FX commands, quote display, and historical charts remain pending.
+Offline tests use a small sanitized JSON fixture with altered test values, a preserved upstream structure, and mocked HTTP; they require neither BoZ access, PostgreSQL, nor OpenBB. Run `cd apps/api && python -m pytest` (or the existing Docker-based `make api-test`).
 
 ## Planned terminal commands
 
@@ -148,7 +165,8 @@ zm-terminal/
 - [x] PostgreSQL schema
 - [x] OpenBB V5 API service
 - [x] CI scaffold
-- [ ] Bank of Zambia FX adapter
+- [x] Bank of Zambia USD/ZMW backend adapter
+- [ ] Frontend FX integration
 - [ ] LuSE market-data adapter
 - [ ] BTC/USD provider
 - [ ] BTC/ZMW derived instrument

@@ -36,6 +36,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://zm_terminal:zm_terminal_dev@postgres:5432/zm_terminal}
       OPENBB_URL: ${OPENBB_URL:-http://openbb:6900}
+      BOZ_USD_RATES_URL: ${BOZ_USD_RATES_URL:-https://www.boz.zm/api/v1/views/boz_zmw_usd_daily_exchange_rates}
       CORS_ORIGINS: http://localhost:5173
     ports:
       - "8000:8000"
