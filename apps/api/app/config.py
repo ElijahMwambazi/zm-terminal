@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     boz_usd_rates_url: str = "https://www.boz.zm/api/v1/views/boz_zmw_usd_daily_exchange_rates"
     boz_treasury_bills_url: str = "https://www.boz.zm/jsonapi/node/tbills_auction_results"
     boz_bond_auctions_url: str = "https://www.boz.zm/jsonapi/node/bond_auction"
+    erb_media_url: str = "https://www.erb.org.zm/wp-json/wp/v2/media"
     cors_origins: str = "http://localhost:5173"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
