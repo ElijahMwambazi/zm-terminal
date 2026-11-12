@@ -245,10 +245,201 @@ def test_adapter_request_and_content_type():
         async with httpx.AsyncClient(transport=httpx.MockTransport(h)) as c:
             return await boz_bonds.get_boz_bonds(client=c)
     rows, rejected = asyncio.run(run(handler))
-    assert "page%5Blimit%5D=5" in seen["url"] and "bond_auction" in seen["url"]
+    assert "page%5Blimit%5D=50" in seen["url"] and "bond_auction" in seen["url"]
     assert len(rows) == 13 and [r.tender_number for r in rejected] == ["99/2026/BA"]
     with pytest.raises(ValueError):
         asyncio.run(run(lambda r: httpx.Response(200, text="<html>", headers={"content-type": "text/html"})))
+
+
+# ---- pagination across the BoZ archive ----
+NEXT = "https://www.boz.zm/jsonapi/node/bond_auction?page%5Boffset%5D={}&page%5Blimit%5D=10"
+by_title = {n["attributes"]["title"]: n for n in FIXTURE["data"]}
+
+
+def page(titles, *, next_offset=None, mutate=None, drop=()):
+    p = {"jsonapi": {"version": "1.0"}, "data": [copy.deepcopy(by_title[t]) for t in titles],
+         "included": copy.deepcopy(FIXTURE["included"]), "links": {}}
+    if next_offset is not None:
+        p["links"]["next"] = {"href": NEXT.format(next_offset)}
+    for pid in drop:  # a tenor the tender legitimately did not auction
+        for n in p["data"]:
+            n["relationships"]["field_auction_results"]["data"] = [
+                r for r in n["relationships"]["field_auction_results"]["data"] if r["id"] != pid]
+    if mutate:
+        mutate(p)
+    return p
+
+
+class Archive:
+    """Offline BoZ: serves pages by `page[offset]`; records every request."""
+
+    def __init__(self, pages):
+        self.pages, self.requests = pages, []
+
+    def handler(self, request):
+        self.requests.append(str(request.url))
+        idx = int(request.url.params.get("page[offset]", 0) or 0)
+        # offset N means "page N" here (each test's links.next uses the page number)
+        page_ = self.pages[idx]
+        if isinstance(page_, Exception):
+            raise page_
+        return httpx.Response(200, json=page_, headers={"content-type": "application/vnd.api+json"})
+
+    async def fetch(self):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(self.handler)) as c:
+            return await boz_bonds.get_boz_bonds(client=c)
+
+
+def test_five_year_found_on_second_page():
+    a = Archive([page(["99/2026/BA", "98/2026/BA"], next_offset=1), page(["97/2026/BA", "96/2026/BA"])])
+    rows, _ = asyncio.run(a.fetch())
+    got = {r.tenor: r for r in latest_per_tenor(rows)}
+    assert got["5Y"].tender_number == "97/2026/BA" and got["5Y"].auction_date == date(2026, 10, 2)
+    assert len(a.requests) == 2 and "page%5Blimit%5D=50" in a.requests[0] and "sort=-field_bond_auction_date" in a.requests[0]
+
+
+def test_traversal_stops_once_all_six_tenors_found():
+    a = Archive([page(["98/2026/BA"], next_offset=1), page(["97/2026/BA"], next_offset=2), page(["96/2026/BA"])])
+    asyncio.run(a.fetch())
+    assert len(a.requests) == 2  # page 3 never requested
+
+
+def test_traversal_stops_at_archive_end_and_reports_missing():
+    a = Archive([page(["98/2026/BA"], next_offset=1), page(["96/2026/BA"])])  # no 5Y anywhere
+    rows, _ = asyncio.run(a.fetch())
+    assert len(a.requests) == 2 and "5Y" not in {r.tenor for r in rows}
+
+
+def test_missing_tenors_only_after_completed_search(monkeypatch):
+    done = Archive([page(["97/2026/BA", "96/2026/BA"], drop=["b5"])])
+    async def complete():
+        return await done.fetch()
+    monkeypatch.setattr(router_module, "get_boz_bonds", complete)
+    assert TestClient(app).get("/api/v1/government-bonds/latest").json()["missing_tenors"] == ["5Y"]
+    # a truncated search must fail closed instead of claiming 5Y is missing
+    monkeypatch.setattr(boz_bonds, "MAX_BOND_PAGES", 2)
+    cut = Archive([page(["96/2026/BA"], next_offset=1, drop=["a2"]), page(["96/2026/BA"], next_offset=2, drop=["a2"])])
+    async def truncated():
+        return await cut.fetch()
+    monkeypatch.setattr(router_module, "get_boz_bonds", truncated)
+    r = TestClient(app).get("/api/v1/government-bonds/latest")
+    assert r.status_code == 502 and "missing" not in r.text and len(cut.requests) == 2
+
+
+def test_page_cap_with_next_link_fails_closed(monkeypatch):
+    monkeypatch.setattr(boz_bonds, "MAX_BOND_PAGES", 2)
+    partial = lambda: page(["98/2026/BA"], next_offset=1)  # never has 3Y/5Y/7Y/15Y
+    a = Archive([partial(), page(["98/2026/BA"], next_offset=2), partial()])
+    with pytest.raises(ValueError, match="truncated"):
+        asyncio.run(a.fetch())
+    assert len(a.requests) == 2
+
+
+def test_rejected_tender_on_earlier_page_flags_older_rows_from_later_page():
+    a = Archive([page(["99/2026/BA", "98/2026/BA"], next_offset=1), page(["97/2026/BA"])])
+    rows, rejected = asyncio.run(a.fetch())
+    got = {r.tenor: r for r in latest_per_tenor(rows, rejected)}
+    assert got["5Y"].newer_rejected_tenders == ["99/2026/BA"]  # selected from page 2
+    assert got["10Y"].newer_rejected_tenders == ["99/2026/BA"]
+
+
+def test_older_rejected_tender_on_later_page_does_not_flag_newer_rows():
+    def break_96(p):
+        para(p, "a10")["attributes"].pop("field_10_year_isin")
+    a = Archive([page(["98/2026/BA"], next_offset=1), page(["97/2026/BA", "96/2026/BA"], mutate=break_96)])
+    rows, rejected = asyncio.run(a.fetch())
+    assert [r.tender_number for r in rejected] == ["96/2026/BA"]
+    assert all(r.newer_rejected_tenders == [] for r in latest_per_tenor(rows, rejected))
+
+
+def test_rejected_page_does_not_stop_traversal():
+    def break_all(p):
+        for n in p["data"]:
+            n["attributes"]["title"] = "bad"
+    a = Archive([page(["99/2026/BA"], next_offset=1, mutate=break_all), page(["97/2026/BA"])])
+    rows, rejected = asyncio.run(a.fetch())
+    assert len(rows) == 6 and len(rejected) == 1 and len(a.requests) == 2
+
+
+def placeholder(title, day):
+    return {"type": "node--bond_auction", "id": "ph" + title, "attributes": {
+        "title": title, "field_bond_auction_date": day, "status": True},
+        "relationships": {"field_auction_results": {"data": []}}}
+
+
+def test_legacy_placeholders_dropped_but_newer_empty_tender_kept():
+    def add(p):
+        p["data"] += [placeholder("12/2025/BA", "2025-12-01T16:00:00+02:00"), placeholder("11/2024/BA", "2024-11-01T16:00:00+02:00")]
+        p["data"].insert(0, placeholder("98/2026/BA", "2026-11-27T10:00:00+02:00"))  # newer than every valid row
+    a = Archive([page(["97/2026/BA"], mutate=add)])
+    rows, rejected = asyncio.run(a.fetch())
+    assert [r.tender_number for r in rejected] == ["98/2026/BA"]  # legacy placeholders are not reported
+    assert all(r.newer_rejected_tenders == ["98/2026/BA"] for r in latest_per_tenor(rows, rejected))
+
+
+def test_tenor_only_in_rejected_tenders_is_missing_with_rejections_reported(monkeypatch):
+    def bad_5y_tender(p):  # the only tender with 5Y has a malformed ISIN elsewhere in it
+        para(p, "b15")["attributes"]["field_15_year_isin"] = "ZM100007709"
+    # a newer valid tender without 5Y exists; the older tender that has 5Y is rejected whole
+    a2 = Archive([page(["98/2026/BA", "97/2026/BA"], mutate=bad_5y_tender)])
+    async def real2():
+        return await a2.fetch()
+    monkeypatch.setattr(router_module, "get_boz_bonds", real2)
+    body = TestClient(app).get("/api/v1/government-bonds/latest").json()
+    assert "5Y" in body["missing_tenors"] and body["skipped_tenders"] == ["97/2026/BA"]
+    assert TestClient(app).get("/api/v1/government-bonds/5Y").status_code == 404
+
+
+def test_identical_duplicate_across_pages_collapses_and_conflict_fails():
+    a = Archive([page(["98/2026/BA"], next_offset=1), page(["98/2026/BA", "97/2026/BA"])])
+    rows, _ = asyncio.run(a.fetch())
+    assert len(rows) == 8 and len({(r.tender_number, r.tenor) for r in rows}) == 8
+
+    def change(p):
+        para(p, "c10")["attributes"]["field_10_year_yield_rate"] = "13.9999"
+    b = Archive([page(["98/2026/BA"], next_offset=1), page(["98/2026/BA", "97/2026/BA"], mutate=change)])
+    with pytest.raises(ValueError, match="Conflicting"):
+        asyncio.run(b.fetch())
+
+
+@pytest.mark.parametrize("failure", [
+    httpx.ReadTimeout("t"), httpx.ConnectError("c"),
+])
+def test_later_page_transport_failure_propagates_for_safe_mapping(failure):
+    a = Archive([page(["98/2026/BA"], next_offset=1), failure])
+    with pytest.raises(type(failure)):
+        asyncio.run(a.fetch())
+
+
+def test_later_page_http_error_and_foreign_next_link_fail():
+    def handler(request):
+        if "page[offset]" in str(request.url) or "offset" in str(request.url):
+            return httpx.Response(503)
+        return httpx.Response(200, json=page(["98/2026/BA"], next_offset=1),
+                              headers={"content-type": "application/vnd.api+json"})
+    async def run(h):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(h)) as c:
+            return await boz_bonds.get_boz_bonds(client=c)
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(run(handler))
+    def foreign(p):
+        p["links"]["next"] = {"href": "https://evil.example/jsonapi/node/bond_auction?page%5Boffset%5D=1"}
+    a = Archive([page(["98/2026/BA"], mutate=foreign)])
+    with pytest.raises(ValueError, match="leaves"):
+        asyncio.run(a.fetch())
+    assert len(a.requests) == 1
+
+
+def test_single_tenor_endpoint_returns_older_valid_auction_not_404(monkeypatch):
+    a = Archive([page(["99/2026/BA", "98/2026/BA"], next_offset=1), page(["97/2026/BA"])])
+    async def real():
+        return await a.fetch()
+    monkeypatch.setattr(router_module, "get_boz_bonds", real)
+    r = TestClient(app).get("/api/v1/government-bonds/5Y")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["tender_number"] == "97/2026/BA" and body["auction_date"] == "2026-10-02" and body["yield_rate"] == "14.5000"
+    assert "stale" not in body
 
 
 # ---- real PostgreSQL (opt-in) ----

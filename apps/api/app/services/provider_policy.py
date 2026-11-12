@@ -64,9 +64,10 @@ BOZ_BOND_POLICY = BOZ_USD_POLICY.model_copy(update={
     "source_url": "https://www.boz.zm/markets-securities/bonds",
     "required_timestamps": ("auction_date", "retrieved_at"),
     "request_guidance": (
-        "One request per user action to the BoZ JSON:API bond_auction (5 most recent auctions), "
-        "10 s timeout, no retries, no background polling. Auctions are irregular (21 to 63 days "
-        "apart in 2026). PDFs are not fetched."
+        "Per user action, sequential requests to the BoZ JSON:API bond_auction, newest first, "
+        "50 auctions per page following links.next, stopping once every tenor is found, at the "
+        "archive end, or failing closed at 10 pages (the archive is ~3 pages). 10 s timeout, no retries, no background polling. "
+        "Auctions are irregular (21 to 63 days apart in 2026). PDFs are not fetched."
     ),
 })
 

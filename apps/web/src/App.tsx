@@ -160,7 +160,7 @@ export default function App() {
           <small>
             {bondState.status === "loading" && "Loading Bank of Zambia auction…"}
             {bondState.status === "error" && bondProblem(bondState)}
-            {bondState.status === "ready" && !bond10 && "No 10Y auction in the most recent BoZ auctions"}
+            {bondState.status === "ready" && !bond10 && "No valid 10Y auction found"}
             {bond10 && <>Yield · BoZ · auction {formatDate(bond10.auction_date)}</>}
             {bond10 && fallbackWarning(bond10) && (
               <><br /><span className="text-stale">{fallbackWarning(bond10)}</span></>

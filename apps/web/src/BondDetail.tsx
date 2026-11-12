@@ -57,7 +57,7 @@ const BondDetail = forwardRef<HTMLElement, { state: BondState; focus: BondTenor 
                         </tr>
                       ) : (
                         <tr key={tenor} className={cls}>
-                          <td>{tenor}</td><td>—</td><td>—</td><td>Not in the most recent auctions</td><td>—</td>
+                          <td>{tenor}</td><td>—</td><td>—</td><td>No valid auction found</td><td>—</td>
                         </tr>
                       );
                     })}
@@ -66,7 +66,7 @@ const BondDetail = forwardRef<HTMLElement, { state: BondState; focus: BondTenor 
               </div>
               {focus && !focused && (
                 <p className="notice notice--error">
-                  {focus} was not auctioned in BoZ&apos;s most recent auctions. No yield is shown.
+                  No valid {focus} auction was found in BoZ&apos;s auction archive. No yield is shown.
                 </p>
               )}
               {anyFallback && (
@@ -76,12 +76,17 @@ const BondDetail = forwardRef<HTMLElement, { state: BondState; focus: BondTenor 
                 </p>
               )}
               {!anyFallback && rejectedNote(data.skipped_tenders) && (
-                <p className="notice">{rejectedNote(data.skipped_tenders)} (ignored; it does not affect the rows shown).</p>
+                <p className="notice">
+                  {rejectedNote(data.skipped_tenders)} (ignored).{" "}
+                  {data.missing_tenors.length > 0
+                    ? `${data.missing_tenors.join(", ")} may appear only in rejected tenders; no value is shown for it.`
+                    : "It does not affect the rows shown."}
+                </p>
               )}
               <ul className="provenance">
                 <li><span>Source</span><a href={data.tenors[0]?.source_url} target="_blank" rel="noreferrer">Bank of Zambia</a> (official auction results)</li>
                 {retrieved && <li><span>Retrieved</span>{formatLusaka(retrieved)}</li>}
-                <li><span>Note</span>Yield and coupon are percent per annum as published. Not every tenor is auctioned each time, and a reopened bond keeps its ISIN and coupon, so each row shows its own auction date. No freshness flag: BoZ publishes no machine-readable schedule.</li>
+                <li><span>Note</span>Yield and coupon are percent per annum as published. Not every tenor is auctioned each time, so a row can come from an older auction, and a reopened bond keeps its ISIN and coupon, so each row shows its own auction date. No freshness flag: BoZ publishes no machine-readable schedule.</li>
               </ul>
             </>
           )}

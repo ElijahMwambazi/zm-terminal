@@ -118,7 +118,7 @@ async def government_bond(tenor: BondTenor) -> GovernmentBondAuction:
     rows, rejected = await _load_bonds()
     match = [r for r in latest_bonds(rows, rejected) if r.tenor == tenor]
     if not match:
-        raise HTTPException(status_code=404, detail=f"No recent BoZ auction for {tenor}")
+        raise HTTPException(status_code=404, detail=f"No valid BoZ auction found for {tenor}")
     return match[0]
 
 

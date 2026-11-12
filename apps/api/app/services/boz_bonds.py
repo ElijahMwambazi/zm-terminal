@@ -11,6 +11,7 @@ and yield ranges exist only in the linked PDFs and are not modelled. Tenders bef
 
 import re
 from datetime import date, datetime, timezone
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -21,7 +22,11 @@ from app.services.boz_treasury import LUSAKA, _decimal
 
 BOND_TIMEOUT_SECONDS = 10.0
 BOND_USER_AGENT = "ZM-Terminal/0.1 (Bank of Zambia Government Bond adapter)"
-RECENT_AUCTIONS = 5
+# Pagination: newest-first pages of BOND_PAGE_SIZE auctions, followed via the API's own
+# `links.next`, sequentially, until all six tenors have a valid row or the archive ends.
+# Hitting MAX_BOND_PAGES first fails closed (never reported as "missing").
+BOND_PAGE_SIZE = 50  # the JSON:API maximum; the whole archive is ~110 tenders, almost all empty placeholders
+MAX_BOND_PAGES = 10
 
 _TITLE = re.compile(r"[0-9]{1,3}/[0-9]{4}(?:/BA)?")
 _DATETIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}")
@@ -94,24 +99,27 @@ def _describe_rejected(node: object) -> RejectedTender:
         parsed = _auction_date(attrs.get("field_bond_auction_date"))
     except ValueError:
         parsed = None
+    refs = (node.get("relationships") or {}).get("field_auction_results", {}).get("data") if isinstance(node, dict) else None
     return RejectedTender(
         tender_number=title if isinstance(title, str) and _TITLE.fullmatch(title) else None,
         auction_date=parsed,
+        no_results=refs == [],
     )
 
 
 def parse_bond_auctions(
-    payload: object, *, retrieved_at: datetime
+    payload: object, *, retrieved_at: datetime, require_rows: bool = True
 ) -> tuple[list[GovernmentBondAuction], list[RejectedTender]]:
     """Return (valid rows, rejected tenders). A failing tender is rejected whole, never repaired.
 
-    Structural problems with the document itself raise.
+    Structural problems with the document itself raise. A page whose tenders are all
+    rejected (e.g. empty legacy placeholders) is only an error when `require_rows`.
     """
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), list) or not payload["data"]:
         raise ValueError("Expected a non-empty JSON:API document")
-    included = payload.get("included")
+    included = payload.get("included", [])  # JSON:API omits it when nothing is included
     if not isinstance(included, list):
-        raise ValueError("Missing included tenor records")
+        raise ValueError("Malformed included tenor records")
     paragraphs = {i["id"]: i for i in included if isinstance(i, dict) and isinstance(i.get("id"), str)}
     rows: list[GovernmentBondAuction] = []
     rejected: list[RejectedTender] = []
@@ -120,7 +128,7 @@ def parse_bond_auctions(
             rows.extend(_parse_node(node, paragraphs, retrieved_at))
         except ValueError:  # includes pydantic ValidationError
             rejected.append(_describe_rejected(node))
-    if not rows:
+    if require_rows and not rows:
         raise ValueError("No valid Government Bond auction in the source")
     return rows, rejected
 
@@ -148,14 +156,10 @@ def latest_per_tenor(
     ]
 
 
-async def fetch_bond_payload(client: httpx.AsyncClient) -> object:
+async def _get(client: httpx.AsyncClient, url: str, params: dict[str, str] | None) -> object:
     response = await client.get(
-        get_settings().boz_bond_auctions_url,
-        params={
-            "include": "field_auction_results",
-            "sort": "-field_bond_auction_date",
-            "page[limit]": str(RECENT_AUCTIONS),
-        },
+        url,
+        params=params,
         timeout=BOND_TIMEOUT_SECONDS,
         headers={"User-Agent": BOND_USER_AGENT, "Accept": "application/vnd.api+json"},
     )
@@ -167,11 +171,74 @@ async def fetch_bond_payload(client: httpx.AsyncClient) -> object:
     return response.json()
 
 
+def _next_url(payload: object, base_url: str) -> str | None:
+    """The page's own `links.next`, accepted only if it targets the configured BoZ endpoint."""
+    links = payload.get("links") if isinstance(payload, dict) else None
+    nxt = links.get("next") if isinstance(links, dict) else None
+    if nxt is None:
+        return None
+    href = nxt.get("href") if isinstance(nxt, dict) else None
+    if not isinstance(href, str):
+        raise ValueError("Malformed next link")
+    got, want = urlsplit(href), urlsplit(base_url)
+    if (got.scheme, got.netloc, got.path) != (want.scheme, want.netloc, want.path):
+        raise ValueError("Next link leaves the BoZ endpoint")
+    return href
+
+
+def _merge(
+    rows: dict[tuple, GovernmentBondAuction], new: list[GovernmentBondAuction]
+) -> None:
+    """Add rows keyed by auction identity. Identical duplicates collapse; conflicting ones fail."""
+    for row in new:
+        key = (row.auction_date, row.tender_number, row.tenor_years)
+        old = rows.get(key)
+        if old is None:
+            rows[key] = row
+        elif (old.isin, old.coupon_rate, old.yield_rate) != (row.isin, row.coupon_rate, row.yield_rate):
+            raise ValueError("Conflicting duplicate auction across pages")
+
+
 async def get_boz_bonds(
     *, client: httpx.AsyncClient | None = None
 ) -> tuple[list[GovernmentBondAuction], list[RejectedTender]]:
+    """Newest-first traversal until every tenor has a valid row or the archive ends.
+
+    Returns (valid rows, rejected tenders) from every page fetched. Raises if the page cap
+    is hit while tenors are still unfound and more pages exist, so `missing` always means
+    "not in the whole archive".
+    """
     if client is None:
         async with httpx.AsyncClient() as owned:
             return await get_boz_bonds(client=owned)
-    payload = await fetch_bond_payload(client)
-    return parse_bond_auctions(payload, retrieved_at=datetime.now(timezone.utc))
+    base_url = get_settings().boz_bond_auctions_url
+    retrieved_at = datetime.now(timezone.utc)
+    rows: dict[tuple, GovernmentBondAuction] = {}
+    rejected: dict[tuple, RejectedTender] = {}
+    url: str | None = base_url
+    params: dict[str, str] | None = {
+        "include": "field_auction_results",
+        "sort": "-field_bond_auction_date",
+        "page[limit]": str(BOND_PAGE_SIZE),
+    }
+    for page in range(1, MAX_BOND_PAGES + 1):
+        payload = await _get(client, url, params)
+        page_rows, page_rejected = parse_bond_auctions(payload, retrieved_at=retrieved_at, require_rows=False)
+        _merge(rows, page_rows)
+        for r in page_rejected:
+            rejected[(r.tender_number, r.auction_date)] = r
+        if {r.tenor for r in rows.values()} >= set(BOND_TENORS):
+            break
+        url, params = _next_url(payload, base_url), None
+        if url is None:
+            break
+        if page == MAX_BOND_PAGES:
+            raise ValueError("Archive search truncated by the page cap")
+    if not rows:
+        raise ValueError("No valid Government Bond auction in the source")
+    ordered = sorted(rows.values(), key=lambda r: (r.auction_date, r.tenor_years), reverse=True)
+    newest = ordered[0].auction_date
+    # Empty placeholders no newer than the newest valid auction carry no data and cannot make
+    # any row a fallback; drop them so the rejected list is not flooded by legacy placeholders.
+    kept = [r for r in rejected.values() if not (r.no_results and r.auction_date is not None and r.auction_date <= newest)]
+    return ordered, kept
