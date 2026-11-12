@@ -98,7 +98,7 @@ def jet_lines(month="NOVEMBER 2026", extra=()):
             row("Wholesale Price to the OMCs", "K/M3", "26,636.02"), *extra]
 
 
-def press_lines(month="OCTOBER 2026", prices=("31.05", "32.44", "30.08", "31.85"), midnight="30th September", layout="new"):
+def press_lines(month="OCTOBER 2026", prices=("31.05", "32.45", "30.08", "31.85"), midnight="30th September", layout="new"):
     head = [f"REVISION OF PETROLEUM PUMP PRICES FOR {month}", "The ERB announces new prices for the month under review."]
     if layout == "new":  # CURRENT / NEW / VARIANCE, with the first row wrapped like the real PDF
         table = ["NATIONAL UNIFORM PUMP PRICES K/LITRE", "ABSOLUTE", "PRODUCT  CURRENT  NEW", "VARIANCE", "PETROL",
@@ -234,6 +234,52 @@ def test_wholesale_label_variants_map_to_the_same_row_and_unknowns_fail():
         erb_pdf.parse_wholesale_buildup(bad_heading)
 
 
+def _swap(old_prefix, new_line):
+    return [new_line if l.startswith(old_prefix) else l for l in WHOLESALE_BODY]
+
+
+def test_malformed_exchange_rate_row_rejects_the_document():  # the Codex P2 example
+    body = _swap("Exchange Rate", row("Exchange Rate", "K to $", "19.84", "19.84", "N/A"))
+    with pytest.raises(FuelPdfError):
+        erb_pdf.parse_wholesale_buildup(wholesale_lines(body=body))
+
+
+@pytest.mark.parametrize("prefix,bad", [
+    ("Exchange Rate", row("Exchange Rate", "K to $", "19.84", "19.84")),  # a missing amount
+    ("BPS Premium", row("BPS Premium", "$/MT", "149.70", "185.00")),  # merged cells, as in the real Jan/Feb 2026 files
+    ("Storage ", row("Storage", "US$/MT", "9.48", "9.23", "9,2x.00")),
+])
+def test_component_row_with_a_missing_or_unreadable_amount_rejects_the_document(prefix, bad):
+    with pytest.raises(FuelPdfError):
+        erb_pdf.parse_wholesale_buildup(wholesale_lines(body=_swap(prefix, bad)))
+
+
+def test_known_continuation_notes_are_still_accepted():
+    parsed = erb_pdf.parse_wholesale_buildup(wholesale_lines())
+    assert "$3.00/M3 which is equivalent" in items_of(parsed, "PETROL", "WHARFAGE")[0].note
+    wrapped = [l for l in WHOLESALE_BODY]
+    i = next(n for n, l in enumerate(wrapped) if l.startswith("Transportation Losses"))
+    wrapped[i] = row("Transportation Losses", "7.60", "4.72", "4.91")
+    wrapped.insert(i + 1, "0.5% petrol & 0.3% diesel, 0.3% kerosene")  # the note printed after its row
+    assert erb_pdf.parse_wholesale_buildup(wholesale_lines(body=wrapped))
+
+
+@pytest.mark.parametrize("line", ["Exchange Rate  K to $  19.84  19.84  N/A", "see note 3 for 2026 pricing",
+                                  "$3.00/M3 which is equivalent to 12 apples", "0.5%", "Carbon levy 1.00", "7"])
+def test_arbitrary_lines_with_digits_are_not_notes(line):
+    body = list(WHOLESALE_BODY)
+    body.insert(body.index(next(l for l in body if l.startswith("Wharfage"))), line)
+    with pytest.raises(FuelPdfError):
+        erb_pdf.parse_wholesale_buildup(wholesale_lines(body=body))
+
+
+def test_a_recognised_note_beside_the_wrong_row_is_rejected():
+    body = list(WHOLESALE_BODY)
+    body.insert(len(body) - 1, "$3.00/M3 which is equivalent to $4.05/MT for petrol &")
+    with pytest.raises(FuelPdfError):
+        erb_pdf.parse_wholesale_buildup(wholesale_lines(body=body))
+
+
 def test_jet_a1_is_a_separate_wholesale_publication():
     parsed = erb_pdf.parse_jet_buildup(jet_lines())
     assert parsed.kind == "jet" and parsed.month == date(2026, 11, 1) and {i.product for i in parsed.items} == {"JET_A1"}
@@ -250,7 +296,7 @@ def test_jet_a1_is_a_separate_wholesale_publication():
 def test_press_statement_prices_and_month(layout, midnight, month):
     parsed = erb_pdf.parse_press_statement(press_lines(layout=layout, midnight=midnight, month=month))
     assert parsed.month == date(2026, 10, 1) and parsed.effective_midnight == date(2026, 9, 30)
-    assert parsed.prices == {"PETROL": Decimal("31.05"), "DIESEL": Decimal("32.44"), "KEROSENE": Decimal("30.08"), "JET_A1": Decimal("31.85")}
+    assert parsed.prices == {"PETROL": Decimal("31.05"), "DIESEL": Decimal("32.45"), "KEROSENE": Decimal("30.08"), "JET_A1": Decimal("31.85")}
     assert str(parsed.prices["PETROL"]) == "31.05"  # exactly as printed
     assert "LSGO" not in parsed.prices  # never invented
 
@@ -260,7 +306,7 @@ def test_press_statement_missing_product_and_malformed_table_fail_or_omit():
     no_jet = [l for l in lines if not l.startswith("JET A-1")]
     assert "JET_A1" not in erb_pdf.parse_press_statement(no_jet).prices
     with pytest.raises(FuelPdfError):  # malformed price
-        erb_pdf.parse_press_statement(press_lines(prices=("31.5", "32.44", "30.08", "31.85")))
+        erb_pdf.parse_press_statement(press_lines(prices=("31.5", "32.45", "30.08", "31.85")))
     with pytest.raises(FuelPdfError):  # effective date does not fit the pricing month
         erb_pdf.parse_press_statement(press_lines(midnight="15th September"))
     with pytest.raises(FuelPdfError):  # no table
@@ -276,7 +322,7 @@ def test_reconciliation_rounding_relationship_and_inconsistency():
     before = (dict(press.prices), list(pump.items))
     erb_pdf.reconcile(press, pump)  # within the documented rounding (< 0.01 ZMW/litre)
     assert (press.prices, pump.items) == before  # nothing recomputed or replaced
-    bad = erb_pdf.parse_press_statement(press_lines(prices=("31.45", "32.44", "30.08", "31.85")))
+    bad = erb_pdf.parse_press_statement(press_lines(prices=("31.45", "32.45", "30.08", "31.85")))
     with pytest.raises(FuelPdfError, match="disagrees"):
         erb_pdf.reconcile(bad, pump)
     with pytest.raises(FuelPdfError, match="different months"):
@@ -381,7 +427,7 @@ def total_items():
     return sum(len(b.items) for b, _ in parsed_set())
 
 
-def job_world(*, press_prices=("31.05", "32.44", "30.08", "31.85"), scanned_press=False, with_pump=True):
+def job_world(*, press_prices=("31.05", "32.45", "30.08", "31.85"), scanned_press=False, with_pump=True):
     urls = {
         "press": f"{B}/PressStatements/CurrentFuelPumpPricesOctober2026.pdf",
         "pump": f"{B}/files/FuelPumpPrices/OCTOBER-2026-PUMP-PRICE-BUILD-UP.pdf",
@@ -421,9 +467,11 @@ def test_job_dry_run_counts_and_never_touches_the_database():
 
 def test_job_reports_missing_scanned_and_reconciliation_failures():
     assert run_job(job_world(with_pump=False), dry_run=True)["documents_missing"] == 1
-    scanned = run_job(job_world(scanned_press=True), dry_run=True)
-    assert scanned["scanned_documents"] == 1 and scanned["retail_rows"] == 0 and scanned["build_up_items"] == total_items()  # build-ups still imported
-    bad = run_job(job_world(press_prices=("33.45", "32.44", "30.08", "31.85")), dry_run=True)
+    def refuse(data):
+        raise FuelPdfError("rejected")
+    scanned = run_job(job_world(scanned_press=True), dry_run=True, ocr=refuse)
+    assert scanned["scanned_documents"] == 1 and scanned["ocr_rejected"] == 1 and scanned["retail_rows"] == 0 and scanned["build_up_items"] == total_items()  # build-ups still imported
+    bad = run_job(job_world(press_prices=("33.45", "32.45", "30.08", "31.85")), dry_run=True)
     assert bad["reconciliation_failures"] == 1 and bad["retail_rows"] == 0 and bad["build_up_items"] == 0  # the whole month is skipped
 
 

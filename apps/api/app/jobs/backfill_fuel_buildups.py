@@ -9,7 +9,9 @@ one transaction through the conflict-aware stores. Retail prices from a press st
 same identity as the XLSX archive (first day of the pricing month): identical values are fine, a
 different value for the same identity is a conflict and nothing is written. A press statement
 that disagrees with its build-up (see erb_pdf.reconcile) skips that month. Scanned (image-only)
-PDFs are counted, never OCR'd. `--dry-run` never touches PostgreSQL. Only counts are printed.
+PDFs are counted; a scanned *press statement* (and only that) falls back to the narrow, two-pass,
+build-up-reconciled Tesseract extraction in app.services.erb_ocr (never reachable from the API).
+Text press statements are never OCR'd, even if they fail validation. `--dry-run` never touches PostgreSQL. Only counts are printed.
 """
 
 import argparse
@@ -19,7 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import httpx
 
-from app.services import erb_pdf
+from app.services import erb_ocr, erb_pdf
 from app.services.erb_fuel import FuelRow
 from app.services.fuel_buildup_store import save_fuel_publications
 from app.services.fuel_store import FuelConflictError
@@ -54,16 +56,18 @@ def month_range(start: date, end: date, *, today: date) -> list[date]:
 async def run_backfill(
     start: date, end: date, *, dry_run: bool = False, client: httpx.AsyncClient | None = None, engine=None,
     now: datetime | None = None, pause: float = PAUSE_SECONDS, sleep=asyncio.sleep,
+    ocr=erb_ocr.ocr_press_statement,
 ) -> dict[str, int]:
     now = now or datetime.now(timezone.utc)
     months = month_range(start, end, today=now.astimezone(LUSAKA).date())
     if client is None:
         async with httpx.AsyncClient() as owned:
             return await run_backfill(start, end, dry_run=dry_run, client=owned, engine=engine, now=now,
-                                      pause=pause, sleep=sleep)
+                                      pause=pause, sleep=sleep, ocr=ocr)
     discovery = await erb_pdf.discover_publications(client)
-    counts = {"months": len(months), "documents_found": 0, "documents_missing": 0, "scanned_documents": 0,
-              "unsupported_documents": 0, "reconciliation_failures": 0, "ambiguous_documents": sum(1 for m, _ in discovery.ambiguous if m in months),
+    counts = {"months": len(months), "documents_found": 0, "documents_missing": 0, "text_press_parsed": 0,
+              "scanned_documents": 0, "ocr_parsed": 0, "ocr_rejected": 0, "unsupported_documents": 0,
+              "reconciliation_passes": 0, "reconciliation_failures": 0, "ambiguous_documents": sum(1 for m, _ in discovery.ambiguous if m in months),
               "retail_rows": 0, "build_up_items": 0, "retail_inserted": 0, "retail_already_present": 0,
               "items_inserted": 0, "items_already_present": 0}
     retail: list[tuple[FuelRow, str]] = []
@@ -82,21 +86,42 @@ async def run_backfill(
                 await sleep(pause)
             first_download = False
             try:
-                lines = erb_pdf.pdf_lines(await erb_pdf.download_pdf(client, url))
+                data = await erb_pdf.download_pdf(client, url)
+                lines = erb_pdf.pdf_lines(data)
                 parsed[kind] = {"press": erb_pdf.parse_press_statement, "pump": erb_pdf.parse_pump_buildup,
                                 "wholesale": erb_pdf.parse_wholesale_buildup, "jet": erb_pdf.parse_jet_buildup}[kind](lines)
                 urls[kind] = url
+                counts["text_press_parsed"] += kind == "press"
             except erb_pdf.ScannedPdfError:
                 counts["scanned_documents"] += 1
+                if kind == "press":  # the only OCR trigger: no text layer at all
+                    try:
+                        parsed[kind] = await asyncio.to_thread(ocr, data)
+                        urls[kind] = url
+                        counts["ocr_parsed"] += 1
+                    except erb_ocr.OcrUnavailableError:
+                        raise
+                    except erb_pdf.FuelPdfError:
+                        counts["ocr_rejected"] += 1
             except erb_pdf.FuelPdfError:
                 counts["unsupported_documents"] += 1
         press, pump = parsed.get("press"), parsed.get("pump")
-        if press is not None and pump is not None:
+        scanned = press is not None and press.extraction_method == "ocr"
+        if scanned and (pump is None or pump.month != press.month):
+            # OCR'd prices are only accepted when the official pump build-up for the month can confirm them
+            counts["ocr_parsed"] -= 1
+            counts["ocr_rejected"] += 1
+            press = None
+        elif press is not None and pump is not None:
             try:
-                erb_pdf.reconcile(press, pump)
+                counts["reconciliation_passes"] += erb_pdf.reconcile(press, pump)
             except erb_pdf.FuelPdfError:
                 counts["reconciliation_failures"] += 1
-                continue  # neither value is replaced by the other; the whole month is skipped
+                if not scanned:
+                    continue  # neither value is replaced by the other; the whole month is skipped
+                counts["ocr_parsed"] -= 1  # a scanned statement that disagrees is dropped; build-ups are independent
+                counts["ocr_rejected"] += 1
+                press = None
         for kind in ("pump", "wholesale", "jet"):
             build = parsed.get(kind)
             if build is not None and build.month == month:

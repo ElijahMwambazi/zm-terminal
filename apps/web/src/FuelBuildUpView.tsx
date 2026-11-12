@@ -73,7 +73,7 @@ export default function FuelBuildUpView(
         <p className="notice">Official retail (ERB press statement / archive): <strong>K{retail.price_zmw}/L</strong></p>
       )}
       {type === "pump" && !sameMonth && (
-        <p className="notice text-stale">No official K/litre price is stored for {formatMonth(data.effective_date)}: ERB&apos;s press statement for the month may be a scanned image, which this view does not read. The uniform pump price above is ERB&apos;s build-up value in ZMW per cubic metre.</p>
+        <p className="notice text-stale">No official K/litre price is stored for {formatMonth(data.effective_date)}: ERB&apos;s press statement for the month could not be read and validated. The uniform pump price above is ERB&apos;s build-up value in ZMW per cubic metre.</p>
       )}
       <p className="notice">Rows are shown exactly as ERB published them, in ERB&apos;s order. They are not recomputed, and the table does not claim every row adds to the next. A dash means ERB did not publish a value.</p>
       <ul className="provenance">

@@ -44,7 +44,7 @@ const FuelDetail = forwardRef<HTMLElement, { state: FuelState; focus: FuelProduc
     const data = state.status === "ready" ? state.data : null;
     const byProduct = new Map<FuelProduct, FuelPrice>((data?.prices ?? []).map((p) => [p.product, p]));
     const first = data?.prices[0];
-    const lagging = data?.prices.some((p) => archiveLags(p.effective_date)) ?? false;
+    const lagging = (data?.prices.length ?? 0) > 0 && (data?.prices.every((p) => archiveLags(p.effective_date)) ?? false);
 
     return (
       <article className="panel detail-panel" ref={ref} tabIndex={-1} aria-label="Zambia fuel detail">
@@ -84,7 +84,7 @@ const FuelDetail = forwardRef<HTMLElement, { state: FuelState; focus: FuelProduc
               )}
               {lagging && (
                 <p className="notice text-stale">
-                  The newest month in ERB&apos;s structured archive is shown. Later monthly prices may already be announced in ERB press releases (PDF) that this view does not read.
+                  The newest stored ERB month is shown. A later monthly price may already be announced in an ERB press release that has not been imported (or could not be read and validated).
                 </p>
               )}
               {first && (

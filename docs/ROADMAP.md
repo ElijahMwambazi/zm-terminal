@@ -12,8 +12,8 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 
 ## Current
 - ERB latest-month + fuel build-ups (this branch: monthly PDF discovery and strict parsing, `zambia_fuel_build_up_items`,
-  `/fuel/build-up`, pump and wholesale build-up views). Press-statement retail prices are ingested only from text PDFs;
-  scanned statements (e.g. November 2026) are reported, not read.
+  `/fuel/build-up`, pump and wholesale build-up views). Press-statement retail prices come from text PDFs and, for image-only statements, an OCR fallback;
+  scanned statements fall back to the narrow two-pass Tesseract reader (see CURRENT_STATE).
 
 ## Next
 - **Zambia agriculture price discovery / vertical slice**

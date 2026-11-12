@@ -17,7 +17,7 @@ import io
 import re
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from urllib.parse import quote, unquote, urlsplit
 
 import httpx
@@ -267,6 +267,27 @@ def _unit_and_note(segments: list[str], pending_note: str | None) -> tuple[str |
     return unit, note
 
 
+# The only continuation text ERB prints inside the wholesale table: the wharfage rate wording, wrapped over
+# several lines (verified against the 2024-2026 documents). Anything else that is not a component row is rejected.
+_USD = r"\$?\d+(?:\.\d{1,2})?"
+_LOSS_NEIGHBOURS = frozenset({"IMPORTERS_COST_PLUS_MARGIN", "STORAGE_LOSSES", "PRICE_PER_METRIC_TONNE", "WHOLESALE_PRICE_TO_OMC"})
+_NOTE_FAMILIES: list[tuple[re.Pattern, frozenset[str]]] = [  # (wording, rows the wrapped text may sit beside)
+    (re.compile(rf"{_USD}/M3\s*which is equivalent to(?:\s+{_USD}/MT)?(?:\s+for)?(?:\s+petrol)?(?:\s*&)?", re.I),
+     frozenset({"WHARFAGE", "BPS_PREMIUM"})),
+    (re.compile(rf"&?\s*{_USD}/MT for Diesel & {_USD}/MT for Kerosene(?:/Jet A-1)?", re.I),
+     frozenset({"WHARFAGE", "BPS_PREMIUM"})),
+    (re.compile(r"\d+(?:\.\d+)?% petrol & \d+(?:\.\d+)?% diesel, \d+(?:\.\d+)?%(?: kerosene)?", re.I),
+     _LOSS_NEIGHBOURS),
+    (re.compile(r"\d+\.\d{2}%"), _LOSS_NEIGHBOURS),
+]
+
+
+def _note_rows(line: str) -> frozenset[str] | None:
+    """Rows a recognised continuation line may precede, or None if the line is not a recognised note."""
+    text = re.sub(r"\s+", " ", line.strip())
+    return next((rows for pattern, rows in _NOTE_FAMILIES if pattern.fullmatch(text)), None)
+
+
 def _parse_wholesale(lines: list[str], kind: str) -> ParsedBuildUp:
     products = PRODUCTS3 if kind == "wholesale" else ["JET A-1"]
     head = _header_index(lines, products)
@@ -277,13 +298,16 @@ def _parse_wholesale(lines: list[str], kind: str) -> ParsedBuildUp:
     items: list[BuildUpItem] = []
     seen: set[tuple[str, str | None]] = set()
     pending: str | None = None
+    allowed: frozenset[str] | None = None
     position = 0
     for line in lines[head + 1:]:
         if not line.strip():
             continue
         row = _split_row(line, len(products))
         if row is None:
-            if re.search(r"\d", line):  # a free-text continuation of the next row, e.g. the wharfage note
+            rows = _note_rows(line)  # only the printed wharfage/loss-rate wording; anything else fails closed
+            if rows is not None:
+                allowed = rows if allowed is None else allowed & rows
                 pending = re.sub(r"\s+", " ", f"{pending} {line.strip()}" if pending else line.strip())
                 continue
             raise FuelPdfError("Unexpected line in wholesale build-up")
@@ -295,8 +319,10 @@ def _parse_wholesale(lines: list[str], kind: str) -> ParsedBuildUp:
         if key not in labels:
             raise FuelPdfError("Unknown wholesale build-up component")
         code = labels[key]
+        if pending and (allowed is None or code not in allowed):
+            raise FuelPdfError("A continuation note sits beside an unexpected row")
         unit, note = _unit_and_note(segments, pending)
-        pending = None
+        pending, allowed = None, None
         if code == "WHOLESALE_PRICE_TO_OMC" and unit and unit != "K/M3":
             code = "WHOLESALE_PRICE_TO_OMC_USD"  # a US$ row is a different quantity from the K/M3 price
         if (code, unit) in seen:
@@ -322,8 +348,8 @@ def parse_jet_buildup(lines: list[str]) -> ParsedBuildUp:
 
 # ---------------------------------------------------------------- press statement (retail K/litre)
 _PRESS_PRODUCTS = {"PETROL": "PETROL", "DIESEL": "DIESEL", "DIESEL(LSG)": "DIESEL", "DIESEL/LSG": "DIESEL",
-                   "KEROSENE": "KEROSENE", "JETA-1": "JET_A1"}
-_PRESS_ROW = r"(PETROL|DIESEL(?: \(LSG\)|/LSG)?|KEROSENE|JET A-1)((?: [0-9.()%-]+)+)"
+                   "KEROSENE": "KEROSENE", "JETA-1": "JET_A1", "JETA1": "JET_A1"}
+_PRESS_ROW = r"(PETROL|DIESEL(?: \(LSG\)|/LSG)?|KEROSENE|JET A-?1)((?: [0-9.()%-]+)+)"
 
 
 @dataclass(frozen=True)
@@ -331,6 +357,7 @@ class ParsedPress:
     month: date
     prices: dict[str, Decimal]  # product -> K/litre, exactly as printed (two decimals)
     effective_midnight: date    # the date the statement says the prices take effect "at midnight on"
+    extraction_method: str = "text"  # "text" (text layer) or "ocr" (scanned statement); operational metadata only
 
 
 def parse_press_statement(lines: list[str]) -> ParsedPress:
@@ -354,7 +381,7 @@ def parse_press_statement(lines: list[str]) -> ParsedPress:
     if table is None:
         raise FuelPdfError("Price table not found")
     body = table.group(1).strip()
-    first = re.search(r"\b(PETROL|DIESEL|KEROSENE|JET A-1)\b", body)
+    first = re.search(r"\b(PETROL|DIESEL|KEROSENE|JET A-?1)\b", body)
     if first is None:
         raise FuelPdfError("No prices found in the press statement")
     heading = body[:first.start()].upper()
@@ -377,32 +404,41 @@ def parse_press_statement(lines: list[str]) -> ParsedPress:
         if product in prices:
             raise FuelPdfError("Duplicate product in press statement")
         prices[product] = Decimal(tokens[column])
+        if prices[product] <= 0:
+            raise FuelPdfError("Press statement price is not positive")
     if not prices:
         raise FuelPdfError("No prices found in the press statement")
     return ParsedPress(start, prices, midnight)
 
 
 # ---------------------------------------------------------------- reconciliation (checks only)
-RECONCILIATION_TOLERANCE = Decimal("0.01")
 
 
-def reconcile(press: ParsedPress, pump: ParsedBuildUp) -> None:
-    """Check each press price against the pump build-up's uniform pump price (ZMW/M3 -> ZMW/litre).
+def reconcile(press: ParsedPress, pump: ParsedBuildUp) -> int:
+    """Check each press price against the pump build-up's uniform pump price; returns products compared.
 
-    ERB prints pump prices to two decimals (33.06) and the build-up to the cubic metre
-    (33,061.35 ZMW/M3 = 33.06135 ZMW/litre), so they may differ by rounding: the allowed
-    difference is strictly less than 0.01 ZMW/litre. A larger gap fails; neither value is ever
-    replaced by the other.
+    ERB prints the pump price to the cubic metre (33,061.35 ZMW/M3 = 33.06135 ZMW/litre) and the press
+    statement to two decimals (33.06), so the press price must equal the build-up price converted to
+    ZMW/litre and rounded half-up to two decimals. Jet A-1 has no pump build-up and is not compared.
+    The press price is never replaced by the build-up value. A statement that was OCR'd must have a
+    build-up price for every pump product it contains.
     """
     if press.month != pump.month:
         raise FuelPdfError("Press statement and build-up are for different months")
     uniform = {i.product: i.amount for i in pump.items if i.component_code == "UNIFORM_PUMP_PRICE"}
+    checked = 0
     for product, price in press.prices.items():
+        if product == "JET_A1":
+            continue
         amount = uniform.get(product)
         if amount is None:
+            if press.extraction_method == "ocr":
+                raise FuelPdfError("No build-up price to confirm a scanned press price")
             continue
-        if abs(price - amount / Decimal(1000)) >= RECONCILIATION_TOLERANCE:
+        if price != (amount / Decimal(1000)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP):
             raise FuelPdfError("Press statement price disagrees with the build-up")
+        checked += 1
+    return checked
 
 
 # ---------------------------------------------------------------- discovery
