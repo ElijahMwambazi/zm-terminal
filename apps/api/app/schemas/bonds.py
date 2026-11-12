@@ -26,8 +26,9 @@ class GovernmentBondAuction(BaseModel):
     source: Literal["boz"] = "boz"
     source_url: Literal[BOND_SOURCE_URL] = BOND_SOURCE_URL
     retrieved_at: AwareDatetime
-    # Rejected auctions dated after this row's auction; non-empty means this value is a
-    # fallback (one of them may have carried this tenor). Empty means no such auction.
+    # Tenders with a rejected record dated after this row's auction that could have carried
+    # THIS tenor (that tenor's own record, or a tender-level rejection). Non-empty means this
+    # value is a fallback. Rejections of other tenors never appear here.
     newer_rejected_tenders: list[str] = []
 
     @field_validator("retrieved_at")
@@ -36,11 +37,30 @@ class GovernmentBondAuction(BaseModel):
         return value.astimezone(timezone.utc)
 
 
+class RejectedBondObservation(BaseModel):
+    """Internal metadata for a rejected source record (never carries error text or raw values).
+
+    scope "tender": the whole tender was untrustworthy, `affected_tenors` is None (any tenor).
+    scope "tenor": one record failed; `affected_tenors` is that tenor, or None when the
+    record's tenor could not be determined.
+    """
+
+    tender_number: str | None
+    auction_date: date | None
+    affected_tenors: tuple[BondTenor, ...] | None
+    scope: Literal["tender", "tenor"]
+
+    def could_affect(self, tenor: str) -> bool:
+        return self.affected_tenors is None or tenor in self.affected_tenors
+
+
 class GovernmentBondsLatest(BaseModel):
     """Newest published value per tenor, each with its own auction date."""
 
     tenors: list[GovernmentBondAuction]
     missing_tenors: list[BondTenor]
-    # Every recent auction that failed validation ("unknown" if its number was unreadable).
-    # Informational: whether a row is a fallback is `newer_rejected_tenders`.
+    # Missing tenors for which a rejected source record could have carried the value.
+    unverified_tenors: list[BondTenor]
+    # Tender numbers with any rejected record ("unknown" if unreadable). Informational:
+    # whether a row is a fallback is its own `newer_rejected_tenders`.
     skipped_tenders: list[str]

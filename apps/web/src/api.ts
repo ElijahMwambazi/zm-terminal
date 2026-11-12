@@ -106,13 +106,15 @@ export type GovernmentBond = {
   source: "boz";
   source_url: string;
   retrieved_at: string;
-  /** Rejected auctions dated after this auction; non-empty means this value is a fallback. */
+  /** Tenders with a newer rejected record that could have carried THIS tenor; non-empty = fallback. */
   newer_rejected_tenders: string[];
 };
 
 export type GovernmentBondsLatest = {
   tenors: GovernmentBond[];
   missing_tenors: BondTenor[];
+  /** Missing tenors that a rejected source record could have carried. */
+  unverified_tenors: BondTenor[];
   skipped_tenders: string[];
 };
 

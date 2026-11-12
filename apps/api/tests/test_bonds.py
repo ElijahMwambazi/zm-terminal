@@ -45,6 +45,12 @@ def row(**kw):
     return GovernmentBondAuction(**{**base, **kw})
 
 
+def placeholder(title, day):
+    return {"type": "node--bond_auction", "id": "ph" + title, "attributes": {
+        "title": title, "field_bond_auction_date": day, "status": True},
+        "relationships": {"field_auction_results": {"data": []}}}
+
+
 # ---- parsing ----
 def test_all_supported_tenors_exact_decimals_identity():
     rows, _ = parsed()
@@ -84,27 +90,72 @@ def test_duplicate_tenor_rejects_whole_tender():
 @pytest.mark.parametrize("mutate", [
     lambda p: p["data"][2]["attributes"].update(title="oops"),
     lambda p: p["data"][2]["attributes"].update(field_bond_auction_date="2026-10-02"),  # no time/offset
-    lambda p: p["data"][2]["attributes"].update(field_bond_auction_date="2026-10-02T15:00:00"),
+    lambda p: p["data"][2]["attributes"].update(field_bond_auction_date="2026-10-02T15:00:00"),  # no offset
+    lambda p: p["data"][2]["attributes"].update(field_bond_auction_date="not-a-date"),
+    lambda p: p["included"].remove(para(p, "b10")),  # referenced record missing: ambiguous tender
+    lambda p: p["data"][2]["relationships"]["field_auction_results"]["data"].append({"type": "x", "id": "b10"}),  # duplicate reference
+    lambda p: p["data"][2]["relationships"].pop("field_auction_results"),
+])
+def test_tender_level_failure_rejects_whole_tender(mutate):
+    rows, rejected = parsed(mutate)
+    mine = [r for r in rejected if r.scope == "tender" and r.auction_date != date(2026, 11, 27)]
+    assert len(mine) == 1 and mine[0].affected_tenors is None
+    assert "97/2026/BA" not in {r.tender_number for r in rows}
+    assert {r.tender_number for r in rows} == {"98/2026/BA", "96/2026/BA"}
+
+
+@pytest.mark.parametrize("mutate", [
     lambda p: para(p, "b10")["attributes"].update(field_10_year_isin="XX123"),
+    lambda p: para(p, "b10")["attributes"].update(field_10_year_isin="ZM9100000048 "),  # trailing space: not trimmed
+    lambda p: para(p, "b10")["attributes"].update(field_10_year_isin="ZM910000048"),  # short: not repaired
     lambda p: para(p, "b10")["attributes"].update(field_10_year_yield_rate="Nil"),
     lambda p: para(p, "b10")["attributes"].update(field_10_year_coupon_rate="1e1"),
     lambda p: para(p, "b10")["attributes"].update(field_10_year_coupon_rate="0"),
     lambda p: para(p, "b10")["attributes"].pop("field_10_year_yield_rate"),
     lambda p: para(p, "b10")["attributes"].update(field_10_year_tenor="7_years"),
-    lambda p: p["included"].remove(para(p, "b10")),
+    lambda p: para(p, "b10")["attributes"].update(status=False),
 ])
-def test_malformed_record_rejects_only_that_tender(mutate):
+def test_tenor_level_failure_rejects_only_that_tenor(mutate):
     rows, rejected = parsed(mutate)
-    assert len(rejected) == 2 and rejected[0].tender_number == "99/2026/BA"
-    assert "97/2026/BA" not in {r.tender_number for r in rows}
-    assert {r.tender_number for r in rows} == {"98/2026/BA", "96/2026/BA"}
+    mine = [r for r in rejected if r.tender_number == "97/2026/BA"]
+    assert [(r.scope, r.affected_tenors) for r in mine] == [("tenor", ("10Y",))]
+    got = {r.tenor for r in rows if r.tender_number == "97/2026/BA"}
+    assert got == {"2Y", "3Y", "5Y", "7Y", "15Y"}  # valid siblings stay usable
 
 
-def test_empty_placeholder_tender_is_rejected_not_a_tenor():
+def test_bad_15y_isin_keeps_siblings_and_bad_5y_isin_drops_only_5y():
+    rows, rejected = parsed(lambda p: para(p, "b15")["attributes"].update(field_15_year_isin="ZM100007709"))
+    assert {r.tenor for r in rows if r.tender_number == "97/2026/BA"} == {"2Y", "3Y", "5Y", "7Y", "10Y"}
+    rows, rejected = parsed(lambda p: para(p, "b5")["attributes"].update(field_5_year_isin="ZM100007626"))
+    assert {r.tenor for r in rows if r.tender_number == "97/2026/BA"} == {"2Y", "3Y", "7Y", "10Y", "15Y"}
+    assert ("97/2026/BA", ("5Y",)) in [(r.tender_number, r.affected_tenors) for r in rejected]
+
+
+def test_unsupported_tenor_record_is_ignored_and_unknown_type_is_a_record_rejection():
     def mutate(p):
-        p["data"][2]["relationships"]["field_auction_results"]["data"] = []
-    _, rejected = parsed(mutate)
-    assert "97/2026/BA" in [r.tender_number for r in rejected]
+        extra = {"type": "paragraph--20_year_bond", "id": "x20", "attributes": {"status": True}}
+        junk = {"type": "paragraph--mystery", "id": "xm", "attributes": {"status": True}}
+        p["included"] += [extra, junk]
+        p["data"][2]["relationships"]["field_auction_results"]["data"] += [{"type": "x", "id": "x20"}, {"type": "x", "id": "xm"}]
+    rows, rejected = parsed(mutate)
+    assert {r.tenor for r in rows if r.tender_number == "97/2026/BA"} == {"2Y", "3Y", "5Y", "7Y", "10Y", "15Y"}
+    mine = [r for r in rejected if r.tender_number == "97/2026/BA"]
+    assert [(r.scope, r.affected_tenors) for r in mine] == [("tenor", None)]  # unknown tenor: may affect any
+
+
+def test_no_results_tender_is_not_malformed_and_never_creates_fallback():
+    def mutate(p):
+        p["data"].pop(0)  # drop the real rejected tender
+        p["data"].insert(0, placeholder("99/2026/BA", "2026-11-27T10:00:00+02:00"))  # newest, pending entry
+    rows, rejected = parsed(mutate)
+    assert rejected == []  # not reported as malformed source data
+    assert all(r.newer_rejected_tenders == [] for r in latest_per_tenor(rows, rejected))
+
+
+def test_rejected_metadata_is_safe():
+    _, rejected = parsed(lambda p: para(p, "b10")["attributes"].update(field_10_year_isin="SECRET-BAD-VALUE"))
+    dumped = json.dumps([r.model_dump(mode="json") for r in rejected])
+    assert "SECRET" not in dumped and set(rejected[0].model_dump()) == {"tender_number", "auction_date", "affected_tenors", "scope"}
 
 
 @pytest.mark.parametrize("bad", [None, [], {"data": []}, {"data": [{}]}, {"data": [], "included": []}])
@@ -361,33 +412,75 @@ def test_rejected_page_does_not_stop_traversal():
     assert len(rows) == 6 and len(rejected) == 1 and len(a.requests) == 2
 
 
-def placeholder(title, day):
-    return {"type": "node--bond_auction", "id": "ph" + title, "attributes": {
-        "title": title, "field_bond_auction_date": day, "status": True},
-        "relationships": {"field_auction_results": {"data": []}}}
-
-
-def test_legacy_placeholders_dropped_but_newer_empty_tender_kept():
+def test_no_results_tenders_across_archive_never_flag_or_get_reported():
     def add(p):
         p["data"] += [placeholder("12/2025/BA", "2025-12-01T16:00:00+02:00"), placeholder("11/2024/BA", "2024-11-01T16:00:00+02:00")]
-        p["data"].insert(0, placeholder("98/2026/BA", "2026-11-27T10:00:00+02:00"))  # newer than every valid row
+        p["data"].insert(0, placeholder("98/2026/BA", "2026-11-27T10:00:00+02:00"))
     a = Archive([page(["97/2026/BA"], mutate=add)])
     rows, rejected = asyncio.run(a.fetch())
-    assert [r.tender_number for r in rejected] == ["98/2026/BA"]  # legacy placeholders are not reported
-    assert all(r.newer_rejected_tenders == ["98/2026/BA"] for r in latest_per_tenor(rows, rejected))
+    assert rejected == [] and all(r.newer_rejected_tenders == [] for r in latest_per_tenor(rows, rejected))
 
 
-def test_tenor_only_in_rejected_tenders_is_missing_with_rejections_reported(monkeypatch):
-    def bad_5y_tender(p):  # the only tender with 5Y has a malformed ISIN elsewhere in it
-        para(p, "b15")["attributes"]["field_15_year_isin"] = "ZM100007709"
-    # a newer valid tender without 5Y exists; the older tender that has 5Y is rejected whole
-    a2 = Archive([page(["98/2026/BA", "97/2026/BA"], mutate=bad_5y_tender)])
+def test_tenor_with_only_a_rejected_record_is_missing_and_unverified(monkeypatch):
+    def bad_5y(p):
+        para(p, "b5")["attributes"]["field_5_year_isin"] = "ZM100007709"
+    a2 = Archive([page(["98/2026/BA", "97/2026/BA"], mutate=bad_5y)])
     async def real2():
         return await a2.fetch()
     monkeypatch.setattr(router_module, "get_boz_bonds", real2)
     body = TestClient(app).get("/api/v1/government-bonds/latest").json()
-    assert "5Y" in body["missing_tenors"] and body["skipped_tenders"] == ["97/2026/BA"]
+    assert body["missing_tenors"] == ["5Y"] and body["unverified_tenors"] == ["5Y"]
+    assert body["skipped_tenders"] == ["97/2026/BA"]
+    assert [t["tenor"] for t in body["tenors"]] == ["2Y", "3Y", "7Y", "10Y", "15Y"]  # siblings kept
     assert TestClient(app).get("/api/v1/government-bonds/5Y").status_code == 404
+
+
+def add_bad_record(p, title, years, pid):
+    """A tenor record with a malformed ISIN inside the given (already present) tender."""
+    names = {5: "field_5_year", 15: "field_15_year"}[years]
+    p["included"].append({"type": f"paragraph--{years}_year{'s' if years == 5 else ''}_bond", "id": pid, "attributes": {
+        "status": True, f"{names}_isin": "ZM1", f"{names}_coupon_rate": "10.0000",
+        f"{names}_tenor": f"{years}_years", f"{names}_yield_rate": "10.0000"}})
+    node = [n for n in p["data"] if n["attributes"]["title"] == title][0]
+    node["relationships"]["field_auction_results"]["data"].append({"type": "x", "id": pid})
+
+
+def latest_from(titles, mutate):
+    p = page(titles, mutate=mutate)
+    rows, rejected = parse_bond_auctions(p, retrieved_at=NOW)
+    return {r.tenor: r for r in latest_per_tenor(rows, rejected)}
+
+
+def test_newer_rejected_15y_does_not_flag_older_5y():
+    got = latest_from(["98/2026/BA", "97/2026/BA"], lambda p: add_bad_record(p, "98/2026/BA", 15, "z15"))
+    assert got["5Y"].newer_rejected_tenders == [] and got["10Y"].newer_rejected_tenders == []
+    assert got["15Y"].newer_rejected_tenders == ["98/2026/BA"]  # the rejected tenor itself is uncertain
+
+
+def test_newer_rejected_5y_flags_older_5y_only():
+    got = latest_from(["98/2026/BA", "97/2026/BA"], lambda p: add_bad_record(p, "98/2026/BA", 5, "z5"))
+    assert got["5Y"].newer_rejected_tenders == ["98/2026/BA"]
+    assert got["15Y"].newer_rejected_tenders == [] and got["3Y"].newer_rejected_tenders == []
+
+
+def test_tender_level_rejection_may_flag_all_older_tenors_it_could_affect():
+    got = latest_from(["99/2026/BA", "98/2026/BA", "97/2026/BA"], None)  # 99/2026/BA has a duplicate 10Y: tender-level
+    assert all(r.newer_rejected_tenders == ["99/2026/BA"] for r in got.values())
+
+
+def test_persistence_receives_only_accepted_rows(monkeypatch):
+    saved = []
+    monkeypatch.setattr(router_module, "save_bond_auctions", lambda rows: saved.append(list(rows)) or (0, 0))
+    a = Archive([page(["98/2026/BA", "97/2026/BA"], mutate=lambda p: (
+        para(p, "b15")["attributes"].update(field_15_year_isin="ZM100007709"),
+        add_bad_record(p, "98/2026/BA", 5, "z5")))])
+    async def real():
+        return await a.fetch()
+    monkeypatch.setattr(router_module, "get_boz_bonds", real)
+    assert TestClient(app).get("/api/v1/government-bonds/latest").status_code == 200
+    keys = {(r.tender_number, r.tenor) for r in saved[0]}
+    assert ("97/2026/BA", "15Y") not in keys and ("98/2026/BA", "5Y") not in keys
+    assert ("97/2026/BA", "5Y") in keys and ("98/2026/BA", "10Y") in keys
 
 
 def test_identical_duplicate_across_pages_collapses_and_conflict_fails():

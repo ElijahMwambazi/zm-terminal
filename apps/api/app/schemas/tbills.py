@@ -14,8 +14,6 @@ class RejectedTender(BaseModel):
 
     tender_number: str | None
     auction_date: date | None
-    # True if the tender carries no result records at all (e.g. an empty legacy placeholder).
-    no_results: bool = False
 
 
 class TreasuryBillAuction(BaseModel):

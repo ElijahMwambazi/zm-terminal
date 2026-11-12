@@ -8,11 +8,13 @@ from sqlalchemy import text
 
 from app.db import database_is_ready, get_engine
 from app.schemas.fx import FxHistory, FxQuote
-from app.schemas.bonds import BOND_TENORS, BondTenor, GovernmentBondAuction, GovernmentBondsLatest
+from app.schemas.bonds import (
+    BOND_TENORS, BondTenor, GovernmentBondAuction, GovernmentBondsLatest, RejectedBondObservation,
+)
 from app.schemas.tbills import TENORS, RejectedTender, Tenor, TreasuryBillAuction, TreasuryBillsLatest
 from app.services.boz import get_boz_fx_quote
 from app.services.bond_store import BondConflictError, save_bond_auctions
-from app.services.boz_bonds import get_boz_bonds, latest_per_tenor as latest_bonds
+from app.services.boz_bonds import get_boz_bonds, latest_per_tenor as latest_bonds, unverified_tenors
 from app.services.boz_treasury import get_boz_tbills, latest_per_tenor
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, save_fx_quote
 from app.services.tbill_store import TbillConflictError, save_tbill_auctions
@@ -86,7 +88,7 @@ async def treasury_bill(tenor: Tenor) -> TreasuryBillAuction:
     return match[0]
 
 
-async def _load_bonds() -> tuple[list[GovernmentBondAuction], list[RejectedTender]]:
+async def _load_bonds() -> tuple[list[GovernmentBondAuction], list[RejectedBondObservation]]:
     try:
         rows, rejected = await get_boz_bonds()
     except httpx.TimeoutException as exc:
@@ -107,9 +109,14 @@ async def government_bonds_latest() -> GovernmentBondsLatest:
     rows, rejected = await _load_bonds()
     latest = latest_bonds(rows, rejected)
     have = {r.tenor for r in latest}
+    skipped: list[str] = []
+    for r in rejected:
+        name = r.tender_number or "unknown"
+        if name not in skipped:
+            skipped.append(name)
     return GovernmentBondsLatest(
         tenors=latest, missing_tenors=[t for t in BOND_TENORS if t not in have],
-        skipped_tenders=[r.tender_number or "unknown" for r in rejected],
+        unverified_tenors=unverified_tenors(have, rejected), skipped_tenders=skipped,
     )
 
 

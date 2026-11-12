@@ -1,7 +1,6 @@
 import { forwardRef } from "react";
 import { BOND_TENORS, type BondTenor, type GovernmentBond } from "./api";
 import { formatDate, formatLusaka } from "./format";
-import { fallbackWarning, rejectedNote } from "./TbillDetail";
 import type { BondState } from "./useGovernmentBonds";
 
 export function bondProblem(state: BondState): string | null {
@@ -11,6 +10,12 @@ export function bondProblem(state: BondState): string | null {
     : "ZM Terminal API is unavailable. No yields are shown.";
 }
 
+/** Strong claim only for a row whose own tenor had a newer rejected record (or a tender-level rejection). */
+export const bondFallbackWarning = (row: GovernmentBond): string | null =>
+  row.newer_rejected_tenders.length > 0
+    ? `FALLBACK — NEWER ${row.tenor} DATA REJECTED (${row.newer_rejected_tenders.join(", ")}) · USING EARLIER VALID AUCTION`
+    : null;
+
 const pct = (value: string) => `${value}%`;
 
 const BondDetail = forwardRef<HTMLElement, { state: BondState; focus: BondTenor | null; onRefresh: () => void }>(
@@ -19,7 +24,7 @@ const BondDetail = forwardRef<HTMLElement, { state: BondState; focus: BondTenor 
     const data = state.status === "ready" ? state.data : null;
     const byTenor = new Map<BondTenor, GovernmentBond>((data?.tenors ?? []).map((row) => [row.tenor, row]));
     const focused = focus ? byTenor.get(focus) : undefined;
-    const anyFallback = data?.tenors.some((row) => fallbackWarning(row)) ?? false;
+    const anyFallback = data?.tenors.some((row) => bondFallbackWarning(row)) ?? false;
     const retrieved = data?.tenors[0]?.retrieved_at;
 
     return (
@@ -51,13 +56,14 @@ const BondDetail = forwardRef<HTMLElement, { state: BondState; focus: BondTenor 
                           <td>{pct(row.coupon_rate)}</td>
                           <td>
                             {formatDate(row.auction_date)} · {row.tender_number}
-                            {fallbackWarning(row) && <span className="text-stale"> · FALLBACK</span>}
+                            {bondFallbackWarning(row) && <span className="text-stale"> · FALLBACK</span>}
                           </td>
                           <td>{row.isin}</td>
                         </tr>
                       ) : (
                         <tr key={tenor} className={cls}>
-                          <td>{tenor}</td><td>—</td><td>—</td><td>No valid auction found</td><td>—</td>
+                          <td>{tenor}</td><td>—</td><td>—</td>
+                          <td>No valid auction found{data.unverified_tenors.includes(tenor) && " (rejected source record)"}</td><td>—</td>
                         </tr>
                       );
                     })}
@@ -71,15 +77,15 @@ const BondDetail = forwardRef<HTMLElement, { state: BondState; focus: BondTenor 
               )}
               {anyFallback && (
                 <p className="notice text-stale">
-                  {[...new Set(data.tenors.flatMap((row) => row.newer_rejected_tenders))].map((n) => `Auction ${n}`).join(", ")}{" "}
-                  failed validation and was ignored. Rows marked FALLBACK come from an earlier valid auction.
+                  Rejected source data in {[...new Set(data.tenors.flatMap((row) => row.newer_rejected_tenders))].join(", ")} was
+                  ignored. Only rows marked FALLBACK could have been affected; they come from an earlier valid auction.
                 </p>
               )}
-              {!anyFallback && rejectedNote(data.skipped_tenders) && (
+              {!anyFallback && data.skipped_tenders.length > 0 && (
                 <p className="notice">
-                  {rejectedNote(data.skipped_tenders)} (ignored).{" "}
-                  {data.missing_tenors.length > 0
-                    ? `${data.missing_tenors.join(", ")} may appear only in rejected tenders; no value is shown for it.`
+                  Rejected source records in {data.skipped_tenders.join(", ")} (ignored).{" "}
+                  {data.unverified_tenors.length > 0
+                    ? `${data.unverified_tenors.join(", ")} may appear only in rejected records; no value is shown for it.`
                     : "It does not affect the rows shown."}
                 </p>
               )}

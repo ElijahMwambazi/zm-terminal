@@ -3,7 +3,7 @@ import { getSystemStatus, type BondTenor, type SystemStatus, type Tenor } from "
 import { COMMAND_NAMES, parseCommand } from "./commands";
 import { formatDate, formatLusaka } from "./format";
 import TbillDetail, { fallbackWarning, rejectedNote, tbillProblem } from "./TbillDetail";
-import BondDetail, { bondProblem } from "./BondDetail";
+import BondDetail, { bondFallbackWarning, bondProblem } from "./BondDetail";
 import { useGovernmentBonds } from "./useGovernmentBonds";
 import { useTreasuryBills } from "./useTreasuryBills";
 import UsdZmwDetail, { QuoteBlock, quoteProblem } from "./UsdZmwDetail";
@@ -85,7 +85,6 @@ export default function App() {
   const tbill364 = tbillState.status === "ready" ? tbillState.data.tenors.find((t) => t.tenor === "364D") : undefined;
 
   const bond10 = bondState.status === "ready" ? bondState.data.tenors.find((t) => t.tenor === "10Y") : undefined;
-  const bondSkipped = bondState.status === "ready" ? bondState.data.skipped_tenders : [];
   const tbillSkipped = tbillState.status === "ready" ? tbillState.data.skipped_tenders : [];
 
   const now = useMemo(
@@ -162,11 +161,8 @@ export default function App() {
             {bondState.status === "error" && bondProblem(bondState)}
             {bondState.status === "ready" && !bond10 && "No valid 10Y auction found"}
             {bond10 && <>Yield · BoZ · auction {formatDate(bond10.auction_date)}</>}
-            {bond10 && fallbackWarning(bond10) && (
-              <><br /><span className="text-stale">{fallbackWarning(bond10)}</span></>
-            )}
-            {bond10 && !fallbackWarning(bond10) && rejectedNote(bondSkipped) && (
-              <><br /><span className="muted">{rejectedNote(bondSkipped)}</span></>
+            {bond10 && bondFallbackWarning(bond10) && (
+              <><br /><span className="text-stale">{bondFallbackWarning(bond10)}</span></>
             )}
           </small>
         </button>
