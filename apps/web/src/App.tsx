@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getSystemStatus, type SystemStatus, type Tenor } from "./api";
+import { getSystemStatus, type BondTenor, type SystemStatus, type Tenor } from "./api";
 import { COMMAND_NAMES, parseCommand } from "./commands";
 import { formatDate, formatLusaka } from "./format";
 import TbillDetail, { fallbackWarning, rejectedNote, tbillProblem } from "./TbillDetail";
+import BondDetail, { bondFallbackWarning, bondProblem } from "./BondDetail";
+import { useGovernmentBonds } from "./useGovernmentBonds";
 import { useTreasuryBills } from "./useTreasuryBills";
 import UsdZmwDetail, { QuoteBlock, quoteProblem } from "./UsdZmwDetail";
 import { useUsdZmwQuote } from "./useUsdZmwQuote";
@@ -28,7 +30,9 @@ export default function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [command, setCommand] = useState("");
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<"usdzmw" | "tbill" | null>(null);
+  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | null>(null);
+  const [bondFocus, setBondFocus] = useState<BondTenor | null>(null);
+  const { state: bondState, refresh: refreshBonds } = useGovernmentBonds();
   const [tbillFocus, setTbillFocus] = useState<Tenor | null>(null);
   const { state: tbillState, refresh: refreshTbills } = useTreasuryBills();
   const { state: quoteState, refreshKey, refresh } = useUsdZmwQuote();
@@ -58,13 +62,20 @@ export default function App() {
     requestAnimationFrame(() => detailRef.current?.focus());
   };
 
+  const openBond = (tenor: BondTenor | null) => {
+    setBondFocus(tenor);
+    setDetail("bond");
+    requestAnimationFrame(() => detailRef.current?.focus());
+  };
+
   const runCommand = () => {
     const result = parseCommand(command);
     if (!result.ok) return setCommandError(result.error);
     setCommandError(null);
     setCommand("");
     if (result.action.type === "open-usdzmw") openUsdZmw();
-    else openTbill(result.action.tenor);
+    else if (result.action.type === "open-tbill") openTbill(result.action.tenor);
+    else openBond(result.action.tenor);
   };
 
   useEffect(() => {
@@ -73,6 +84,7 @@ export default function App() {
 
   const tbill364 = tbillState.status === "ready" ? tbillState.data.tenors.find((t) => t.tenor === "364D") : undefined;
 
+  const bond10 = bondState.status === "ready" ? bondState.data.tenors.find((t) => t.tenor === "10Y") : undefined;
   const tbillSkipped = tbillState.status === "ready" ? tbillState.data.skipped_tenders : [];
 
   const now = useMemo(
@@ -100,7 +112,7 @@ export default function App() {
         <span><StatusDot ok={status?.api} /> API</span>
         <span><StatusDot ok={status?.database} /> POSTGRES</span>
         <span><StatusDot ok={status?.openbb} /> OPENBB</span>
-        <span className="status-note">v0.1 — only USD/ZMW and Treasury Bills (Bank of Zambia) are live</span>
+        <span className="status-note">v0.1 — only USD/ZMW, Treasury Bills and Government Bonds (Bank of Zambia) are live</span>
       </section>
 
       <section className="market-grid" aria-label="Market overview">
@@ -141,6 +153,19 @@ export default function App() {
             )}
           </small>
         </button>
+        <button type="button" className="market-card market-card--live" onClick={() => openBond("10Y")}>
+          <span className="market-label">10Y GRZ BOND</span>
+          {bond10 ? <strong>{bond10.yield_rate}%</strong> : <strong>{bondState.status === "loading" ? "…" : "—"}</strong>}
+          <small>
+            {bondState.status === "loading" && "Loading Bank of Zambia auction…"}
+            {bondState.status === "error" && bondProblem(bondState)}
+            {bondState.status === "ready" && !bond10 && "No valid 10Y auction found"}
+            {bond10 && <>Yield · BoZ · auction {formatDate(bond10.auction_date)}</>}
+            {bond10 && bondFallbackWarning(bond10) && (
+              <><br /><span className="text-stale">{bondFallbackWarning(bond10)}</span></>
+            )}
+          </small>
+        </button>
         {markets.map((market) => (
           <article className="market-card" key={market.label}>
             <span className="market-label">{market.label}</span>
@@ -153,12 +178,14 @@ export default function App() {
       <section className="workspace-grid">
         {detail === "usdzmw" ? (
           <UsdZmwDetail ref={detailRef} state={quoteState} refreshKey={refreshKey} onRefresh={refresh} />
+        ) : detail === "bond" ? (
+          <BondDetail ref={detailRef} state={bondState} focus={bondFocus} onRefresh={refreshBonds} />
         ) : detail === "tbill" ? (
           <TbillDetail ref={detailRef} state={tbillState} focus={tbillFocus} onRefresh={refreshTbills} />
         ) : (
           <article className="panel">
             <div className="panel-heading"><span>WORKSPACE</span></div>
-            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, or <code>TBILL ZM</code> for Treasury Bills.</p>
+            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, or <code>BOND ZM</code> for Government Bonds.</p>
           </article>
         )}
 

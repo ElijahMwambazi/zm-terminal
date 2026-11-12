@@ -160,14 +160,14 @@ td:last-child { text-align: right; }
 .command-line input::placeholder { color: #454545; }
 
 @media (max-width: 1000px) {
-  .market-grid { grid-template-columns: repeat(3, 1fr); }
+  .market-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .workspace-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 640px) {
   .terminal-shell { padding: 16px; }
   .topbar { align-items: flex-start; }
-  .market-grid { grid-template-columns: repeat(2, 1fr); }
+  .market-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .status-strip .status-note { width: 100%; margin-left: 0; padding-bottom: 10px; }
 }
 
@@ -205,3 +205,5 @@ th { text-align: left; color: #8c8c8c; font-weight: normal; padding: 6px 4px; }
 .row--focus { background: rgba(255, 176, 0, 0.12); }
 .table-scroll { overflow-x: auto; }
 .table-scroll td, .table-scroll th { white-space: nowrap; padding-right: 12px; }
+.market-card { overflow-wrap: anywhere; }
+.history-section { margin-top: 14px; border-top: 1px solid #292929; }

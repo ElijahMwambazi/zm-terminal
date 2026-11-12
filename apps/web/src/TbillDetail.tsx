@@ -1,5 +1,6 @@
 import { forwardRef } from "react";
-import { TENORS, type Tenor, type TreasuryBill } from "./api";
+import { TBILL_RANGES, TENORS, getTbillHistory, type Tenor, type TreasuryBill } from "./api";
+import AuctionHistory from "./AuctionHistory";
 import { formatDate, formatLusaka } from "./format";
 import type { TbillState } from "./useTreasuryBills";
 
@@ -11,7 +12,7 @@ export function tbillProblem(state: TbillState): string | null {
 }
 
 /** Strong claim: only when a rejected tender newer than this row's auction exists. */
-export const fallbackWarning = (row: TreasuryBill): string | null =>
+export const fallbackWarning = (row: { newer_rejected_tenders: string[] }): string | null =>
   row.newer_rejected_tenders.length > 0
     ? `LATEST TENDER REJECTED (${row.newer_rejected_tenders.join(", ")}) · USING EARLIER VALID AUCTION`
     : null;
@@ -92,6 +93,8 @@ const TbillDetail = forwardRef<HTMLElement, { state: TbillState; focus: Tenor | 
               </ul>
             </>
           )}
+          <AuctionHistory title="T-BILL" tenors={TENORS} ranges={TBILL_RANGES} initialRange="1Y" focus={focus}
+            fallbackTenor="364D" load={getTbillHistory} reloadKey={state} />
         </div>
       </article>
     );

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -8,11 +8,19 @@ from sqlalchemy import text
 
 from app.db import database_is_ready, get_engine
 from app.schemas.fx import FxHistory, FxQuote
-from app.schemas.tbills import TENORS, RejectedTender, Tenor, TreasuryBillAuction, TreasuryBillsLatest
+from app.schemas.bonds import (
+    BOND_TENORS, BondTenor, GovernmentBondAuction, GovernmentBondsLatest, RejectedBondObservation,
+    BondHistoryRange, GovernmentBondHistory,
+)
+from app.schemas.tbills import (
+    TENORS, HistoryRange, RejectedTender, Tenor, TreasuryBillAuction, TreasuryBillHistory, TreasuryBillsLatest,
+)
 from app.services.boz import get_boz_fx_quote
-from app.services.boz_treasury import get_boz_tbills, latest_per_tenor
+from app.services.bond_store import BondConflictError, fetch_bond_history, save_bond_auctions
+from app.services.boz_bonds import get_boz_bonds, latest_per_tenor as latest_bonds, unverified_tenors
+from app.services.boz_treasury import LUSAKA, get_boz_tbills, latest_per_tenor
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, save_fx_quote
-from app.services.tbill_store import TbillConflictError, save_tbill_auctions
+from app.services.tbill_store import TbillConflictError, fetch_tbill_history, save_tbill_auctions
 from app.services.provider_policy import PROVIDER_POLICIES, ProviderPolicy
 from app.services.openbb import get_openbb_coverage, openbb_is_ready
 
@@ -74,12 +82,79 @@ async def treasury_bills_latest() -> TreasuryBillsLatest:
     )
 
 
+def _lusaka_today() -> date:
+    return datetime.now(timezone.utc).astimezone(LUSAKA).date()
+
+
+@router.get("/treasury-bills/history", response_model=TreasuryBillHistory)
+async def treasury_bills_history(tenor: Tenor = "364D", range: HistoryRange = "1Y") -> TreasuryBillHistory:
+    """Stored observations only: BoZ is never called here."""
+    try:
+        points = await asyncio.to_thread(fetch_tbill_history, int(tenor[:-1]), range, today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("T-bill history read failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Stored history unavailable") from exc
+    return TreasuryBillHistory(tenor=tenor, range=range, count=len(points), observations=points)
+
+
 @router.get("/treasury-bills/{tenor}", response_model=TreasuryBillAuction)
 async def treasury_bill(tenor: Tenor) -> TreasuryBillAuction:
     rows, rejected = await _load_tbills()
     match = [r for r in latest_per_tenor(rows, datetime.now(timezone.utc), rejected) if r.tenor == tenor]
     if not match:
         raise HTTPException(status_code=404, detail=f"No recent BoZ auction for {tenor}")
+    return match[0]
+
+
+async def _load_bonds() -> tuple[list[GovernmentBondAuction], list[RejectedBondObservation]]:
+    try:
+        rows, rejected = await get_boz_bonds()
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="Bank of Zambia request timed out") from exc
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Bank of Zambia data unavailable or invalid") from exc
+    try:
+        await asyncio.to_thread(save_bond_auctions, rows)
+    except BondConflictError:
+        logger.warning("Bond persistence conflict; live data returned unsaved")
+    except Exception as exc:
+        logger.warning("Bond persistence failed (%s); live data returned unsaved", type(exc).__name__)
+    return rows, rejected
+
+
+@router.get("/government-bonds/latest", response_model=GovernmentBondsLatest)
+async def government_bonds_latest() -> GovernmentBondsLatest:
+    rows, rejected = await _load_bonds()
+    latest = latest_bonds(rows, rejected)
+    have = {r.tenor for r in latest}
+    skipped: list[str] = []
+    for r in rejected:
+        name = r.tender_number or "unknown"
+        if name not in skipped:
+            skipped.append(name)
+    return GovernmentBondsLatest(
+        tenors=latest, missing_tenors=[t for t in BOND_TENORS if t not in have],
+        unverified_tenors=unverified_tenors(have, rejected), skipped_tenders=skipped,
+    )
+
+
+@router.get("/government-bonds/history", response_model=GovernmentBondHistory)
+async def government_bonds_history(tenor: BondTenor = "10Y", range: BondHistoryRange = "1Y") -> GovernmentBondHistory:
+    """Stored accepted observations only: BoZ is never called here."""
+    try:
+        points = await asyncio.to_thread(fetch_bond_history, int(tenor[:-1]), range, today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("Bond history read failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Stored history unavailable") from exc
+    return GovernmentBondHistory(tenor=tenor, range=range, count=len(points), observations=points)
+
+
+@router.get("/government-bonds/{tenor}", response_model=GovernmentBondAuction)
+async def government_bond(tenor: BondTenor) -> GovernmentBondAuction:
+    rows, rejected = await _load_bonds()
+    match = [r for r in latest_bonds(rows, rejected) if r.tenor == tenor]
+    if not match:
+        raise HTTPException(status_code=404, detail=f"No valid BoZ auction found for {tenor}")
     return match[0]
 
 

@@ -91,3 +91,63 @@ export type TreasuryBillsLatest = {
 };
 
 export const getTreasuryBills = () => getJson<TreasuryBillsLatest>("/api/v1/treasury-bills/latest");
+
+export const BOND_TENORS = ["2Y", "3Y", "5Y", "7Y", "10Y", "15Y"] as const;
+export type BondTenor = (typeof BOND_TENORS)[number];
+
+/** Rates are percent per annum, decimal strings exactly as BoZ publishes them. */
+export type GovernmentBond = {
+  tenor: BondTenor;
+  auction_date: string; // YYYY-MM-DD
+  tender_number: string;
+  isin: string;
+  coupon_rate: string;
+  yield_rate: string;
+  source: "boz";
+  source_url: string;
+  retrieved_at: string;
+  /** Tenders with a newer rejected record that could have carried THIS tenor; non-empty = fallback. */
+  newer_rejected_tenders: string[];
+};
+
+export type GovernmentBondsLatest = {
+  tenors: GovernmentBond[];
+  missing_tenors: BondTenor[];
+  /** Missing tenors that a rejected source record could have carried. */
+  unverified_tenors: BondTenor[];
+  skipped_tenders: string[];
+};
+
+export const getGovernmentBonds = () => getJson<GovernmentBondsLatest>("/api/v1/government-bonds/latest");
+
+export const TBILL_RANGES = ["1M", "3M", "6M", "1Y", "ALL"] as const;
+export type TbillRange = (typeof TBILL_RANGES)[number];
+export const BOND_RANGES = ["3M", "6M", "1Y", "ALL"] as const;
+export type BondRange = (typeof BOND_RANGES)[number];
+
+/** A stored auction observation; auctions that did not happen are simply absent. */
+export type AuctionPoint = {
+  tenor: string;
+  auction_date: string; // YYYY-MM-DD
+  tender_number: string;
+  isin: string;
+  yield_rate: string;
+  discount_rate?: string;
+  coupon_rate?: string;
+};
+
+async function getHistory(path: string): Promise<AuctionPoint[]> {
+  try {
+    return (await getJson<{ observations: AuctionPoint[] }>(path)).observations;
+  } catch (error) {
+    if (error instanceof ApiError && error.message.includes("(503)")) {
+      throw new ApiError("api", "Stored history is unavailable (database)");
+    }
+    throw error;
+  }
+}
+
+export const getTbillHistory = (tenor: Tenor, range: TbillRange) =>
+  getHistory(`/api/v1/treasury-bills/history?tenor=${tenor}&range=${range}`);
+export const getBondHistory = (tenor: BondTenor, range: BondRange) =>
+  getHistory(`/api/v1/government-bonds/history?tenor=${tenor}&range=${range}`);

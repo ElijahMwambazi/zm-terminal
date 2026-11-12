@@ -41,7 +41,8 @@ def test_providers_endpoint():
     with TestClient(app) as client:
         body = client.get("/api/v1/providers").json()
     assert [(p["provider_id"], p["dataset_id"]) for p in body] == [
-        ("boz", "boz_zmw_usd_daily_exchange_rates"), ("boz", "boz_treasury_bill_auction_results")]
+        ("boz", "boz_zmw_usd_daily_exchange_rates"), ("boz", "boz_treasury_bill_auction_results"),
+        ("boz", "boz_government_bond_auction_results")]
 
 
 # ---- range handling ----

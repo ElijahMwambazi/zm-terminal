@@ -115,7 +115,7 @@ def _describe_rejected(node: object) -> RejectedTender:
 
 
 def parse_tbill_auctions(
-    payload: object, *, retrieved_at: datetime
+    payload: object, *, retrieved_at: datetime, require_rows: bool = True
 ) -> tuple[list[TreasuryBillAuction], list[RejectedTender]]:
     """Return (valid auction rows newest tender first, tenders rejected).
 
@@ -124,9 +124,9 @@ def parse_tbill_auctions(
     """
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), list) or not payload["data"]:
         raise ValueError("Expected a non-empty JSON:API document")
-    included = payload.get("included")
+    included = payload.get("included", [])  # JSON:API omits it when nothing is included
     if not isinstance(included, list):
-        raise ValueError("Missing included tenor records")
+        raise ValueError("Malformed included tenor records")
     paragraphs = {i["id"]: i for i in included if isinstance(i, dict) and isinstance(i.get("id"), str)}
     rows: list[TreasuryBillAuction] = []
     skipped: list[RejectedTender] = []
@@ -135,7 +135,7 @@ def parse_tbill_auctions(
             rows.extend(_parse_node(node, paragraphs, retrieved_at))
         except ValueError:  # includes pydantic ValidationError
             skipped.append(_describe_rejected(node))
-    if not rows:
+    if require_rows and not rows:
         raise ValueError("No valid Treasury Bill tender in the source")
     return rows, skipped
 

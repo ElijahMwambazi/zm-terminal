@@ -48,3 +48,25 @@ class TreasuryBillsLatest(BaseModel):
     # Every recent BoZ tender that failed validation and was ignored ("unknown" if its number
     # was unreadable). Informational: whether a row is a fallback is `newer_rejected_tenders`.
     skipped_tenders: list[str]
+
+
+HistoryRange = Literal["1M", "3M", "6M", "1Y", "ALL"]
+
+
+class TreasuryBillHistoryPoint(BaseModel):
+    """One stored auction observation. Missing auctions are absent, never filled."""
+
+    tenor: Tenor
+    auction_date: date
+    tender_number: str
+    isin: str
+    discount_rate: Decimal
+    yield_rate: Decimal
+    source: Literal["boz"] = "boz"
+
+
+class TreasuryBillHistory(BaseModel):
+    tenor: Tenor
+    range: HistoryRange
+    count: int
+    observations: list[TreasuryBillHistoryPoint]
