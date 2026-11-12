@@ -1,0 +1,190 @@
+{
+ "jsonapi": {
+  "version": "1.0"
+ },
+ "data": [
+  {
+   "type": "node--tbills_auction_results",
+   "id": "n3",
+   "attributes": {
+    "title": "99/2026",
+    "field_tbills_auction_date": "2026-11-26",
+    "status": true
+   },
+   "relationships": {
+    "field_tbills_auction_results": {
+     "data": [
+      {
+       "type": "x",
+       "id": "b1"
+      },
+      {
+       "type": "x",
+       "id": "b2"
+      },
+      {
+       "type": "x",
+       "id": "b3"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "type": "node--tbills_auction_results",
+   "id": "n2",
+   "attributes": {
+    "title": "98/2026",
+    "field_tbills_auction_date": "2026-11-12",
+    "status": true
+   },
+   "relationships": {
+    "field_tbills_auction_results": {
+     "data": [
+      {
+       "type": "x",
+       "id": "q1"
+      },
+      {
+       "type": "x",
+       "id": "q4"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "type": "node--tbills_auction_results",
+   "id": "n1",
+   "attributes": {
+    "title": "97/2026",
+    "field_tbills_auction_date": "2026-10-29",
+    "status": true
+   },
+   "relationships": {
+    "field_tbills_auction_results": {
+     "data": [
+      {
+       "type": "x",
+       "id": "p1"
+      },
+      {
+       "type": "x",
+       "id": "p2"
+      },
+      {
+       "type": "x",
+       "id": "p3"
+      },
+      {
+       "type": "x",
+       "id": "p4"
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "included": [
+  {
+   "type": "paragraph--91_days_tbill",
+   "id": "p1",
+   "attributes": {
+    "status": true,
+    "field_91_days_tbills_isin": "ZM9000000011",
+    "field_91_days_yield_rate": "7.5000",
+    "field_91_discounted_rate": "7.3500",
+    "field_91_days_tenor": "91_days"
+   }
+  },
+  {
+   "type": "paragraph--182_days_tbill",
+   "id": "p2",
+   "attributes": {
+    "status": true,
+    "field_182_days_tbill_isin": "ZM9000000029",
+    "field_182_days_yield_rate": "8.2500",
+    "field_182_days_tbill_discount": "7.9300",
+    "field_182_days_tenor": "182_days"
+   }
+  },
+  {
+   "type": "paragraph--273_days_tbills",
+   "id": "p3",
+   "attributes": {
+    "status": true,
+    "field_273_days_isin": "ZM9000000037",
+    "field_273_yield_rate": "8.7000",
+    "field_273_days_discount_rate": "8.1500",
+    "field_273_days_tenor": "273_days"
+   }
+  },
+  {
+   "type": "paragraph--364_tbill",
+   "id": "p4",
+   "attributes": {
+    "status": true,
+    "field_364_days_isin": "ZM9000000045",
+    "field_364_yield_rate": "9.4000",
+    "field_364_days_discount_rate": "8.5900",
+    "field_364_days_tenor": "364_days"
+   }
+  },
+  {
+   "type": "paragraph--91_days_tbill",
+   "id": "q1",
+   "attributes": {
+    "status": true,
+    "field_91_days_tbills_isin": "ZM9000000052",
+    "field_91_days_yield_rate": "7.4000",
+    "field_91_discounted_rate": "7.2600",
+    "field_91_days_tenor": "91_days"
+   }
+  },
+  {
+   "type": "paragraph--364_tbill",
+   "id": "q4",
+   "attributes": {
+    "status": true,
+    "field_364_days_isin": "ZM9000000060",
+    "field_364_yield_rate": "9.3000",
+    "field_364_days_discount_rate": "8.5000",
+    "field_364_days_tenor": "364_days"
+   }
+  },
+  {
+   "type": "paragraph--91_days_tbill",
+   "id": "b1",
+   "attributes": {
+    "status": true,
+    "field_91_days_tbills_isin": "ZM9000000078",
+    "field_91_days_yield_rate": "7.0000",
+    "field_91_discounted_rate": "6.9000",
+    "field_91_days_tenor": "91_days"
+   }
+  },
+  {
+   "type": "paragraph--273_days_tbills",
+   "id": "b2",
+   "attributes": {
+    "status": true,
+    "field_273_days_isin": "ZM9000000086",
+    "field_273_yield_rate": "8.0000",
+    "field_273_days_discount_rate": "7.8000",
+    "field_273_days_tenor": "273_days"
+   }
+  },
+  {
+   "type": "paragraph--273_days_tbills",
+   "id": "b3",
+   "attributes": {
+    "status": true,
+    "field_273_days_isin": "ZM9000000094",
+    "field_273_yield_rate": "8.1000",
+    "field_273_days_discount_rate": "7.9000",
+    "field_273_days_tenor": "273_days"
+   }
+  }
+ ],
+ "links": {}
+}

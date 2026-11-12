@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getSystemStatus, type SystemStatus } from "./api";
+import { getSystemStatus, type SystemStatus, type Tenor } from "./api";
 import { COMMAND_NAMES, parseCommand } from "./commands";
-import { formatLusaka } from "./format";
+import { formatDate, formatLusaka } from "./format";
+import TbillDetail, { tbillProblem } from "./TbillDetail";
+import { useTreasuryBills } from "./useTreasuryBills";
 import UsdZmwDetail, { QuoteBlock, quoteProblem } from "./UsdZmwDetail";
 import { useUsdZmwQuote } from "./useUsdZmwQuote";
 
@@ -16,7 +18,6 @@ const markets: MarketCard[] = [
   { label: "BTC/USD", value: "—", context: "OpenBB / crypto adapter" },
   { label: "BTC/ZMW", value: "—", context: "Derived rate" },
   { label: "COPPER", value: "—", context: "Commodity adapter" },
-  { label: "364D T-BILL", value: "—", context: "BoZ securities adapter" },
 ];
 
 function StatusDot({ ok }: { ok?: boolean }) {
@@ -27,7 +28,9 @@ export default function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [command, setCommand] = useState("");
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
+  const [detail, setDetail] = useState<"usdzmw" | "tbill" | null>(null);
+  const [tbillFocus, setTbillFocus] = useState<Tenor | null>(null);
+  const { state: tbillState, refresh: refreshTbills } = useTreasuryBills();
   const { state: quoteState, refreshKey, refresh } = useUsdZmwQuote();
   const detailRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -44,8 +47,14 @@ export default function App() {
   }, []);
 
   const openUsdZmw = () => {
-    setDetailOpen(true);
+    setDetail("usdzmw");
     // Wait for the panel to mount before focusing it.
+    requestAnimationFrame(() => detailRef.current?.focus());
+  };
+
+  const openTbill = (tenor: Tenor | null) => {
+    setTbillFocus(tenor);
+    setDetail("tbill");
     requestAnimationFrame(() => detailRef.current?.focus());
   };
 
@@ -55,11 +64,14 @@ export default function App() {
     setCommandError(null);
     setCommand("");
     if (result.action.type === "open-usdzmw") openUsdZmw();
+    else openTbill(result.action.tenor);
   };
 
   useEffect(() => {
     getSystemStatus().then(setStatus).catch(() => setStatus(null));
   }, []);
+
+  const tbill364 = tbillState.status === "ready" ? tbillState.data.tenors.find((t) => t.tenor === "364D") : undefined;
 
   const now = useMemo(
     () =>
@@ -86,7 +98,7 @@ export default function App() {
         <span><StatusDot ok={status?.api} /> API</span>
         <span><StatusDot ok={status?.database} /> POSTGRES</span>
         <span><StatusDot ok={status?.openbb} /> OPENBB</span>
-        <span className="status-note">v0.1 — only USD/ZMW (Bank of Zambia) is live</span>
+        <span className="status-note">v0.1 — only USD/ZMW and Treasury Bills (Bank of Zambia) are live</span>
       </section>
 
       <section className="market-grid" aria-label="Market overview">
@@ -106,6 +118,21 @@ export default function App() {
             )}
           </small>
         </button>
+        <button type="button" className="market-card market-card--live" onClick={() => openTbill("364D")}>
+          <span className="market-label">364D T-BILL</span>
+          {tbill364 ? <strong>{tbill364.yield_rate}%</strong> : <strong>{tbillState.status === "loading" ? "…" : "—"}</strong>}
+          <small>
+            {tbillState.status === "loading" && "Loading Bank of Zambia auction…"}
+            {tbillState.status === "error" && tbillProblem(tbillState)}
+            {tbillState.status === "ready" && !tbill364 && "No recent 364D auction published"}
+            {tbill364 && (
+              <>
+                Yield · BoZ · auction {formatDate(tbill364.auction_date)}
+                {tbill364.stale && <> · <span className="text-stale">STALE</span></>}
+              </>
+            )}
+          </small>
+        </button>
         {markets.map((market) => (
           <article className="market-card" key={market.label}>
             <span className="market-label">{market.label}</span>
@@ -116,12 +143,14 @@ export default function App() {
       </section>
 
       <section className="workspace-grid">
-        {detailOpen ? (
+        {detail === "usdzmw" ? (
           <UsdZmwDetail ref={detailRef} state={quoteState} refreshKey={refreshKey} onRefresh={refresh} />
+        ) : detail === "tbill" ? (
+          <TbillDetail ref={detailRef} state={tbillState} focus={tbillFocus} onRefresh={refreshTbills} />
         ) : (
           <article className="panel">
             <div className="panel-heading"><span>WORKSPACE</span></div>
-            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) to open the USD/ZMW detail view.</p>
+            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, or <code>TBILL ZM</code> for Treasury Bills.</p>
           </article>
         )}
 

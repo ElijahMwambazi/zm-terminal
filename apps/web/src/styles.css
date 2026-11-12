@@ -200,3 +200,6 @@ button.market-card { font: inherit; text-align: left; cursor: pointer; color: in
 @media (max-width: 640px) { .price-chart { height: 240px; } }
 .workspace-grid > * { min-width: 0; }
 .price-chart { overflow: hidden; }
+
+th { text-align: left; color: #8c8c8c; font-weight: normal; padding: 6px 4px; }
+.row--focus { background: rgba(255, 176, 0, 0.12); }

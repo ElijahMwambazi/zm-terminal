@@ -40,7 +40,8 @@ def test_boz_policy_values():
 def test_providers_endpoint():
     with TestClient(app) as client:
         body = client.get("/api/v1/providers").json()
-    assert [p["provider_id"] for p in body] == ["boz"]
+    assert [(p["provider_id"], p["dataset_id"]) for p in body] == [
+        ("boz", "boz_zmw_usd_daily_exchange_rates"), ("boz", "boz_treasury_bill_auction_results")]
 
 
 # ---- range handling ----
