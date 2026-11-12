@@ -73,6 +73,8 @@ export default function App() {
 
   const tbill364 = tbillState.status === "ready" ? tbillState.data.tenors.find((t) => t.tenor === "364D") : undefined;
 
+  const tbillSkipped = tbillState.status === "ready" ? tbillState.data.skipped_tenders : [];
+
   const now = useMemo(
     () =>
       new Intl.DateTimeFormat("en-ZM", {
@@ -129,6 +131,13 @@ export default function App() {
               <>
                 Yield · BoZ · auction {formatDate(tbill364.auction_date)}
                 {tbill364.stale && <> · <span className="text-stale">STALE</span></>}
+              </>
+            )}
+            {tbillSkipped.length > 0 && (
+              <>
+                <br /><span className="text-stale">
+                  LATEST TENDER REJECTED ({tbillSkipped.join(", ")}) · USING EARLIER VALID AUCTION
+                </span>
               </>
             )}
           </small>

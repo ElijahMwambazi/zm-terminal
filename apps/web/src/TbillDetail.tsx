@@ -33,6 +33,7 @@ const TbillDetail = forwardRef<HTMLElement, { state: TbillState; focus: Tenor | 
           {problem && <p className="notice notice--error" role="alert">{problem}</p>}
           {data && (
             <>
+              <div className="table-scroll">
               <table>
                 <thead>
                   <tr><th>TENOR</th><th>YIELD</th><th>DISCOUNT</th><th>AUCTION</th><th>ISIN</th></tr>
@@ -60,6 +61,7 @@ const TbillDetail = forwardRef<HTMLElement, { state: TbillState; focus: Tenor | 
                   })}
                 </tbody>
               </table>
+              </div>
               {focus && !focused && (
                 <p className="notice notice--error">No recent {focus} auction is published. No rate is shown.</p>
               )}
