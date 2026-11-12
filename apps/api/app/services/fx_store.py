@@ -1,6 +1,7 @@
 """PostgreSQL persistence for normalized USD/ZMW observations (no raw payloads)."""
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Literal
 
 from sqlalchemy import text
@@ -43,17 +44,6 @@ def range_start(range_: str, now: datetime) -> datetime | None:
     return None if window is None else now.astimezone(timezone.utc) - window
 
 
-def save_fx_quote(quote: FxQuote, *, engine: Engine | None = None) -> bool:
-    """Insert once per (pair, observed_at, source); returns True if a row was added."""
-    with (engine or get_engine()).begin() as connection:
-        result = connection.execute(_INSERT, {
-            "observed_at": quote.observed_at, "buy": quote.buy, "mid": quote.mid,
-            "sell": quote.sell, "source": quote.source,
-            "retrieved_at": quote.retrieved_at, "source_url": quote.source_url,
-        })
-    return result.rowcount == 1
-
-
 def fetch_fx_history(
     range_: str, *, now: datetime | None = None, engine: Engine | None = None
 ) -> list[FxHistoryPoint]:
@@ -61,3 +51,60 @@ def fetch_fx_history(
     with (engine or get_engine()).connect() as connection:
         rows = connection.execute(_SELECT, {"since": since}).mappings().all()
     return [FxHistoryPoint(**row) for row in rows]
+
+
+class FxConflictError(Exception):
+    """A stored observation has different values than the incoming one for the same key."""
+
+
+_SELECT_ONE = text(
+    """
+    SELECT buy, mid, sell FROM fx_rates
+    WHERE base_currency = 'USD' AND quote_currency = 'ZMW'
+      AND observed_at = :observed_at AND source = :source
+    """
+)
+
+
+def save_fx_observations(
+    observations: dict[datetime, tuple[Decimal, Decimal, Decimal]],
+    *, retrieved_at: datetime, source: str, source_url: str, engine: Engine | None = None,
+) -> tuple[int, int]:
+    """Atomically insert observations; returns (inserted, already_present_identical).
+
+    Existing rows are never overwritten. If any existing row has different values
+    (numeric comparison, so 19.8 == 19.8000) the whole batch is rolled back.
+    """
+    inserted = identical = 0
+    conflicts: list[datetime] = []
+    with (engine or get_engine()).begin() as connection:
+        for observed_at, (buy, mid, sell) in sorted(observations.items()):
+            params = {
+                "observed_at": observed_at, "buy": buy, "mid": mid, "sell": sell,
+                "source": source, "retrieved_at": retrieved_at, "source_url": source_url,
+            }
+            if connection.execute(_INSERT, params).rowcount == 1:
+                inserted += 1
+                continue
+            existing = connection.execute(_SELECT_ONE, params).one()
+            if tuple(existing) == (buy, mid, sell):
+                identical += 1
+            else:
+                conflicts.append(observed_at)
+        if conflicts:  # raising inside begin() rolls the whole batch back
+            stamps = ", ".join(c.isoformat() for c in conflicts[:5])
+            raise FxConflictError(f"{len(conflicts)} stored observation(s) conflict with BoZ values, e.g. {stamps}")
+    return inserted, identical
+
+
+def save_fx_quote(quote: FxQuote, *, engine: Engine | None = None) -> bool:
+    """Conflict-aware single save; returns True if a row was added, False if already present.
+
+    Shares save_fx_observations' rules: never overwrites, identical values (numeric
+    comparison) are a silent no-op, different values raise FxConflictError.
+    """
+    inserted, _ = save_fx_observations(
+        {quote.observed_at: (quote.buy, quote.mid, quote.sell)},
+        retrieved_at=quote.retrieved_at, source=quote.source, source_url=quote.source_url, engine=engine,
+    )
+    return inserted == 1

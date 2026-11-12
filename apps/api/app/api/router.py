@@ -9,7 +9,7 @@ from sqlalchemy import text
 from app.db import database_is_ready, get_engine
 from app.schemas.fx import FxHistory, FxQuote
 from app.services.boz import get_boz_fx_quote
-from app.services.fx_store import HistoryRange, fetch_fx_history, save_fx_quote
+from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, save_fx_quote
 from app.services.provider_policy import PROVIDER_POLICIES, ProviderPolicy
 from app.services.openbb import get_openbb_coverage, openbb_is_ready
 
@@ -28,6 +28,8 @@ async def usd_zmw_quote() -> FxQuote:
     # A valid live quote is still returned if storage fails; only the exception type is logged.
     try:
         await asyncio.to_thread(save_fx_quote, quote)
+    except FxConflictError:
+        logger.warning("USDZMW persistence conflict; live quote returned unsaved")
     except Exception as exc:
         logger.warning("USDZMW persistence failed (%s); quote returned unsaved", type(exc).__name__)
     return quote

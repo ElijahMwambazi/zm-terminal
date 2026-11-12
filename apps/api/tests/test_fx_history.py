@@ -33,7 +33,8 @@ def test_boz_policy_values():
     assert p.raw_response_storage == "disabled" and p.normalized_storage_allowed
     assert p.attribution_required and p.redistribution == "review_required"
     assert p.commercial_use == "review_required"
-    assert set(p.required_timestamps) == {"source", "observed_at", "retrieved_at"}
+    assert set(p.required_provenance) == {"source", "source_url"}
+    assert set(p.required_timestamps) == {"observed_at", "retrieved_at"}
 
 
 def test_providers_endpoint():
@@ -178,3 +179,57 @@ def test_pg_history_order_filter_and_duplicates(engine):
 
 def test_pg_empty_history(engine):
     assert fx_store.fetch_fx_history("ALL", now=NOW, engine=engine) == []
+
+
+# ---- conflict-aware live save ----
+def test_conflict_logs_safe_warning_and_still_returns_live_quote(monkeypatch, caplog):
+    async def fetch():
+        return quote(mid="19.8987")
+    def conflict(q):
+        raise fx_store.FxConflictError("1 stored observation(s) conflict with BoZ values, e.g. 2026-10-09T14:00:00+00:00")
+    monkeypatch.setattr(router_module, "get_boz_fx_quote", fetch)
+    monkeypatch.setattr(router_module, "save_fx_quote", conflict)
+    with caplog.at_level(logging.WARNING), TestClient(app) as client:
+        response = client.get("/api/v1/fx/USDZMW")
+    assert response.status_code == 200 and response.json()["mid"] == "19.8987"
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING] == [
+        "USDZMW persistence conflict; live quote returned unsaved"]
+    assert "19.8987" not in caplog.text and "2026-10-09" not in caplog.text
+
+
+def test_identical_save_logs_nothing(monkeypatch, caplog):
+    async def fetch():
+        return quote()
+    monkeypatch.setattr(router_module, "get_boz_fx_quote", fetch)
+    monkeypatch.setattr(router_module, "save_fx_quote", lambda q: False)  # already present
+    with caplog.at_level(logging.WARNING), TestClient(app) as client:
+        assert client.get("/api/v1/fx/USDZMW").status_code == 200
+    assert caplog.records == []
+
+
+def test_pg_live_save_conflict_never_overwrites(engine):
+    original = quote(mid="19.8987")
+    assert fx_store.save_fx_quote(original, engine=engine) is True
+    changed = FxQuote(buy="19.8736", mid="20.0000", sell="19.9236", observed_at=original.observed_at,
+                      retrieved_at=NOW + timedelta(minutes=5), stale=False)
+    with pytest.raises(fx_store.FxConflictError):
+        fx_store.save_fx_quote(changed, engine=engine)
+    with engine.connect() as c:
+        row = c.execute(text("SELECT mid, retrieved_at FROM fx_rates")).one()
+    assert row.mid == Decimal("19.8987") and row.retrieved_at == NOW
+
+
+def test_pg_live_save_equivalent_scale_is_already_present(engine):
+    assert fx_store.save_fx_quote(FxQuote(buy="19.8", mid="19.9", sell="20.0", observed_at=NOW - timedelta(hours=1),
+                                          retrieved_at=NOW, stale=False), engine=engine) is True
+    same = FxQuote(buy="19.8000", mid="19.9000", sell="20.0000", observed_at=NOW - timedelta(hours=1),
+                   retrieved_at=NOW + timedelta(minutes=1), stale=False)
+    assert fx_store.save_fx_quote(same, engine=engine) is False
+
+
+def test_pg_live_and_backfill_share_conflict_rules(engine):
+    q = quote(mid="19.8987")
+    fx_store.save_fx_quote(q, engine=engine)
+    with pytest.raises(fx_store.FxConflictError):
+        fx_store.save_fx_observations({q.observed_at: (q.buy, Decimal("1"), q.sell)}, retrieved_at=NOW,
+                                      source="boz", source_url=q.source_url, engine=engine)

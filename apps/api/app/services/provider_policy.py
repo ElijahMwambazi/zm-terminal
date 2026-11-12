@@ -18,6 +18,7 @@ class ProviderPolicy(BaseModel):
     normalized_storage_allowed: bool
     raw_response_storage: Literal["disabled", "enabled"]
     attribution_required: bool
+    required_provenance: tuple[str, ...]
     required_timestamps: tuple[str, ...]
     redistribution: Literal["review_required", "permitted"]
     commercial_use: Literal["review_required", "permitted"]
@@ -35,12 +36,14 @@ BOZ_USD_POLICY = ProviderPolicy(
     normalized_storage_allowed=True,
     raw_response_storage="disabled",
     attribution_required=True,
-    required_timestamps=("source", "observed_at", "retrieved_at"),
+    required_provenance=("source", "source_url"),
+    required_timestamps=("observed_at", "retrieved_at"),
     redistribution="review_required",
     commercial_use="review_required",
     request_guidance=(
         "One request per user action, 10 s timeout, no retries, no background polling. "
-        "Rates change at most a few times per day; do not poll more than about once a minute."
+        "Rates change about three times per business day. Manual historical backfill: "
+        "sequential requests of at most 31 days, 2 s apart, at most 400 days per run."
     ),
 )
 

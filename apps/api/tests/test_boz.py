@@ -14,7 +14,7 @@ from app.services import boz
 
 
 NOW = datetime(2026, 10, 9, 15, tzinfo=timezone.utc)
-OBSERVED = datetime(2026, 10, 9, 14, 0, 51, tzinfo=timezone.utc)
+OBSERVED = datetime(2026, 10, 9, 13, 30, 51, tzinfo=timezone.utc)
 
 
 @pytest.fixture
@@ -31,14 +31,14 @@ def test_normalization_and_serialization(payload):
     assert quote.observed_at == OBSERVED
     assert quote.observed_at.second == 51
     assert quote.observed_at.tzinfo == timezone.utc
-    assert quote.observed_at.astimezone(ZoneInfo("Africa/Lusaka")).hour == 16
+    assert quote.observed_at.astimezone(ZoneInfo("Africa/Lusaka")).hour == 15
     assert quote.retrieved_at == NOW
     assert quote.retrieved_at.tzinfo == timezone.utc
     assert quote.source == "boz" and quote.source_url == BOZ_SOURCE_URL
     assert quote.stale is False
     serialized = json.loads(quote.model_dump_json())
     assert (serialized["buy"], serialized["mid"], serialized["sell"]) == ("19.8736", "19.8987", "19.9236")
-    assert serialized["observed_at"] == "2026-10-09T14:00:51Z"
+    assert serialized["observed_at"] == "2026-10-09T13:30:51Z"
 
 
 def test_single_row_precision_and_display_text_ignored(payload):

@@ -100,13 +100,13 @@ GET /api/v1/providers
 The source labels the pair ZMW/USD; the application symbol `USDZMW` represents ZMW per USD without inversion.
 
 The response preserves published `buy`, `mid`, and `sell` as **JSON decimal strings**. It extracts explicit UTC observation timestamps from each row's `<time datetime>` attribute, preserving seconds, and records a separate UTC `retrieved_at`.
-It selects the latest timestamp across all hours, regardless of response order. The website applies an additional hour filter whose semantics are undocumented; this adapter does not reproduce it.
+It validates every row, then selects the latest timestamp **among rows in an official slot**, regardless of response order (see *Source-selection policy* below). A valid row outside the slots is *not selected*, not invalid; if no row is in a slot the request fails closed with a safe 502.
 Identical duplicates are accepted. Conflicting duplicates at any timestamp, malformed rows, missing values, and future observations fail explicitly rather than silently selecting older data.
 
 `stale` means the observation is **more than 96 hours old** at retrieval. This is an application heuristic that tolerates weekends and some holiday gaps, not a BoZ publication SLA or holiday calendar. Stale quotes still return HTTP 200 with `stale: true`.
 Requests use a 10-second HTTPX timeout and a ZM Terminal User-Agent, without retries. Timeouts return 504; upstream HTTP failures or invalid data return a safe 502 response.
 
-Each successful quote is persisted (exact `NUMERIC` values, `observed_at`, `retrieved_at`, `source`, `source_url`) to `fx_rates`, idempotently on `(pair, observed_at, source)`. Raw BoZ responses are never stored. If persistence fails the live quote is still returned and a generic warning (exception type only) is logged. Nothing is cached.
+Each successful quote is persisted (exact `NUMERIC` values, `observed_at`, `retrieved_at`, `source`, `source_url`) to `fx_rates`, idempotently on `(pair, observed_at, source)` using the same conflict-aware logic as the backfill: a new row is inserted, identical values (numeric comparison, `19.8 == 19.8000`) are a silent no-op, and different values for the same key are **never overwritten**. Raw BoZ responses are never stored. If persistence fails or conflicts, the live quote is still returned and only a generic warning is logged (`USDZMW persistence conflict; live quote returned unsaved`, or the exception type). Nothing is cached.
 
 `GET /api/v1/fx/USDZMW/history` returns stored observations ascending by `observed_at` as `{symbol, range, count, observations[{observed_at, buy, mid, sell, source}]}` with decimal strings. Invalid ranges return 422; a database failure returns a safe 503. **History only contains observations this app has retrieved and stored**; it is not backfilled from BoZ, so it starts empty/sparse on a new database.
 
@@ -115,6 +115,23 @@ Each successful quote is persisted (exact `NUMERIC` values, `observed_at`, `retr
 **Existing databases:** `db/init` scripts only run on a fresh volume. Apply the provenance columns with
 `docker compose exec -T postgres psql -U zm_terminal -d zm_terminal < db/init/002_fx_rates_provenance.sql`.
 After adding the `lightweight-charts` dependency, recreate the web `node_modules` volume (`docker compose down && docker volume rm zm-terminal_web_node_modules`).
+
+### Historical backfill (manual job)
+
+```bash
+docker compose exec api python -m app.jobs.backfill_usdzmw --from 2026-01-22 [--to YYYY-MM-DD] [--dry-run]
+# or, locally: cd apps/api && python -m app.jobs.backfill_usdzmw --from ...
+```
+
+Source: the same official BoZ JSON view as the live adapter (`boz_zmw_usd_daily_exchange_rates`), filtered with the `time[min]` / `time[max]` parameters that the BoZ website's own series chart uses. Verified behaviour (2026-11-12): same row shape and explicit UTC `<time datetime>` values, **about three observations per business day** (07:30, 10:30, 13:30 UTC = 09:30/12:30/15:30 Africa/Lusaka), newest first, a hard cap of **500 rows per request with no paging**, and **no rows before 2026-01-22**. Because the granularity matches the live model, no schema or API change was needed.
+
+The job splits the range into sequential windows of at most 31 days (2 s apart, 10 s timeout, no retries, at most 400 days per run), fails if any window reaches the 500-row cap, validates every row with the live adapter's rules, and only then writes **one transaction**. Inserts are idempotent (`ON CONFLICT DO NOTHING`); an existing row with *different* values aborts the whole batch and is never overwritten. Valid rows outside the official slots are **not selected**: they are reported on stderr (`not_selected` count) and neither stored nor altered. They are not called invalid; invalid rows (malformed, conflicting, future) still fail the run. No raw payload is stored; nothing is interpolated.
+
+The BoZ "Download historical rates" XLSX (history from 2011) was inspected but **deliberately not used**: it is an analyst workbook with multiple sheets and pivot tables, Excel floating-point values, a `#VALUE!` column, pre-rebasing kwacha values (~4,949), mixed interbank/retail series and timestamps without a timezone, so a safe exact-decimal UTC import cannot be derived from it without inference.
+
+### Source-selection policy
+
+`OFFICIAL_SLOT_UTC_HOURS = {7, 10, 13}` in `app/services/boz.py`, applied identically by the live adapter and the backfill. Evidence (BoZ Angular client, inspected 2026-11-12): `STANDARD_UTC_HOURS = new Set([7,10,13])` is used by `mapLatestUsdRates`, which picks the site's *latest* USD rates by `getUTCHours()` only (09:30/12:30/15:30 Africa/Lusaka), falling back to all rows if none match. The site's *series* function (`getBankOfZambiaDollarExchangeRatesSeries`) applies **no** hour filter, so the rule is evidenced for BoZ's headline rates, not for its series; applying it to history is this project's choice, made so an off-slot row cannot appear live yet be absent from history (or vice versa). Hour is compared alone (as on the site), not minutes. Unlike the site there is **no fallback** to other hours. Hour is not treated as proof a row is mathematically wrong; no statistical outlier thresholds are used. Off-slot rows seen in 2026 (e.g. a 2.7486 mid among ~18.6 values on 2026-07-27 08:00Z) are therefore excluded by policy, not diagnosed.
 
 ### Frontend
 
