@@ -1,10 +1,12 @@
 """PostgreSQL persistence for normalized Government Bond auction rows (no raw payloads)."""
 
+from datetime import date, timedelta
+
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from app.db import get_engine
-from app.schemas.bonds import GovernmentBondAuction
+from app.schemas.bonds import GovernmentBondAuction, GovernmentBondHistoryPoint
 
 _INSERT = text(
     """
@@ -47,3 +49,26 @@ def save_bond_auctions(rows: list[GovernmentBondAuction], *, engine: Engine | No
         if conflicts:
             raise BondConflictError(f"{len(conflicts)} stored row(s) conflict with BoZ values, e.g. {conflicts[:5]}")
     return inserted, identical
+
+
+RANGE_DAYS: dict[str, int | None] = {"3M": 90, "6M": 182, "1Y": 365, "ALL": None}
+_HISTORY = text(
+    """
+    SELECT tenor_years, auction_date, tender_number, isin, coupon_rate, yield_rate, source
+    FROM government_bond_auctions
+    WHERE tenor_years = :tenor_years AND (CAST(:since AS DATE) IS NULL OR auction_date >= :since)
+    ORDER BY auction_date ASC, tender_number ASC
+    """
+)
+
+
+def fetch_bond_history(
+    tenor_years: int, range_: str, *, today: date, engine: Engine | None = None
+) -> list[GovernmentBondHistoryPoint]:
+    """Stored accepted observations only, ascending by auction date. Never deduplicated by ISIN."""
+    days = RANGE_DAYS[range_]
+    since = None if days is None else today - timedelta(days=days)
+    with (engine or get_engine()).connect() as connection:
+        rows = connection.execute(_HISTORY, {"tenor_years": tenor_years, "since": since}).mappings().all()
+    return [GovernmentBondHistoryPoint(tenor=f"{r['tenor_years']}Y", **{k: r[k] for k in (
+        "auction_date", "tender_number", "isin", "coupon_rate", "yield_rate", "source")}) for r in rows]

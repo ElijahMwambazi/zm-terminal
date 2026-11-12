@@ -206,3 +206,4 @@ th { text-align: left; color: #8c8c8c; font-weight: normal; padding: 6px 4px; }
 .table-scroll { overflow-x: auto; }
 .table-scroll td, .table-scroll th { white-space: nowrap; padding-right: 12px; }
 .market-card { overflow-wrap: anywhere; }
+.history-section { margin-top: 14px; border-top: 1px solid #292929; }

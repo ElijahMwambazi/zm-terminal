@@ -119,3 +119,35 @@ export type GovernmentBondsLatest = {
 };
 
 export const getGovernmentBonds = () => getJson<GovernmentBondsLatest>("/api/v1/government-bonds/latest");
+
+export const TBILL_RANGES = ["1M", "3M", "6M", "1Y", "ALL"] as const;
+export type TbillRange = (typeof TBILL_RANGES)[number];
+export const BOND_RANGES = ["3M", "6M", "1Y", "ALL"] as const;
+export type BondRange = (typeof BOND_RANGES)[number];
+
+/** A stored auction observation; auctions that did not happen are simply absent. */
+export type AuctionPoint = {
+  tenor: string;
+  auction_date: string; // YYYY-MM-DD
+  tender_number: string;
+  isin: string;
+  yield_rate: string;
+  discount_rate?: string;
+  coupon_rate?: string;
+};
+
+async function getHistory(path: string): Promise<AuctionPoint[]> {
+  try {
+    return (await getJson<{ observations: AuctionPoint[] }>(path)).observations;
+  } catch (error) {
+    if (error instanceof ApiError && error.message.includes("(503)")) {
+      throw new ApiError("api", "Stored history is unavailable (database)");
+    }
+    throw error;
+  }
+}
+
+export const getTbillHistory = (tenor: Tenor, range: TbillRange) =>
+  getHistory(`/api/v1/treasury-bills/history?tenor=${tenor}&range=${range}`);
+export const getBondHistory = (tenor: BondTenor, range: BondRange) =>
+  getHistory(`/api/v1/government-bonds/history?tenor=${tenor}&range=${range}`);

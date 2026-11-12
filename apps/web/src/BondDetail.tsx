@@ -1,5 +1,6 @@
 import { forwardRef } from "react";
-import { BOND_TENORS, type BondTenor, type GovernmentBond } from "./api";
+import { BOND_RANGES, BOND_TENORS, getBondHistory, type BondTenor, type GovernmentBond } from "./api";
+import AuctionHistory from "./AuctionHistory";
 import { formatDate, formatLusaka } from "./format";
 import type { BondState } from "./useGovernmentBonds";
 
@@ -96,6 +97,8 @@ const BondDetail = forwardRef<HTMLElement, { state: BondState; focus: BondTenor 
               </ul>
             </>
           )}
+          <AuctionHistory title="GOVERNMENT BOND" tenors={BOND_TENORS} ranges={BOND_RANGES} initialRange="1Y" focus={focus}
+            fallbackTenor="10Y" load={getBondHistory} reloadKey={state} />
         </div>
       </article>
     );
