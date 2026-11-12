@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(**/node_modules/**)",
+      "Read(**/dist/**)",
+      "Read(**/.vite/**)",
+      "Read(**/__pycache__/**)",
+      "Read(**/*.log)"
+    ]
+  }
+}
