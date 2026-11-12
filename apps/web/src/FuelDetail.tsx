@@ -4,6 +4,7 @@ import {
   type FuelHistoryPoint, type FuelPrice, type FuelProduct, type FuelRange,
 } from "./api";
 import AuctionChart from "./AuctionChart";
+import FuelBuildUpView from "./FuelBuildUpView";
 import { formatLusaka, formatMonth } from "./format";
 import type { FuelState } from "./useFuel";
 
@@ -27,6 +28,7 @@ const FuelDetail = forwardRef<HTMLElement, { state: FuelState; focus: FuelProduc
   function FuelDetail({ state, focus, onRefresh }, ref) {
     const [product, setProduct] = useState<FuelProduct>(focus ?? "PETROL");
     const [range, setRange] = useState<FuelRange>("1Y");
+    const [view, setView] = useState<"history" | "pump" | "wholesale">("history");
     const [history, setHistory] = useState<History>({ status: "loading" });
     useEffect(() => { if (focus) setProduct(focus); }, [focus]);
     useEffect(() => {
@@ -94,14 +96,26 @@ const FuelDetail = forwardRef<HTMLElement, { state: FuelState; focus: FuelProduc
               )}
             </>
           )}
-          <section className="history-section" aria-label="Fuel history">
-            <div className="panel-heading"><span>{FUEL_LABELS[product]} · RETAIL PRICE BY MONTH</span></div>
-            <div className="range-row" role="group" aria-label="History product">
+          <section className="history-section" aria-label="Fuel product detail">
+            <div className="panel-heading"><span>{FUEL_LABELS[product]} · DETAIL</span></div>
+            <div className="range-row" role="group" aria-label="Fuel product">
               {FUEL_PRODUCTS.map((item) => (
                 <button key={item} type="button" className={item === product ? "range range--active" : "range"}
                   aria-pressed={item === product} onClick={() => setProduct(item)}>{FUEL_LABELS[item]}</button>
               ))}
             </div>
+            <div className="range-row" role="group" aria-label="Fuel view">
+              {([["history", "RETAIL HISTORY"], ["pump", "PUMP BUILD-UP"], ["wholesale", "WHOLESALE BUILD-UP"]] as const).map(([key, label]) => (
+                <button key={key} type="button" className={key === view ? "range range--active" : "range"}
+                  aria-pressed={key === view} onClick={() => setView(key)}>{label}</button>
+              ))}
+            </div>
+            {view !== "history" && (
+              <FuelBuildUpView product={product} type={view} retail={byProduct.get(product)} reloadKey={state} />
+            )}
+          </section>
+          <section className="history-section" aria-label="Fuel history" hidden={view !== "history"}>
+            <div className="panel-heading"><span>{FUEL_LABELS[product]} · RETAIL PRICE BY MONTH</span></div>
             <div className="range-row" role="group" aria-label="History range">
               {FUEL_RANGES.map((item) => (
                 <button key={item} type="button" className={item === range ? "range range--active" : "range"}

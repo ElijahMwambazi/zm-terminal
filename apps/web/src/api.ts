@@ -189,3 +189,35 @@ export async function getFuelHistory(product: FuelProduct, range: FuelRange): Pr
     throw error;
   }
 }
+
+export type BuildUpType = "pump" | "wholesale";
+export type BuildUpComponent = {
+  code: string;
+  label: string;
+  /** null = ERB printed "-" (not published); never zero. */
+  amount: string | null;
+  currency: string | null;
+  unit: string | null;
+  note: string | null;
+};
+export type FuelBuildUp = {
+  product: FuelProduct;
+  effective_date: string;
+  publication_month: string;
+  build_up_type: BuildUpType;
+  components: BuildUpComponent[];
+  source_url: string;
+  retrieved_at: string;
+};
+
+export async function getFuelBuildUp(product: FuelProduct, type: BuildUpType): Promise<FuelBuildUp | null> {
+  try {
+    return await getJson<FuelBuildUp>(`/api/v1/fuel/build-up?product=${product}&type=${type}`);
+  } catch (error) {
+    if (error instanceof ApiError && error.message.includes("(404)")) return null;
+    if (error instanceof ApiError && error.message.includes("(503)")) {
+      throw new ApiError("api", "Stored fuel prices are unavailable (database)");
+    }
+    throw error;
+  }
+}

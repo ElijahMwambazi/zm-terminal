@@ -1,13 +1,15 @@
 import asyncio
 import logging
+from typing import Annotated
 from datetime import date, datetime, timezone
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import text
 
 from app.db import database_is_ready, get_engine
 from app.schemas.fx import FxHistory, FxQuote
+from app.schemas.fuel_buildup import BuildUpType, FuelBuildUp
 from app.schemas.fuel import FUEL_PRODUCTS, FuelHistory, FuelLatest, FuelPrice, FuelProduct, FuelRange, PriceType
 from app.schemas.bonds import (
     BOND_TENORS, BondTenor, GovernmentBondAuction, GovernmentBondsLatest, RejectedBondObservation,
@@ -20,6 +22,7 @@ from app.services.boz import get_boz_fx_quote
 from app.services.bond_store import BondConflictError, fetch_bond_history, save_bond_auctions
 from app.services.boz_bonds import get_boz_bonds, latest_per_tenor as latest_bonds, unverified_tenors
 from app.services.boz_treasury import LUSAKA, get_boz_tbills, latest_per_tenor
+from app.services.fuel_buildup_store import fetch_build_up
 from app.services.fuel_store import fetch_fuel_history, fetch_latest_fuel
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, save_fx_quote
 from app.services.tbill_store import TbillConflictError, fetch_tbill_history, save_tbill_auctions
@@ -182,6 +185,22 @@ async def fuel_history(product: FuelProduct = "PETROL", range: FuelRange = "1Y",
         logger.warning("Fuel history read failed (%s)", type_name(exc))
         raise HTTPException(status_code=503, detail="Stored fuel prices unavailable") from exc
     return FuelHistory(product=product, price_type=type, range=range, count=len(points), observations=points)
+
+
+@router.get("/fuel/build-up", response_model=FuelBuildUp)
+async def fuel_build_up(
+    product: FuelProduct, type: BuildUpType = "pump",
+    month: Annotated[str | None, Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")] = None,
+) -> FuelBuildUp:
+    """Stored ERB build-up rows exactly as published; ERB is never called here."""
+    try:
+        found = await asyncio.to_thread(fetch_build_up, product, type, month)
+    except Exception as exc:
+        logger.warning("Fuel build-up read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored fuel prices unavailable") from exc
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"No stored {type} build-up for {product}")
+    return found
 
 
 @router.get("/fuel/{product}", response_model=FuelPrice)
