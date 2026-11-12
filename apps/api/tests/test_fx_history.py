@@ -33,7 +33,8 @@ def test_boz_policy_values():
     assert p.raw_response_storage == "disabled" and p.normalized_storage_allowed
     assert p.attribution_required and p.redistribution == "review_required"
     assert p.commercial_use == "review_required"
-    assert set(p.required_timestamps) == {"source", "observed_at", "retrieved_at"}
+    assert set(p.required_provenance) == {"source", "source_url"}
+    assert set(p.required_timestamps) == {"observed_at", "retrieved_at"}
 
 
 def test_providers_endpoint():

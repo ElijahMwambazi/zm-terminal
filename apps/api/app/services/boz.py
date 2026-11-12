@@ -77,13 +77,13 @@ def is_stale(observed_at: datetime, now: datetime) -> bool:
     return age > FX_STALE_AFTER
 
 
-def parse_boz_quote(payload: object, *, retrieved_at: datetime) -> FxQuote:
-    """Validate all rows; never hide malformed data by falling back to an older row.
+def parse_boz_observations(payload: object, *, allow_empty: bool = False) -> dict[datetime, tuple[Decimal, Decimal, Decimal]]:
+    """Validate every row; return {observed_at: (buy, mid, sell)}.
 
-    Select across all hours, unlike the website's undocumented hour filter.
-    Identical duplicates collapse; conflicting rates at any timestamp fail.
+    Identical duplicates collapse; conflicting rates at any timestamp fail. An empty
+    array is only accepted when `allow_empty` (a bounded historical window may be empty).
     """
-    if not isinstance(payload, list) or not payload:
+    if not isinstance(payload, list) or (not payload and not allow_empty):
         raise ValueError("Expected a non-empty observation array")
     observations: dict[datetime, tuple[Decimal, Decimal, Decimal]] = {}
     for row in payload:
@@ -98,7 +98,15 @@ def parse_boz_quote(payload: object, *, retrieved_at: datetime) -> FxQuote:
             # Stable even if equal decimals have different trailing-zero precision.
             rates = min(previous, rates, key=lambda values: tuple(map(str, values)))
         observations[observed_at] = rates
+    return observations
 
+
+def parse_boz_quote(payload: object, *, retrieved_at: datetime) -> FxQuote:
+    """Validate all rows; never hide malformed data by falling back to an older row.
+
+    Select across all hours, unlike the website's undocumented hour filter.
+    """
+    observations = parse_boz_observations(payload)
     observed_at = max(observations)
     buy, mid, sell = observations[observed_at]
     return FxQuote(
@@ -108,18 +116,24 @@ def parse_boz_quote(payload: object, *, retrieved_at: datetime) -> FxQuote:
     )
 
 
-async def get_boz_fx_quote(*, client: httpx.AsyncClient | None = None) -> FxQuote:
-    """The optional client is a transport seam for offline tests."""
-    if client is None:
-        async with httpx.AsyncClient() as owned_client:
-            return await get_boz_fx_quote(client=owned_client)
+async def fetch_boz_payload(client: httpx.AsyncClient, params: dict[str, str] | None = None) -> object:
+    """One GET against the configured BoZ view; returns the decoded JSON."""
     response = await client.get(
         get_settings().boz_usd_rates_url,
+        params=params,
         timeout=BOZ_TIMEOUT_SECONDS,
         headers={"User-Agent": BOZ_USER_AGENT, "Accept": "application/json"},
     )
     response.raise_for_status()
     if response.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
         raise ValueError("Expected a JSON response")
-    payload = response.json()
+    return response.json()
+
+
+async def get_boz_fx_quote(*, client: httpx.AsyncClient | None = None) -> FxQuote:
+    """The optional client is a transport seam for offline tests."""
+    if client is None:
+        async with httpx.AsyncClient() as owned_client:
+            return await get_boz_fx_quote(client=owned_client)
+    payload = await fetch_boz_payload(client)
     return parse_boz_quote(payload, retrieved_at=datetime.now(timezone.utc))
