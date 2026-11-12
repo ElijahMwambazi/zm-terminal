@@ -27,3 +27,23 @@ class FxQuote(BaseModel):
     @classmethod
     def normalize_utc(cls, value: datetime) -> datetime:
         return value.astimezone(timezone.utc)
+
+
+class FxHistoryPoint(BaseModel):
+    observed_at: AwareDatetime
+    buy: Decimal
+    mid: Decimal
+    sell: Decimal
+    source: Literal["boz"] = "boz"
+
+    @field_validator("observed_at")
+    @classmethod
+    def normalize_utc(cls, value: datetime) -> datetime:
+        return value.astimezone(timezone.utc)
+
+
+class FxHistory(BaseModel):
+    symbol: Literal["USDZMW"] = "USDZMW"
+    range: Literal["1D", "1W", "1M", "3M", "1Y", "ALL"]
+    count: int
+    observations: list[FxHistoryPoint]

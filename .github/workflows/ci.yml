@@ -8,6 +8,19 @@ on:
 jobs:
   api:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: zm_terminal_test
+          POSTGRES_USER: zm_terminal
+          POSTGRES_PASSWORD: zm_terminal_dev
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U zm_terminal -d zm_terminal_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://zm_terminal:zm_terminal_dev@localhost:5432/zm_terminal_test
     defaults:
       run:
         working-directory: apps/api
