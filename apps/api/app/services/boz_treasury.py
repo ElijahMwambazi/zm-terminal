@@ -13,7 +13,7 @@ from decimal import Decimal
 import httpx
 
 from app.config import get_settings
-from app.schemas.tbills import TENORS, TreasuryBillAuction
+from app.schemas.tbills import TENORS, RejectedTender, TreasuryBillAuction
 
 TBILL_TIMEOUT_SECONDS = 10.0
 TBILL_USER_AGENT = "ZM-Terminal/0.1 (Bank of Zambia Treasury Bill adapter)"
@@ -98,10 +98,26 @@ def _parse_node(node: object, paragraphs: dict[str, dict], retrieved_at: datetim
     return [rows[d] for d in sorted(rows)]
 
 
+def _describe_rejected(node: object) -> RejectedTender:
+    attrs = node.get("attributes") if isinstance(node, dict) else None
+    attrs = attrs if isinstance(attrs, dict) else {}
+    title, day = attrs.get("title"), attrs.get("field_tbills_auction_date")
+    parsed = None
+    if isinstance(day, str) and _DATE.fullmatch(day):
+        try:
+            parsed = date.fromisoformat(day)
+        except ValueError:
+            pass
+    return RejectedTender(
+        tender_number=title if isinstance(title, str) and _TITLE.fullmatch(title) else None,
+        auction_date=parsed,
+    )
+
+
 def parse_tbill_auctions(
     payload: object, *, retrieved_at: datetime
-) -> tuple[list[TreasuryBillAuction], list[str]]:
-    """Return (valid auction rows newest tender first, titles of tenders rejected).
+) -> tuple[list[TreasuryBillAuction], list[RejectedTender]]:
+    """Return (valid auction rows newest tender first, tenders rejected).
 
     Structural problems with the document itself raise. A tender that fails validation is
     rejected whole (never partially used, never repaired) and reported by number.
@@ -113,27 +129,40 @@ def parse_tbill_auctions(
         raise ValueError("Missing included tenor records")
     paragraphs = {i["id"]: i for i in included if isinstance(i, dict) and isinstance(i.get("id"), str)}
     rows: list[TreasuryBillAuction] = []
-    skipped: list[str] = []
+    skipped: list[RejectedTender] = []
     for node in payload["data"]:
         try:
             rows.extend(_parse_node(node, paragraphs, retrieved_at))
         except ValueError:  # includes pydantic ValidationError
-            title = node.get("attributes", {}).get("title") if isinstance(node, dict) else None
-            skipped.append(title if isinstance(title, str) and _TITLE.fullmatch(title) else "unknown")
+            skipped.append(_describe_rejected(node))
     if not rows:
         raise ValueError("No valid Treasury Bill tender in the source")
     return rows, skipped
 
 
-def latest_per_tenor(rows: list[TreasuryBillAuction], now: datetime) -> list[TreasuryBillAuction]:
-    """Newest auction date per tenor, with a stale flag against Africa/Lusaka today."""
+def latest_per_tenor(
+    rows: list[TreasuryBillAuction], now: datetime, rejected: list[RejectedTender] | None = None
+) -> list[TreasuryBillAuction]:
+    """Newest auction date per tenor, with a stale flag against Africa/Lusaka today.
+
+    Fallback rule: a row lists in `newer_rejected_tenders` every rejected tender with a
+    readable date strictly after the row's auction date (it might have carried that tenor).
+    Rejected tenders that are older, same-dated or undated never mark a row as a fallback;
+    a valid newer tender that merely omits a tenor is not an error either.
+    """
     today = now.astimezone(LUSAKA).date()
     best: dict[str, TreasuryBillAuction] = {}
     for row in rows:
         if row.tenor not in best or row.auction_date > best[row.tenor].auction_date:
             best[row.tenor] = row
     return [
-        best[t].model_copy(update={"stale": today - best[t].auction_date > TBILL_STALE_AFTER})
+        best[t].model_copy(update={
+            "stale": today - best[t].auction_date > TBILL_STALE_AFTER,
+            "newer_rejected_tenders": [
+                r.tender_number or "unknown" for r in (rejected or [])
+                if r.auction_date is not None and r.auction_date > best[t].auction_date
+            ],
+        })
         for t in TENORS if t in best
     ]
 
@@ -159,8 +188,8 @@ async def fetch_tbill_payload(client: httpx.AsyncClient) -> object:
 
 async def get_boz_tbills(
     *, client: httpx.AsyncClient | None = None
-) -> tuple[list[TreasuryBillAuction], list[str]]:
-    """All valid rows from the most recent tenders (newest first) plus rejected tender numbers."""
+) -> tuple[list[TreasuryBillAuction], list[RejectedTender]]:
+    """All valid rows from the most recent tenders (newest first) plus the rejected tenders."""
     if client is None:
         async with httpx.AsyncClient() as owned:
             return await get_boz_tbills(client=owned)

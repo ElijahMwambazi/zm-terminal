@@ -80,6 +80,8 @@ export type TreasuryBill = {
   source_url: string;
   retrieved_at: string;
   stale: boolean;
+  /** Rejected tenders dated after this auction; non-empty means this value is a fallback. */
+  newer_rejected_tenders: string[];
 };
 
 export type TreasuryBillsLatest = {

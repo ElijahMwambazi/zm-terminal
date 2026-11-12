@@ -51,7 +51,8 @@ def test_all_four_tenors_exact_decimals_and_identity():
 
 def test_duplicate_tenor_tender_is_skipped_whole_and_reported():
     rows, skipped = parsed()
-    assert skipped == ["99/2026"]
+    assert [r.tender_number for r in skipped] == ["99/2026"]
+    assert skipped[0].auction_date == date(2026, 11, 26)
     assert "99/2026" not in {r.tender_number for r in rows}
 
 
@@ -84,7 +85,7 @@ def test_malformed_record_rejects_only_that_tender(mutate):
     p = payload()
     mutate(p)
     rows, skipped = parse_tbill_auctions(p, retrieved_at=NOW)
-    assert len(skipped) == 2 and skipped[0] == "99/2026"  # bad tender reported (by number, else "unknown")
+    assert len(skipped) == 2 and skipped[0].tender_number == "99/2026"  # bad tender reported (number None if unreadable)
     assert "97/2026" not in {r.tender_number for r in rows}
 
 
@@ -99,6 +100,54 @@ def test_no_valid_tender_raises():
     p["data"] = p["data"][:1]
     with pytest.raises(ValueError):
         parse_tbill_auctions(p, retrieved_at=NOW)
+
+
+# ---- fallback semantics (rejected tender vs actual fallback) ----
+def latest(mutate=None):
+    p = payload()
+    if mutate:
+        mutate(p)
+    rows, rejected = parse_tbill_auctions(p, retrieved_at=NOW)
+    return {r.tenor: r for r in latest_per_tenor(rows, NOW, rejected)}, rejected
+
+
+def test_newer_malformed_tender_marks_every_older_row_as_fallback():
+    got, rejected = latest()  # 99/2026 (newest) rejected
+    assert [r.tender_number for r in rejected] == ["99/2026"]
+    assert all(r.newer_rejected_tenders == ["99/2026"] for r in got.values())
+    assert got["364D"].tender_number == "98/2026"  # the value shown is the older valid one
+
+
+def test_older_malformed_tender_with_newer_valid_is_not_a_fallback():
+    got, rejected = latest(lambda p: p["data"][0]["attributes"].update(field_tbills_auction_date="2026-10-01"))
+    assert [r.tender_number for r in rejected] == ["99/2026"]  # still reported
+    assert all(r.newer_rejected_tenders == [] for r in got.values())
+
+
+def test_unrelated_rejected_tender_makes_no_false_fallback_claim():
+    def mutate(p):  # rejected tender is older than 98/2026 (so older than the 91D/364D rows)
+        p["data"][0]["attributes"].update(field_tbills_auction_date="2026-11-05")
+    got, _ = latest(mutate)
+    # 91D/364D come from 98/2026 (11-12), newer than the rejected 11-05 tender: not fallbacks.
+    assert got["91D"].newer_rejected_tenders == [] and got["364D"].newer_rejected_tenders == []
+    # 182D/273D come from 97/2026 (10-29): the rejected 11-05 tender could have carried them.
+    assert got["182D"].newer_rejected_tenders == ["99/2026"]
+
+
+def test_undated_or_same_dated_rejected_tender_never_claims_fallback():
+    got, _ = latest(lambda p: p["data"][0]["attributes"].update(field_tbills_auction_date="not-a-date"))
+    assert all(r.newer_rejected_tenders == [] for r in got.values())
+    got, _ = latest(lambda p: p["data"][0]["attributes"].update(field_tbills_auction_date="2026-11-12"))
+    assert got["91D"].newer_rejected_tenders == []  # same date as 98/2026: not "newer"
+
+
+def test_valid_partial_newer_tender_without_rejections_is_not_a_fallback():
+    def mutate(p):
+        p["data"].pop(0)  # no rejected tender at all
+    got, rejected = latest(mutate)
+    assert rejected == []
+    assert got["364D"].tender_number == "98/2026" and got["182D"].tender_number == "97/2026"
+    assert all(r.newer_rejected_tenders == [] for r in got.values())
 
 
 # ---- policy ----
@@ -126,6 +175,7 @@ def test_latest_endpoint(client):
     body = client.get("/api/v1/treasury-bills/latest").json()
     assert [t["tenor"] for t in body["tenors"]] == ["91D", "182D", "273D", "364D"]
     assert body["missing_tenors"] == [] and body["skipped_tenders"] == ["99/2026"]
+    assert all(t["newer_rejected_tenders"] == ["99/2026"] for t in body["tenors"])
     t364 = body["tenors"][3]
     assert t364["yield_rate"] == "9.3000" and t364["tender_number"] == "98/2026"
     assert t364["source"] == "boz" and "discount_rate" in t364
@@ -177,7 +227,7 @@ def test_adapter_uses_mock_transport_and_rejects_non_json():
             return await boz_treasury.get_boz_tbills(client=c)
     import asyncio
     rows, skipped = asyncio.run(run(handler))
-    assert "page%5Blimit%5D=5" in seen["url"] and len(rows) == 6 and skipped == ["99/2026"]
+    assert "page%5Blimit%5D=5" in seen["url"] and len(rows) == 6 and [r.tender_number for r in skipped] == ["99/2026"]
     with pytest.raises(ValueError):
         asyncio.run(run(lambda r: httpx.Response(200, text="<html>", headers={"content-type": "text/html"})))
 

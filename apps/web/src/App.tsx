@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getSystemStatus, type SystemStatus, type Tenor } from "./api";
 import { COMMAND_NAMES, parseCommand } from "./commands";
 import { formatDate, formatLusaka } from "./format";
-import TbillDetail, { tbillProblem } from "./TbillDetail";
+import TbillDetail, { fallbackWarning, rejectedNote, tbillProblem } from "./TbillDetail";
 import { useTreasuryBills } from "./useTreasuryBills";
 import UsdZmwDetail, { QuoteBlock, quoteProblem } from "./UsdZmwDetail";
 import { useUsdZmwQuote } from "./useUsdZmwQuote";
@@ -133,12 +133,11 @@ export default function App() {
                 {tbill364.stale && <> · <span className="text-stale">STALE</span></>}
               </>
             )}
-            {tbillSkipped.length > 0 && (
-              <>
-                <br /><span className="text-stale">
-                  LATEST TENDER REJECTED ({tbillSkipped.join(", ")}) · USING EARLIER VALID AUCTION
-                </span>
-              </>
+            {tbill364 && fallbackWarning(tbill364) && (
+              <><br /><span className="text-stale">{fallbackWarning(tbill364)}</span></>
+            )}
+            {tbill364 && !fallbackWarning(tbill364) && rejectedNote(tbillSkipped) && (
+              <><br /><span className="muted">{rejectedNote(tbillSkipped)}</span></>
             )}
           </small>
         </button>

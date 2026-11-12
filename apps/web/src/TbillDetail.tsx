@@ -10,6 +10,16 @@ export function tbillProblem(state: TbillState): string | null {
     : "ZM Terminal API is unavailable. No rates are shown.";
 }
 
+/** Strong claim: only when a rejected tender newer than this row's auction exists. */
+export const fallbackWarning = (row: TreasuryBill): string | null =>
+  row.newer_rejected_tenders.length > 0
+    ? `LATEST TENDER REJECTED (${row.newer_rejected_tenders.join(", ")}) · USING EARLIER VALID AUCTION`
+    : null;
+
+/** Neutral reporting of rejected source tenders that do not affect the value shown. */
+export const rejectedNote = (skipped: string[]): string | null =>
+  skipped.length > 0 ? `Rejected source tender: ${skipped.join(", ")}` : null;
+
 const pct = (value: string) => `${value}%`;
 
 const TbillDetail = forwardRef<HTMLElement, { state: TbillState; focus: Tenor | null; onRefresh: () => void }>(
@@ -50,6 +60,7 @@ const TbillDetail = forwardRef<HTMLElement, { state: TbillState; focus: Tenor | 
                         <td>
                           {formatDate(row.auction_date)} · {row.tender_number}
                           {row.stale && <span className="text-stale"> · STALE</span>}
+                          {row.newer_rejected_tenders.length > 0 && <span className="text-stale"> · FALLBACK</span>}
                         </td>
                         <td>{row.isin}</td>
                       </tr>
@@ -65,11 +76,14 @@ const TbillDetail = forwardRef<HTMLElement, { state: TbillState; focus: Tenor | 
               {focus && !focused && (
                 <p className="notice notice--error">No recent {focus} auction is published. No rate is shown.</p>
               )}
-              {data.skipped_tenders.length > 0 && (
-                <p className="notice">
-                  BoZ tender{data.skipped_tenders.length > 1 ? "s" : ""} {data.skipped_tenders.join(", ")} failed
-                  validation and {data.skipped_tenders.length > 1 ? "were" : "was"} ignored; rows above come from earlier tenders.
+              {data.tenors.some((row) => fallbackWarning(row)) && (
+                <p className="notice text-stale">
+                  {[...new Set(data.tenors.filter((row) => fallbackWarning(row)).flatMap((row) => row.newer_rejected_tenders))]
+                    .map((n) => `Tender ${n}`).join(", ")} failed validation and was ignored. Rows marked FALLBACK come from an earlier valid auction.
                 </p>
+              )}
+              {!data.tenors.some((row) => fallbackWarning(row)) && rejectedNote(data.skipped_tenders) && (
+                <p className="notice">{rejectedNote(data.skipped_tenders)} (ignored; it does not affect the rows shown).</p>
               )}
               <ul className="provenance">
                 <li><span>Source</span><a href={data.tenors[0]?.source_url} target="_blank" rel="noreferrer">Bank of Zambia</a> (official auction results)</li>

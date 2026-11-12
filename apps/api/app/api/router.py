@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from app.db import database_is_ready, get_engine
 from app.schemas.fx import FxHistory, FxQuote
-from app.schemas.tbills import TENORS, Tenor, TreasuryBillAuction, TreasuryBillsLatest
+from app.schemas.tbills import TENORS, RejectedTender, Tenor, TreasuryBillAuction, TreasuryBillsLatest
 from app.services.boz import get_boz_fx_quote
 from app.services.boz_treasury import get_boz_tbills, latest_per_tenor
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, save_fx_quote
@@ -48,7 +48,7 @@ async def usd_zmw_history(range: HistoryRange = "1M") -> FxHistory:
     return FxHistory(range=range, count=len(points), observations=points)
 
 
-async def _load_tbills() -> tuple[list[TreasuryBillAuction], list[str]]:
+async def _load_tbills() -> tuple[list[TreasuryBillAuction], list[RejectedTender]]:
     try:
         rows, skipped = await get_boz_tbills()
     except httpx.TimeoutException as exc:
@@ -66,18 +66,18 @@ async def _load_tbills() -> tuple[list[TreasuryBillAuction], list[str]]:
 
 @router.get("/treasury-bills/latest", response_model=TreasuryBillsLatest)
 async def treasury_bills_latest() -> TreasuryBillsLatest:
-    rows, skipped = await _load_tbills()
-    latest = latest_per_tenor(rows, datetime.now(timezone.utc))
+    rows, rejected = await _load_tbills()
+    latest = latest_per_tenor(rows, datetime.now(timezone.utc), rejected)
     have = {r.tenor for r in latest}
     return TreasuryBillsLatest(
-        tenors=latest, missing_tenors=[t for t in TENORS if t not in have], skipped_tenders=skipped
+        tenors=latest, missing_tenors=[t for t in TENORS if t not in have], skipped_tenders=[r.tender_number or "unknown" for r in rejected]
     )
 
 
 @router.get("/treasury-bills/{tenor}", response_model=TreasuryBillAuction)
 async def treasury_bill(tenor: Tenor) -> TreasuryBillAuction:
-    rows, _ = await _load_tbills()
-    match = [r for r in latest_per_tenor(rows, datetime.now(timezone.utc)) if r.tenor == tenor]
+    rows, rejected = await _load_tbills()
+    match = [r for r in latest_per_tenor(rows, datetime.now(timezone.utc), rejected) if r.tenor == tenor]
     if not match:
         raise HTTPException(status_code=404, detail=f"No recent BoZ auction for {tenor}")
     return match[0]
