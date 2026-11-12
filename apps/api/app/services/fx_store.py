@@ -44,17 +44,6 @@ def range_start(range_: str, now: datetime) -> datetime | None:
     return None if window is None else now.astimezone(timezone.utc) - window
 
 
-def save_fx_quote(quote: FxQuote, *, engine: Engine | None = None) -> bool:
-    """Insert once per (pair, observed_at, source); returns True if a row was added."""
-    with (engine or get_engine()).begin() as connection:
-        result = connection.execute(_INSERT, {
-            "observed_at": quote.observed_at, "buy": quote.buy, "mid": quote.mid,
-            "sell": quote.sell, "source": quote.source,
-            "retrieved_at": quote.retrieved_at, "source_url": quote.source_url,
-        })
-    return result.rowcount == 1
-
-
 def fetch_fx_history(
     range_: str, *, now: datetime | None = None, engine: Engine | None = None
 ) -> list[FxHistoryPoint]:
@@ -106,3 +95,16 @@ def save_fx_observations(
             stamps = ", ".join(c.isoformat() for c in conflicts[:5])
             raise FxConflictError(f"{len(conflicts)} stored observation(s) conflict with BoZ values, e.g. {stamps}")
     return inserted, identical
+
+
+def save_fx_quote(quote: FxQuote, *, engine: Engine | None = None) -> bool:
+    """Conflict-aware single save; returns True if a row was added, False if already present.
+
+    Shares save_fx_observations' rules: never overwrites, identical values (numeric
+    comparison) are a silent no-op, different values raise FxConflictError.
+    """
+    inserted, _ = save_fx_observations(
+        {quote.observed_at: (quote.buy, quote.mid, quote.sell)},
+        retrieved_at=quote.retrieved_at, source=quote.source, source_url=quote.source_url, engine=engine,
+    )
+    return inserted == 1

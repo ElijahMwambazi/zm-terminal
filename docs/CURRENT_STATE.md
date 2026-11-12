@@ -16,6 +16,6 @@ Known limitations:
 
 - History is limited to what the JSON view serves (from 2026-01-22) plus quotes retrieved by this app. The filter's timezone is undocumented (harmless for whole-day windows given the 07:30-13:30 UTC slots).
 - A few published rows are inconsistent and stored as published, e.g. buy > sell on 2026-03-19 07:30Z and 10:30Z; the live adapter and backfill share one source-selection policy (UTC hours 07/10/13, mirroring the BoZ site's latest-rate selection; its series chart is unfiltered, and unlike the site there is no fallback), so rows in those slots are trusted as published.
-- The live-quote persistence path ignores (does not flag) a conflicting existing row; only the backfill detects conflicts.
+- A conflicting stored row is detected (safe warning) but not resolved: the live quote is returned unsaved and the stored row is kept; there is no reconciliation tool.
 - Redistribution and commercial-use terms of BoZ data are unreviewed.
 - Migrations are plain SQL in `db/init` (applied automatically only on a fresh database volume).
