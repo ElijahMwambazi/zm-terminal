@@ -170,3 +170,33 @@ td:last-child { text-align: right; }
   .market-grid { grid-template-columns: repeat(2, 1fr); }
   .status-strip .status-note { width: 100%; margin-left: 0; padding-bottom: 10px; }
 }
+
+/* USD/ZMW live quote, detail view, chart */
+button.market-card { font: inherit; text-align: left; cursor: pointer; color: inherit; background: transparent; border-left: 1px solid #292929; }
+.market-card--live:hover { background: rgba(255, 176, 0, 0.06); }
+.text-fresh { color: #8fd14f; }
+.text-stale { color: #ffb000; }
+.notice { margin: 0; padding: 14px 16px; color: #8c8c8c; font-size: 0.78rem; line-height: 1.5; }
+.notice--error { color: #ff7a6b; }
+.notice code { color: #ffb000; }
+.detail-panel { outline: none; }
+.detail-body { padding: 8px 0 14px; }
+.quote-grid { display: flex; gap: 28px; flex-wrap: wrap; margin: 0; padding: 12px 16px; }
+.quote-grid dt { color: #ffb000; font-size: 0.7rem; }
+.quote-grid dd { margin: 4px 0 0; font-size: 1.2rem; }
+.quote-grid .quote-mid { font-size: 2rem; }
+.badge { display: inline-block; margin: 0 16px; padding: 4px 8px; font-size: 0.7rem; border: 1px solid; }
+.badge--fresh { color: #8fd14f; }
+.badge--stale { color: #ffb000; }
+.provenance { list-style: none; margin: 0; padding: 12px 16px; font-size: 0.75rem; color: #8c8c8c; display: grid; gap: 6px; }
+.provenance span { display: inline-block; min-width: 76px; color: #606060; }
+.provenance a { color: #ffb000; }
+.link-button { background: none; border: 1px solid #292929; color: #ffb000; padding: 3px 8px; cursor: pointer; font-size: 0.7rem; }
+.link-button:disabled { color: #606060; cursor: default; }
+.range-row { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 16px; }
+.range { background: none; border: 1px solid #252525; color: #8c8c8c; padding: 5px 10px; cursor: pointer; font-size: 0.72rem; }
+.range--active { color: #0a0a0a; background: #ffb000; border-color: #ffb000; }
+.price-chart { height: 320px; margin: 0 8px; }
+@media (max-width: 640px) { .price-chart { height: 240px; } }
+.workspace-grid > * { min-width: 0; }
+.price-chart { overflow: hidden; }
