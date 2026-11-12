@@ -11,9 +11,17 @@ precision. Binary Excel floating-point representation is not treated as addition
 precision: cells formatted with two decimals become Decimal(f"{v:.2f}") and must equal the
 stored value within float noise (1e-9); a cell whose stored value carries real precision hidden
 by the format is rejected and counted, never rounded. "General" cells display up to 15
-significant digits, so they are normalized through that representation. Any other number
-format, header, sheet or value type fails the parse. "-", blank and missing cells are
-"not published" (None), never zero. Nothing is interpolated or forward-filled.
+significant digits, so they are normalized through that representation (retail/public pump
+prices use the official displayed 2dp precision; some wholesale cells carry higher precision and
+are kept only where the workbook presents it rather than hiding it behind a 2dp format). Any
+other number format, header or sheet fails the parse; an unusable single value (junk text,
+non-finite, zero/negative) is a counted cell rejection. "-", blank and missing cells are "not
+published" (None), never zero. Nothing is interpolated or forward-filled.
+
+Duplicates: all non-missing observations of a month/product are tracked before any is rejected.
+Identical usable duplicates collapse; if they differ, or any is rejected, the whole product-month
+is ambiguous (no effective day to order them) and omitted. A "-" next to a valid value is not a
+competing observation.
 """
 
 import io
@@ -61,6 +69,10 @@ class FuelArchiveError(ValueError):
     """The workbook is not in the verified layout, or contains an unusable value."""
 
 
+class _InvalidValue(FuelArchiveError):
+    """A single cell's value is unusable (junk text, non-finite, zero/negative)."""
+
+
 class _HiddenPrecision(Exception):
     pass
 
@@ -80,6 +92,7 @@ class ParseStats:
     valid_rows: int = 0
     missing_cells: int = 0
     hidden_precision_cells: int = 0
+    invalid_value_cells: int = 0
     ambiguous_duplicate_cells: int = 0
     identical_duplicate_cells: int = 0
 
@@ -93,10 +106,10 @@ def normalize_price(value: object, number_format: str) -> Decimal | None:
     if value is None or (isinstance(value, str) and value.strip() in ("", "-")):
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise FuelArchiveError("Unexpected price cell type")
+        raise _InvalidValue("Unexpected price cell type")
     number = float(value)
     if not math.isfinite(number) or number <= 0:
-        raise FuelArchiveError("Price must be finite and positive")
+        raise _InvalidValue("Price must be finite and positive")
     if number_format in TWO_DP_FORMATS:
         price = Decimal(f"{number:.2f}")
         if abs(float(price) - number) > 1e-9:
@@ -105,7 +118,7 @@ def normalize_price(value: object, number_format: str) -> Decimal | None:
     if number_format == "General":
         price = Decimal(f"{number:.15g}")
         if price.as_tuple().exponent < -8:
-            raise FuelArchiveError("Unexpected decimal precision")
+            raise _InvalidValue("Unexpected decimal precision")
         return price if price.as_tuple().exponent <= -2 else price.quantize(Decimal("0.01"))
     raise FuelArchiveError("Unexpected number format")
 
@@ -141,7 +154,11 @@ def _parse_sheet(ws, kind: str, stats: ParseStats) -> list[FuelRow]:
     header = [c.value.strip() if isinstance(c.value, str) else c.value for c in ws[1]]
     if header[:width] != expected or any(h is not None for h in header[width:]):
         raise FuelArchiveError("Unexpected worksheet header")
-    seen: dict[tuple[date, str], list[Decimal]] = {}
+    # Every non-missing source observation per business key (month, product) is recorded BEFORE any
+    # is discarded, so a rejected duplicate can never leave its valid sibling looking unambiguous.
+    # None marks an observation rejected for a value problem; a missing cell ("-", blank) is no
+    # observation at all and never competes with a published value.
+    seen: dict[tuple[date, str], list[Decimal | None]] = {}
     units: dict[str, str] = {}
     for row in ws.iter_rows(min_row=2):
         year, month = row[0].value, row[1].value
@@ -168,21 +185,28 @@ def _parse_sheet(ws, kind: str, stats: ParseStats) -> list[FuelRow]:
                 price = normalize_price(cell.value, cell.number_format)
             except _HiddenPrecision:
                 stats.hidden_precision_cells += 1
-                continue
-            if price is None:
-                stats.missing_cells += 1
-                continue
+                price = None
+            except _InvalidValue:
+                stats.invalid_value_cells += 1
+                price = None
+            else:
+                if price is None:
+                    stats.missing_cells += 1
+                    continue
             seen.setdefault((effective, product), []).append(price)
     out: list[FuelRow] = []
-    for (effective, product), prices in sorted(seen.items()):
-        if len(prices) > 1:
-            if len(set(prices)) > 1:
-                # Two different prices for one month (a mid-month change) and no day to tell
-                # them apart: ambiguous, so neither is used. Never resolved by row order.
+    for (effective, product), observations in sorted(seen.items()):
+        if len(observations) > 1:
+            usable = {p for p in observations if p is not None}
+            if None in observations or len(usable) > 1:
+                # Competing observations (different prices, or one unusable) and no effective day to
+                # order them: ambiguous, so none is used. Never resolved by row order.
                 stats.ambiguous_duplicate_cells += 1
                 continue
             stats.identical_duplicate_cells += 1
-        out.append(FuelRow(effective, product, kind, prices[0], units[product]))
+        if observations[0] is None:
+            continue  # a single rejected observation: no price, already counted
+        out.append(FuelRow(effective, product, kind, observations[0], units[product]))
     return out
 
 

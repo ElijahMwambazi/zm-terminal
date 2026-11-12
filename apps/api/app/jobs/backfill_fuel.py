@@ -43,7 +43,7 @@ async def run_backfill(
     selected = [r for r in rows if start <= r.effective_date <= end]
     result = {
         "records_examined": stats.records_examined, "valid_rows": len(rows), "in_range": len(selected),
-        "missing_cells": stats.missing_cells, "hidden_precision_cells": stats.hidden_precision_cells,
+        "missing_cells": stats.missing_cells, "hidden_precision_cells": stats.hidden_precision_cells, "invalid_value_cells": stats.invalid_value_cells,
         "ambiguous_duplicate_cells": stats.ambiguous_duplicate_cells, "inserted": 0, "already_present": 0,
         "conflicts": 0,
     }

@@ -148,11 +148,18 @@ def test_unexpected_schema_fails(kw):
 
 @pytest.mark.parametrize("row", [
     (2026, "Octob", 1.0, 1.0, 1.0, 1.0, 1.0), ("2026", "October", 1.0, 1.0, 1.0, 1.0, 1.0), (1999, "October", 1.0, 1.0, 1.0, 1.0, 1.0),
-    (None, None, 1.0, 1.0, 1.0, 1.0, 1.0), (2026, "October", -3.0, 1.0, 1.0, 1.0, 1.0), (2026, "October", "n/a", 1.0, 1.0, 1.0, 1.0),
+    (None, None, 1.0, 1.0, 1.0, 1.0, 1.0),
 ])
 def test_bad_rows_fail_loudly(row):
     with pytest.raises(FuelArchiveError):
         parse(retail=[row])
+
+
+@pytest.mark.parametrize("bad", [-3.0, 0, "n/a"])  # inf/nan cannot be stored in an XLSX; normalize_price covers them
+def test_single_unusable_value_is_a_counted_rejection_not_a_price(bad):
+    rows, stats = parse(retail=[(2026, "October", bad, 1.0, 1.0, 1.0, 1.0)])
+    assert date(2026, 10, 1) not in by(rows, "retail", "PETROL") and stats.invalid_value_cells == 1
+    assert stats.ambiguous_duplicate_cells == 0 and len(by(rows, "retail", "DIESEL")) == 1
 
 
 def test_corrupt_workbook_fails_without_leaking():
@@ -389,3 +396,95 @@ def test_pg_job_atomic_write_and_idempotent_rerun(engine):
     assert first["inserted"] == 13 and first["already_present"] == 0 and first["missing_cells"] == 2
     again = run_job(date(2012, 1, 1), date(2026, 10, 31), xlsx, engine=engine)
     assert again["inserted"] == 0 and again["already_present"] == 13
+
+
+# ---------------- duplicate ambiguity is decided before observations are discarded ----------------
+JAN = date(2022, 1, 1)
+
+
+def wholesale_book(petrol_cells, *, other=21.0):
+    """Wholesale sheet with one row per entry in `petrol_cells`: (value, number_format) for PETROL."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Wholesale Prices"
+    ws.append(WHOLE_HEAD)
+    for value, fmt in petrol_cells:
+        ws.append([2022, "January", value, other, 18.5, 23.7, None, None, None, other])
+        ws.cell(row=ws.max_row, column=3).number_format = fmt
+        for col in (4, 5, 6, 10):
+            ws.cell(row=ws.max_row, column=col).number_format = "0.00"
+    rt = wb.create_sheet("Retail Prices ")
+    rt.append(RETAIL_HEAD)
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def wholesale_petrol(cells):
+    rows, stats = parse_workbook(wholesale_book(cells))
+    return by(rows, "wholesale", "PETROL"), rows, stats
+
+
+def test_valid_duplicate_plus_hidden_precision_duplicate_omits_the_month():
+    got, rows, stats = wholesale_petrol([(20.0, "0.00"), (22.00448, "0.00")])
+    assert JAN not in got  # the surviving 20.00 must not look unambiguous
+    assert stats.hidden_precision_cells == 1 and stats.ambiguous_duplicate_cells == 1
+    assert by(rows, "wholesale", "DIESEL")[JAN].price_zmw == Decimal("21.00")  # other products unaffected
+
+
+@pytest.mark.parametrize("bad", ["n/a", -3.0, 0])
+def test_valid_duplicate_plus_invalid_numeric_duplicate_omits_the_month(bad):
+    got, _, stats = wholesale_petrol([(20.0, "0.00"), (bad, "0.00")])
+    assert JAN not in got and stats.invalid_value_cells == 1 and stats.ambiguous_duplicate_cells == 1
+
+
+def test_identical_valid_duplicates_collapse_to_one_observation():
+    got, _, stats = wholesale_petrol([(20.0, "0.00"), (20.0, "0.00"), (19.999999999999996, "0.00")])
+    assert got[JAN].price_zmw == Decimal("20.00") and stats.identical_duplicate_cells == 5 and stats.ambiguous_duplicate_cells == 0  # PETROL plus the 4 other products, whose rows repeat
+
+
+def test_different_valid_duplicates_are_all_omitted():
+    got, _, stats = wholesale_petrol([(20.0, "0.00"), (22.0, "0.00")])
+    assert JAN not in got and stats.ambiguous_duplicate_cells == 1 and stats.hidden_precision_cells == 0
+
+
+def test_valid_value_next_to_missing_dash_is_preserved():
+    for cells in ([(20.0, "0.00"), ("-", "General")], [("-", "General"), (20.0, "0.00")], [(20.0, "0.00"), (None, "General")]):
+        got, _, stats = wholesale_petrol(cells)
+        assert got[JAN].price_zmw == Decimal("20.00") and stats.missing_cells >= 1 and stats.ambiguous_duplicate_cells == 0
+
+
+def test_single_hidden_precision_cell_is_counted_but_not_ambiguous():
+    got, _, stats = wholesale_petrol([(20.00448, "0.00")])
+    assert JAN not in got and stats.hidden_precision_cells == 1 and stats.ambiguous_duplicate_cells == 0
+
+
+@pytest.mark.parametrize("cells", [
+    [(20.0, "0.00"), (22.00448, "0.00")], [(20.0, "0.00"), (22.0, "0.00")], [(20.0, "0.00"), (20.0, "0.00")],
+    [(20.0, "0.00"), ("-", "General")], [(20.0, "0.00"), ("n/a", "0.00"), (20.0, "0.00")],
+])
+def test_source_row_order_never_changes_the_result(cells):
+    forward = wholesale_petrol(cells)
+    backward = wholesale_petrol(list(reversed(cells)))
+    assert forward[0] == backward[0] and forward[2] == backward[2]
+
+
+def test_wholesale_general_precision_is_preserved_only_where_presented():
+    got, _, stats = wholesale_petrol([(20.00448, "General")])
+    assert got[JAN].price_zmw == Decimal("20.00448") and stats.hidden_precision_cells == 0
+    got, _, stats = wholesale_petrol([(20.977439999999998, "General"), (20.97744, "General")])
+    assert got[JAN].price_zmw == Decimal("20.97744") and stats.identical_duplicate_cells == 5  # identical after 15-digit display
+    got, _, stats = wholesale_petrol([(20.00448, "General"), (20.00448, "0.00")])  # same number, hidden behind 2dp in one row
+    assert JAN not in got and stats.hidden_precision_cells == 1 and stats.ambiguous_duplicate_cells == 1
+    got, _, _ = wholesale_petrol([(33.059999999999995, "0.00")])
+    assert got[JAN].price_zmw == Decimal("33.06")  # float noise inside the tolerance still normalizes to 2dp
+
+
+def test_retail_duplicate_rules_match():
+    rows, stats = parse(retail=[(2014, "April", 9.91, 9.2, 6.83, "-", "-"), (2014, "April", 10.63, 10.01, 6.83, "-", "-")])
+    apr = date(2014, 4, 1)
+    assert apr not in by(rows, "retail", "PETROL") and apr not in by(rows, "retail", "DIESEL")  # mid-month changes: omitted
+    assert by(rows, "retail", "KEROSENE")[apr].price_zmw == Decimal("6.83")  # unchanged price in both rows: kept once
+    assert stats.ambiguous_duplicate_cells == 2 and stats.identical_duplicate_cells == 1
+    rows, stats = parse(retail=[(2014, "May", 9.91, 9.2, 6.83, "-", "-"), (2014, "May", 9.9111, 9.2, 6.83, "-", "-")])
+    assert date(2014, 5, 1) not in by(rows, "retail", "PETROL") and stats.hidden_precision_cells == 1 and stats.ambiguous_duplicate_cells == 1
