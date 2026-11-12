@@ -1,10 +1,12 @@
 """PostgreSQL persistence for normalized T-bill auction rows (no raw payloads)."""
 
+from datetime import date, timedelta
+
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from app.db import get_engine
-from app.schemas.tbills import TreasuryBillAuction
+from app.schemas.tbills import TreasuryBillAuction, TreasuryBillHistoryPoint
 
 _INSERT = text(
     """
@@ -44,3 +46,26 @@ def save_tbill_auctions(rows: list[TreasuryBillAuction], *, engine: Engine | Non
         if conflicts:
             raise TbillConflictError(f"{len(conflicts)} stored row(s) conflict with BoZ values, e.g. {conflicts[:5]}")
     return inserted, identical
+
+
+RANGE_DAYS: dict[str, int | None] = {"1M": 30, "3M": 90, "6M": 182, "1Y": 365, "ALL": None}
+_HISTORY = text(
+    """
+    SELECT tenor_days, auction_date, tender_number, isin, discount_rate, yield_rate, source
+    FROM treasury_bill_auctions
+    WHERE tenor_days = :tenor_days AND (CAST(:since AS DATE) IS NULL OR auction_date >= :since)
+    ORDER BY auction_date ASC, tender_number ASC
+    """
+)
+
+
+def fetch_tbill_history(
+    tenor_days: int, range_: str, *, today: date, engine: Engine | None = None
+) -> list[TreasuryBillHistoryPoint]:
+    """Stored observations only, ascending by auction date. Never interpolated or filled."""
+    days = RANGE_DAYS[range_]
+    since = None if days is None else today - timedelta(days=days)
+    with (engine or get_engine()).connect() as connection:
+        rows = connection.execute(_HISTORY, {"tenor_days": tenor_days, "since": since}).mappings().all()
+    return [TreasuryBillHistoryPoint(tenor=f"{r['tenor_days']}D", **{k: r[k] for k in (
+        "auction_date", "tender_number", "isin", "discount_rate", "yield_rate", "source")}) for r in rows]

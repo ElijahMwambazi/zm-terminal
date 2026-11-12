@@ -1,5 +1,6 @@
 import { forwardRef } from "react";
-import { TENORS, type Tenor, type TreasuryBill } from "./api";
+import { TBILL_RANGES, TENORS, getTbillHistory, type Tenor, type TreasuryBill } from "./api";
+import AuctionHistory from "./AuctionHistory";
 import { formatDate, formatLusaka } from "./format";
 import type { TbillState } from "./useTreasuryBills";
 
@@ -92,6 +93,8 @@ const TbillDetail = forwardRef<HTMLElement, { state: TbillState; focus: Tenor | 
               </ul>
             </>
           )}
+          <AuctionHistory title="T-BILL" tenors={TENORS} ranges={TBILL_RANGES} initialRange="1Y" focus={focus}
+            fallbackTenor="364D" load={getTbillHistory} reloadKey={state} />
         </div>
       </article>
     );

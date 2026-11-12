@@ -64,3 +64,25 @@ class GovernmentBondsLatest(BaseModel):
     # Tender numbers with any rejected record ("unknown" if unreadable). Informational:
     # whether a row is a fallback is its own `newer_rejected_tenders`.
     skipped_tenders: list[str]
+
+
+BondHistoryRange = Literal["3M", "6M", "1Y", "ALL"]
+
+
+class GovernmentBondHistoryPoint(BaseModel):
+    """One stored accepted auction observation. A reopened ISIN yields one point per auction."""
+
+    tenor: BondTenor
+    auction_date: date
+    tender_number: str
+    isin: str
+    coupon_rate: Decimal
+    yield_rate: Decimal
+    source: Literal["boz"] = "boz"
+
+
+class GovernmentBondHistory(BaseModel):
+    tenor: BondTenor
+    range: BondHistoryRange
+    count: int
+    observations: list[GovernmentBondHistoryPoint]
