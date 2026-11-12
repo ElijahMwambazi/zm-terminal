@@ -116,6 +116,19 @@ Each successful quote is persisted (exact `NUMERIC` values, `observed_at`, `retr
 `docker compose exec -T postgres psql -U zm_terminal -d zm_terminal < db/init/002_fx_rates_provenance.sql`.
 After adding the `lightweight-charts` dependency, recreate the web `node_modules` volume (`docker compose down && docker volume rm zm-terminal_web_node_modules`).
 
+### Historical backfill (manual job)
+
+```bash
+docker compose exec api python -m app.jobs.backfill_usdzmw --from 2026-01-22 [--to YYYY-MM-DD] [--dry-run]
+# or, locally: cd apps/api && python -m app.jobs.backfill_usdzmw --from ...
+```
+
+Source: the same official BoZ JSON view as the live adapter (`boz_zmw_usd_daily_exchange_rates`), filtered with the `time[min]` / `time[max]` parameters that the BoZ website's own series chart uses. Verified behaviour (2026-11-12): same row shape and explicit UTC `<time datetime>` values, **about three observations per business day** (07:30, 10:30, 13:30 UTC = 09:30/12:30/15:30 Africa/Lusaka), newest first, a hard cap of **500 rows per request with no paging**, and **no rows before 2026-01-22**. Because the granularity matches the live model, no schema or API change was needed.
+
+The job splits the range into sequential windows of at most 31 days (2 s apart, 10 s timeout, no retries, at most 400 days per run), fails if any window reaches the 500-row cap, validates every row with the live adapter's rules, and only then writes **one transaction**. Inserts are idempotent (`ON CONFLICT DO NOTHING`); an existing row with *different* values aborts the whole batch and is never overwritten. Rows outside the standard 07:30/10:30/13:30 UTC slots (the BoZ site's own "latest" logic uses the same hours) are **skipped and reported on stderr**, not stored or altered; they include obvious outliers such as a 2.7486 mid among ~18.6 values. No raw payload is stored; nothing is interpolated.
+
+The BoZ "Download historical rates" XLSX (history from 2011) was inspected but **deliberately not used**: it is an analyst workbook with multiple sheets and pivot tables, Excel floating-point values, a `#VALUE!` column, pre-rebasing kwacha values (~4,949), mixed interbank/retail series and timestamps without a timezone, so a safe exact-decimal UTC import cannot be derived from it without inference.
+
 ### Frontend
 
 The overview shows a live USD/ZMW card (mid, buy/sell, BoZ, Africa/Lusaka observation time, fresh/stale) with loading, API-unavailable and BoZ-unavailable states; no placeholder prices are substituted. `FX USDZMW` or `USDZMW` (Ctrl+K focuses the input; case-insensitive, whitespace tolerant) opens the detail view: quote, provenance, observed/retrieved times, stale state, a refresh button (one BoZ request per click), range selector and a [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts) line of `mid`. It shows empty, loading, error and "insufficient history" (one point) states. Unknown commands show a local error.
