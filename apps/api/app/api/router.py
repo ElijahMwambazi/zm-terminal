@@ -8,8 +8,11 @@ from sqlalchemy import text
 
 from app.db import database_is_ready, get_engine
 from app.schemas.fx import FxHistory, FxQuote
+from app.schemas.tbills import TENORS, RejectedTender, Tenor, TreasuryBillAuction, TreasuryBillsLatest
 from app.services.boz import get_boz_fx_quote
+from app.services.boz_treasury import get_boz_tbills, latest_per_tenor
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, save_fx_quote
+from app.services.tbill_store import TbillConflictError, save_tbill_auctions
 from app.services.provider_policy import PROVIDER_POLICIES, ProviderPolicy
 from app.services.openbb import get_openbb_coverage, openbb_is_ready
 
@@ -43,6 +46,41 @@ async def usd_zmw_history(range: HistoryRange = "1M") -> FxHistory:
         logger.warning("USDZMW history read failed (%s)", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Stored history unavailable") from exc
     return FxHistory(range=range, count=len(points), observations=points)
+
+
+async def _load_tbills() -> tuple[list[TreasuryBillAuction], list[RejectedTender]]:
+    try:
+        rows, skipped = await get_boz_tbills()
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="Bank of Zambia request timed out") from exc
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Bank of Zambia data unavailable or invalid") from exc
+    try:
+        await asyncio.to_thread(save_tbill_auctions, rows)
+    except TbillConflictError:
+        logger.warning("T-bill persistence conflict; live data returned unsaved")
+    except Exception as exc:
+        logger.warning("T-bill persistence failed (%s); live data returned unsaved", type(exc).__name__)
+    return rows, skipped
+
+
+@router.get("/treasury-bills/latest", response_model=TreasuryBillsLatest)
+async def treasury_bills_latest() -> TreasuryBillsLatest:
+    rows, rejected = await _load_tbills()
+    latest = latest_per_tenor(rows, datetime.now(timezone.utc), rejected)
+    have = {r.tenor for r in latest}
+    return TreasuryBillsLatest(
+        tenors=latest, missing_tenors=[t for t in TENORS if t not in have], skipped_tenders=[r.tender_number or "unknown" for r in rejected]
+    )
+
+
+@router.get("/treasury-bills/{tenor}", response_model=TreasuryBillAuction)
+async def treasury_bill(tenor: Tenor) -> TreasuryBillAuction:
+    rows, rejected = await _load_tbills()
+    match = [r for r in latest_per_tenor(rows, datetime.now(timezone.utc), rejected) if r.tenor == tenor]
+    if not match:
+        raise HTTPException(status_code=404, detail=f"No recent BoZ auction for {tenor}")
+    return match[0]
 
 
 @router.get("/providers", response_model=list[ProviderPolicy])

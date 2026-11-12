@@ -64,3 +64,30 @@ export async function getUsdZmwHistory(range: HistoryRange): Promise<FxHistoryPo
   );
   return body.observations;
 }
+
+export const TENORS = ["91D", "182D", "273D", "364D"] as const;
+export type Tenor = (typeof TENORS)[number];
+
+/** Rates are percent per annum, decimal strings exactly as BoZ publishes them. */
+export type TreasuryBill = {
+  tenor: Tenor;
+  auction_date: string; // YYYY-MM-DD
+  tender_number: string;
+  isin: string;
+  discount_rate: string;
+  yield_rate: string;
+  source: "boz";
+  source_url: string;
+  retrieved_at: string;
+  stale: boolean;
+  /** Rejected tenders dated after this auction; non-empty means this value is a fallback. */
+  newer_rejected_tenders: string[];
+};
+
+export type TreasuryBillsLatest = {
+  tenors: TreasuryBill[];
+  missing_tenors: Tenor[];
+  skipped_tenders: string[];
+};
+
+export const getTreasuryBills = () => getJson<TreasuryBillsLatest>("/api/v1/treasury-bills/latest");
