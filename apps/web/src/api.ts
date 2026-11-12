@@ -11,3 +11,56 @@ export async function getSystemStatus(): Promise<SystemStatus> {
   if (!response.ok) throw new Error("Unable to load system status");
   return response.json();
 }
+
+export type FxQuote = {
+  symbol: "USDZMW";
+  buy: string;
+  mid: string;
+  sell: string;
+  observed_at: string;
+  retrieved_at: string;
+  source: "boz";
+  source_url: string;
+  stale: boolean;
+};
+
+export type FxHistoryPoint = {
+  observed_at: string;
+  buy: string;
+  mid: string;
+  sell: string;
+  source: "boz";
+};
+
+export const HISTORY_RANGES = ["1D", "1W", "1M", "3M", "1Y", "ALL"] as const;
+export type HistoryRange = (typeof HISTORY_RANGES)[number];
+
+/** "upstream": Bank of Zambia failed (502/504). "api": our API is unreachable or failed. */
+export class ApiError extends Error {
+  constructor(readonly kind: "upstream" | "api", message: string) {
+    super(message);
+  }
+}
+
+async function getJson<T>(path: string): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`);
+  } catch {
+    throw new ApiError("api", "ZM Terminal API is unreachable");
+  }
+  if (response.status === 502 || response.status === 504) {
+    throw new ApiError("upstream", "Bank of Zambia data is currently unavailable");
+  }
+  if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
+  return response.json();
+}
+
+export const getUsdZmwQuote = () => getJson<FxQuote>("/api/v1/fx/USDZMW");
+
+export async function getUsdZmwHistory(range: HistoryRange): Promise<FxHistoryPoint[]> {
+  const body = await getJson<{ observations: FxHistoryPoint[] }>(
+    `/api/v1/fx/USDZMW/history?range=${range}`,
+  );
+  return body.observations;
+}

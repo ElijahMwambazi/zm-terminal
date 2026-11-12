@@ -2,7 +2,7 @@
 
 A personal, Zambia-first market intelligence terminal built with React, FastAPI, PostgreSQL, OpenBB and Docker.
 
-> Status: **v0.1 scaffold with a Bank of Zambia USD/ZMW backend adapter**. The application deliberately does not display fabricated market prices. Frontend FX integration and LuSE, crypto and commodity adapters remain pending.
+> Status: **v0.1 with one live vertical slice: Bank of Zambia USD/ZMW** (adapter, PostgreSQL persistence, history API, live quote, detail view, chart, and `FX USDZMW` / `USDZMW` commands). The application deliberately does not display fabricated market prices. LuSE, crypto, commodity and other adapters remain pending.
 
 ## Goals
 
@@ -89,6 +89,8 @@ GET /api/v1/instruments
 GET /api/v1/markets/overview
 GET /api/v1/openbb/coverage
 GET /api/v1/fx/USDZMW
+GET /api/v1/fx/USDZMW/history?range=1D|1W|1M|3M|1Y|ALL   (default 1M)
+GET /api/v1/providers
 ```
 
 ### Bank of Zambia USD/ZMW backend
@@ -104,7 +106,21 @@ Identical duplicates are accepted. Conflicting duplicates at any timestamp, malf
 `stale` means the observation is **more than 96 hours old** at retrieval. This is an application heuristic that tolerates weekends and some holiday gaps, not a BoZ publication SLA or holiday calendar. Stale quotes still return HTTP 200 with `stale: true`.
 Requests use a 10-second HTTPX timeout and a ZM Terminal User-Agent, without retries. Timeouts return 504; upstream HTTP failures or invalid data return a safe 502 response.
 
-No quotes are persisted or cached. Frontend FX commands, quote display, and historical charts remain pending.
+Each successful quote is persisted (exact `NUMERIC` values, `observed_at`, `retrieved_at`, `source`, `source_url`) to `fx_rates`, idempotently on `(pair, observed_at, source)`. Raw BoZ responses are never stored. If persistence fails the live quote is still returned and a generic warning (exception type only) is logged. Nothing is cached.
+
+`GET /api/v1/fx/USDZMW/history` returns stored observations ascending by `observed_at` as `{symbol, range, count, observations[{observed_at, buy, mid, sell, source}]}` with decimal strings. Invalid ranges return 422; a database failure returns a safe 503. **History only contains observations this app has retrieved and stored**; it is not backfilled from BoZ, so it starts empty/sparse on a new database.
+
+`GET /api/v1/providers` exposes the provider policy (`app/services/provider_policy.py`): public market data, no personal data, no authentication, normalized storage allowed, raw storage disabled, attribution required, redistribution and commercial use *review required*, and request guidance (one request per user action, no background polling).
+
+**Existing databases:** `db/init` scripts only run on a fresh volume. Apply the provenance columns with
+`docker compose exec -T postgres psql -U zm_terminal -d zm_terminal < db/init/002_fx_rates_provenance.sql`.
+After adding the `lightweight-charts` dependency, recreate the web `node_modules` volume (`docker compose down && docker volume rm zm-terminal_web_node_modules`).
+
+### Frontend
+
+The overview shows a live USD/ZMW card (mid, buy/sell, BoZ, Africa/Lusaka observation time, fresh/stale) with loading, API-unavailable and BoZ-unavailable states; no placeholder prices are substituted. `FX USDZMW` or `USDZMW` (Ctrl+K focuses the input; case-insensitive, whitespace tolerant) opens the detail view: quote, provenance, observed/retrieved times, stale state, a refresh button (one BoZ request per click), range selector and a [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts) line of `mid`. It shows empty, loading, error and "insufficient history" (one point) states. Unknown commands show a local error.
+
+Backend tests: `cd apps/api && python -m pytest`. PostgreSQL integration tests run when `TEST_DATABASE_URL` points to a disposable database whose name ends in `_test` (CI provides one); otherwise they are skipped.
 Offline tests use a small sanitized JSON fixture with altered test values, a preserved upstream structure, and mocked HTTP; they require neither BoZ access, PostgreSQL, nor OpenBB. Run `cd apps/api && python -m pytest` (or the existing Docker-based `make api-test`).
 
 ## Planned terminal commands
