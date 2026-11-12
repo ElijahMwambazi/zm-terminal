@@ -128,8 +128,8 @@ def test_fetch_sends_bounded_filters_sequentially(window, monkeypatch):
             return await job.fetch_observations(
                 job.plan_windows(date(2026, 3, 1), date(2026, 4, 15), today=TODAY),
                 client=client, now=NOW, pause=2.0, sleep=record_sleep)
-    obs, skipped = run(go())
-    assert len(obs) == 5 and skipped == []
+    obs, not_selected = run(go())
+    assert len(obs) == 5 and not_selected == []
     assert seen[0] == {"time[min]": "2026-03-01 00:00:00", "time[max]": "2026-03-31 23:59:59"}
     assert seen[1] == {"time[min]": "2026-04-01 00:00:00", "time[max]": "2026-04-15 23:59:59"}
     assert sleeps == [2.0]
@@ -175,18 +175,19 @@ def test_upstream_failures_propagate(response):
         run(go())
 
 
-def test_non_standard_hour_rows_are_skipped_and_reported_not_altered(window, capsys):
+def test_off_slot_rows_are_not_selected_and_reported_not_altered(window, capsys):
     odd = row("2026-03-04T08:00:00Z", buy="2.7448", mid="2.7486", sell="2.7524")
     async def go():
         async with mock_client(lambda r: json_response(window + [odd])) as client:
             return await job.run_backfill(date(2026, 3, 3), date(2026, 3, 4), dry_run=True,
                                           client=client, now=NOW, sleep=no_sleep)
     result = run(go())
-    assert result["fetched"] == 5 and result["skipped"] == 1
-    assert "2026-03-04T08:00:00+00:00" in capsys.readouterr().err
+    assert result["selected"] == 5 and result["not_selected"] == 1
+    err = capsys.readouterr().err
+    assert "2026-03-04T08:00:00+00:00" in err and "not selected" in err and "invalid" not in err.replace("never", "")
 
 
-def test_malformed_row_still_fails_even_if_it_would_be_skipped(window):
+def test_malformed_off_slot_row_is_invalid_not_merely_unselected(window):
     bad = row("2026-03-04T08:00:00Z", mid="oops")
     async def go():
         async with mock_client(lambda r: json_response(window + [bad])) as client:
@@ -204,7 +205,7 @@ def test_dry_run_never_touches_database(window):
         async with mock_client(lambda r: json_response(window)) as client:
             return await job.run_backfill(date(2026, 3, 3), date(2026, 3, 4), dry_run=True,
                                           client=client, engine=Exploding(), now=NOW, sleep=no_sleep)
-    assert run(go()) == {"windows": 1, "fetched": 5, "skipped": 0, "inserted": 0, "already_present": 0}
+    assert run(go()) == {"windows": 1, "selected": 5, "not_selected": 0, "inserted": 0, "already_present": 0}
 
 
 def test_empty_dataset_inserts_nothing_and_skips_database():
@@ -215,7 +216,7 @@ def test_empty_dataset_inserts_nothing_and_skips_database():
         async with mock_client(lambda r: json_response([])) as client:
             return await job.run_backfill(date(2025, 1, 1), date(2025, 1, 7), client=client,
                                           engine=Exploding(), now=NOW, sleep=no_sleep)
-    assert run(go())["fetched"] == 0
+    assert run(go())["selected"] == 0
 
 
 def test_cli_reports_failure_without_details(monkeypatch, capsys):
@@ -266,8 +267,8 @@ def backfill(engine, payload):
 
 
 def test_pg_backfill_idempotent_with_provenance(engine, window):
-    assert backfill(engine, window) == {"windows": 1, "fetched": 5, "skipped": 0, "inserted": 5, "already_present": 0}
-    assert backfill(engine, window) == {"windows": 1, "fetched": 5, "skipped": 0, "inserted": 0, "already_present": 5}
+    assert backfill(engine, window) == {"windows": 1, "selected": 5, "not_selected": 0, "inserted": 5, "already_present": 0}
+    assert backfill(engine, window) == {"windows": 1, "selected": 5, "not_selected": 0, "inserted": 0, "already_present": 5}
     with engine.connect() as c:
         rows = c.execute(text("SELECT * FROM fx_rates ORDER BY observed_at")).mappings().all()
     assert len(rows) == 5
@@ -305,3 +306,42 @@ def test_pg_live_quote_row_and_backfill_coexist_and_history_reads_them(engine, w
     assert backfill(engine, window)["already_present"] == 1   # same timestamp, same values
     history = fx_store.fetch_fx_history("ALL", now=NOW, engine=engine)
     assert [p.observed_at for p in history] == sorted(p.observed_at for p in history) and len(history) == 5
+
+
+# ---- live / historical selection parity (source-selection policy) ----
+def test_policy_hours_and_hour_only_comparison():
+    assert boz.OFFICIAL_SLOT_UTC_HOURS == {7, 10, 13}
+    stamps = [datetime(2026, 3, 4, h, m, tzinfo=timezone.utc) for h, m in [(7, 30), (7, 59), (8, 0), (10, 30), (13, 30), (14, 0)]]
+    selected, not_selected = boz.select_official({t: (Decimal(1),) * 3 for t in stamps})
+    assert sorted(selected) == stamps[:2] + stamps[3:5]   # minutes are not compared, as on the BoZ site
+    assert not_selected == [stamps[2], stamps[5]]
+
+
+def test_off_slot_row_is_never_live_and_never_stored():
+    # An anomalous, newer off-slot row (plausibly mis-published) must not become the live quote
+    # nor enter history: both paths apply the same selection.
+    payload = [row("2026-03-04T10:30:00Z", mid="19.6150"), row("2026-03-04T11:00:00Z", mid="2.7486")]
+    quote = boz.parse_boz_quote(payload, retrieved_at=NOW)
+    assert (quote.observed_at.hour, str(quote.mid)) == (10, "19.6150")
+    selected, not_selected = boz.select_official(boz.parse_boz_observations(payload))
+    assert max(selected) == quote.observed_at and len(not_selected) == 1
+
+
+def test_only_off_slot_rows_fail_closed_live():
+    with pytest.raises(ValueError, match="official publication slot"):
+        boz.parse_boz_quote([row("2026-03-04T11:00:00Z")], retrieved_at=NOW)
+
+
+def test_live_still_validates_unselected_rows_strictly():
+    for bad in (row("2026-03-04T11:00:00Z", mid="oops"), row("2026-03-04T11:00:00+02:00")):
+        with pytest.raises(ValueError):
+            boz.parse_boz_quote([row("2026-03-04T10:30:00Z"), bad], retrieved_at=NOW)
+    conflict = [row("2026-03-04T11:00:00Z"), row("2026-03-04T11:00:00Z", mid="9.9999"), row("2026-03-04T10:30:00Z")]
+    with pytest.raises(ValueError, match="Conflicting"):
+        boz.parse_boz_quote(conflict, retrieved_at=NOW)
+
+
+def test_live_and_backfill_select_same_latest_for_fixture(window):
+    quote = boz.parse_boz_quote(window, retrieved_at=NOW)
+    selected, _ = boz.select_official(boz.parse_boz_observations(window))
+    assert quote.observed_at == max(selected)

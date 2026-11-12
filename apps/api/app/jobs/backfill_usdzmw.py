@@ -5,8 +5,10 @@
 Uses the same endpoint as the live adapter with the `time[min]`/`time[max]` filters the
 BoZ website itself uses. The endpoint returns at most 500 rows per request with no
 paging, so the range is split into <=31-day windows and any window that reaches the
-cap is treated as possibly truncated and fails. Nothing is inferred or interpolated;
-raw responses are never stored or logged.
+cap is treated as possibly truncated and fails. Every row is validated strictly; valid rows
+outside the official slots (boz.OFFICIAL_SLOT_UTC_HOURS, the same policy the live adapter
+uses) are reported as "not selected", never stored and never called invalid. Nothing is
+inferred or interpolated; raw responses are never stored or logged.
 """
 
 import argparse
@@ -25,10 +27,6 @@ WINDOW_DAYS = 31
 MAX_SPAN_DAYS = 400
 ROW_CAP = 500  # observed upstream per-request cap; reaching it means truncation is possible
 REQUEST_PAUSE_SECONDS = 2.0
-# Standard publication slots (09:30/12:30/15:30 Africa/Lusaka); the BoZ site's own "latest"
-# logic filters on the same UTC hours. Other rows (e.g. a 2.7486 row among ~18.6 values on
-# 2026-07-27 08:00Z) are reported and skipped, never silently dropped or altered.
-STANDARD_UTC_HOURS = frozenset({7, 10, 13})
 EARLIEST_VERIFIED_DATE = date(2026, 1, 22)  # no earlier rows were found in the view
 
 Observations = dict[datetime, tuple[Decimal, Decimal, Decimal]]
@@ -57,9 +55,8 @@ async def fetch_observations(
     windows: list[tuple[date, date]], *, client: httpx.AsyncClient,
     now: datetime, pause: float = REQUEST_PAUSE_SECONDS, sleep=asyncio.sleep,
 ) -> tuple[Observations, list[datetime]]:
-    """Returns (observations in standard slots, timestamps of skipped non-standard rows)."""
+    """Returns (selected official-slot observations, timestamps of valid but not-selected rows)."""
     merged: Observations = {}
-    skipped: list[datetime] = []
     for index, (first, last) in enumerate(windows):
         if index:
             await sleep(pause)  # sequential and polite; no retries
@@ -72,28 +69,26 @@ async def fetch_observations(
         for observed_at, rates in boz.parse_boz_observations(payload, allow_empty=True).items():
             if observed_at > now:
                 raise ValueError("Observation is in the future")
-            if observed_at.hour not in STANDARD_UTC_HOURS:
-                skipped.append(observed_at)
-            elif merged.setdefault(observed_at, rates) != rates:
+            if merged.setdefault(observed_at, rates) != rates:
                 raise ValueError("Conflicting observations at the same timestamp")
-    return merged, sorted(set(skipped))
+    return boz.select_official(merged)
 
 
 async def run_backfill(
     start: date, end: date, *, dry_run: bool = False, client: httpx.AsyncClient | None = None,
     engine=None, now: datetime | None = None, pause: float = REQUEST_PAUSE_SECONDS, sleep=asyncio.sleep,
 ) -> dict[str, int]:
-    """Returns counts; `skipped` timestamps are also written to stderr."""
+    """Returns counts; `not_selected` timestamps are also written to stderr."""
     now = now or datetime.now(timezone.utc)
     windows = plan_windows(start, end, today=now.date())
     if client is None:
         async with httpx.AsyncClient() as owned:
-            observations, skipped = await fetch_observations(windows, client=owned, now=now, pause=pause, sleep=sleep)
+            observations, not_selected = await fetch_observations(windows, client=owned, now=now, pause=pause, sleep=sleep)
     else:
-        observations, skipped = await fetch_observations(windows, client=client, now=now, pause=pause, sleep=sleep)
-    for stamp in skipped:
-        print(f"skipped non-standard-hour row at {stamp.isoformat()}", file=sys.stderr)
-    result = {"windows": len(windows), "fetched": len(observations), "skipped": len(skipped),
+        observations, not_selected = await fetch_observations(windows, client=client, now=now, pause=pause, sleep=sleep)
+    for stamp in not_selected:
+        print(f"not selected (valid row outside official slots) at {stamp.isoformat()}", file=sys.stderr)
+    result = {"windows": len(windows), "selected": len(observations), "not_selected": len(not_selected),
               "inserted": 0, "already_present": 0}
     if observations and not dry_run:
         # Persist only after every window validated; one transaction, all or nothing.

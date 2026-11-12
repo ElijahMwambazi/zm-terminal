@@ -15,6 +15,14 @@ BOZ_TIMEOUT_SECONDS = 10.0
 BOZ_USER_AGENT = "ZM-Terminal/0.1 (Bank of Zambia USDZMW adapter)"
 # Application heuristic, not a BoZ SLA or a holiday/publication calendar.
 FX_STALE_AFTER = timedelta(hours=96)
+# Source-selection policy (not a validity rule). The BoZ website's own client selects the
+# "latest" USD rates from rows whose UTC hour is 7, 10 or 13 (09:30/12:30/15:30 Africa/Lusaka;
+# `STANDARD_UTC_HOURS` in its mapLatestUsdRates). Its series chart applies no hour filter, so
+# this policy mirrors BoZ's headline-rate selection rather than its series. Only the hour is
+# compared, exactly as the site does. A row outside these hours is valid but *not selected*;
+# it is never treated as malformed. Unlike the site, there is no fallback to other hours when
+# no slot row exists: selection fails closed instead of publishing an unselected row.
+OFFICIAL_SLOT_UTC_HOURS = frozenset({7, 10, 13})
 _RATE_PATTERN = re.compile(r"[0-9]+(?:\.[0-9]+)?")
 _UTC_TIMESTAMP_PATTERN = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)"
@@ -101,12 +109,23 @@ def parse_boz_observations(payload: object, *, allow_empty: bool = False) -> dic
     return observations
 
 
+def select_official(
+    observations: dict[datetime, tuple[Decimal, Decimal, Decimal]],
+) -> tuple[dict[datetime, tuple[Decimal, Decimal, Decimal]], list[datetime]]:
+    """Split validated observations into (selected, not-selected timestamps) by slot hour."""
+    selected = {t: r for t, r in observations.items() if t.hour in OFFICIAL_SLOT_UTC_HOURS}
+    return selected, sorted(t for t in observations if t not in selected)
+
+
 def parse_boz_quote(payload: object, *, retrieved_at: datetime) -> FxQuote:
     """Validate all rows; never hide malformed data by falling back to an older row.
 
-    Select across all hours, unlike the website's undocumented hour filter.
+    Every row is validated, but only rows in an official slot (see OFFICIAL_SLOT_UTC_HOURS)
+    are candidates for the latest quote.
     """
-    observations = parse_boz_observations(payload)
+    observations, _ = select_official(parse_boz_observations(payload))
+    if not observations:
+        raise ValueError("No observation in an official publication slot")
     observed_at = max(observations)
     buy, mid, sell = observations[observed_at]
     return FxQuote(
