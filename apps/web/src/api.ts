@@ -151,3 +151,41 @@ export const getTbillHistory = (tenor: Tenor, range: TbillRange) =>
   getHistory(`/api/v1/treasury-bills/history?tenor=${tenor}&range=${range}`);
 export const getBondHistory = (tenor: BondTenor, range: BondRange) =>
   getHistory(`/api/v1/government-bonds/history?tenor=${tenor}&range=${range}`);
+
+export const FUEL_PRODUCTS = ["PETROL", "DIESEL", "KEROSENE", "JET_A1", "LSGO"] as const;
+export type FuelProduct = (typeof FUEL_PRODUCTS)[number];
+export const FUEL_LABELS: Record<FuelProduct, string> = {
+  PETROL: "PETROL", DIESEL: "DIESEL", KEROSENE: "KEROSENE", JET_A1: "JET A-1", LSGO: "LSGO",
+};
+export const FUEL_RANGES = ["1Y", "3Y", "5Y", "ALL"] as const;
+export type FuelRange = (typeof FUEL_RANGES)[number];
+
+/** ZMW per litre exactly as ERB publishes it. effective_date is the first day of the pricing month. */
+export type FuelPrice = {
+  product: FuelProduct;
+  effective_date: string;
+  price_zmw: string;
+  currency: "ZMW";
+  unit: "litre";
+  price_type: "retail";
+  source: "erb";
+  source_url: string;
+  retrieved_at: string;
+};
+
+export type FuelLatest = { prices: FuelPrice[]; missing_products: FuelProduct[] };
+export type FuelHistoryPoint = { product: FuelProduct; effective_date: string; price_zmw: string };
+
+export const getFuelLatest = () => getJson<FuelLatest>("/api/v1/fuel/latest");
+
+export async function getFuelHistory(product: FuelProduct, range: FuelRange): Promise<FuelHistoryPoint[]> {
+  try {
+    return (await getJson<{ observations: FuelHistoryPoint[] }>(
+      `/api/v1/fuel/history?product=${product}&range=${range}&type=retail`)).observations;
+  } catch (error) {
+    if (error instanceof ApiError && error.message.includes("(503)")) {
+      throw new ApiError("api", "Stored fuel prices are unavailable (database)");
+    }
+    throw error;
+  }
+}

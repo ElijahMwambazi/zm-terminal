@@ -14,3 +14,9 @@ export function formatDate(isoDate: string): string {
   const [year, month, day] = isoDate.split("-");
   return `${day} ${MONTHS[Number(month) - 1]} ${year}`;
 }
+
+/** A pricing month (first day of the month, YYYY-MM-DD), e.g. "Oct 2026". */
+export function formatMonth(isoDate: string): string {
+  const [year, month] = isoDate.split("-");
+  return `${MONTHS[Number(month) - 1]} ${year}`;
+}

@@ -71,7 +71,31 @@ BOZ_BOND_POLICY = BOZ_USD_POLICY.model_copy(update={
     ),
 })
 
+# Separate provider: the Energy Regulation Board Zambia (not BoZ).
+ERB_FUEL_POLICY = ProviderPolicy(
+    provider_id="erb",
+    dataset_id="erb_zambia_fuel_prices",
+    name="Energy Regulation Board Zambia",
+    source_url="https://www.erb.org.zm/petroleum/",
+    classification="public_market_data",
+    personal_data_expected=False,
+    authentication="none",
+    normalized_storage_allowed=True,
+    raw_response_storage="disabled",
+    attribution_required=True,
+    required_provenance=("source", "source_url"),
+    required_timestamps=("effective_date", "retrieved_at"),
+    redistribution="review_required",
+    commercial_use="review_required",
+    request_guidance=(
+        "Manual job only: ERB's WordPress media API to locate the official \"Pump and Wholesale "
+        "Prices\" archive ZIP (https://www.erb.org.zm/wp-json/wp/v2/media), then one download "
+        "(about 30 KB, 5 MB cap); 20 s timeout, no retries, no polling, nothing written to disk. "
+        "Monthly granularity; the archive lags the latest monthly press release."
+    ),
+)
+
 # Keyed by dataset: one provider may publish several datasets.
 PROVIDER_POLICIES: dict[str, ProviderPolicy] = {
-    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY)
+    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY, ERB_FUEL_POLICY)
 }

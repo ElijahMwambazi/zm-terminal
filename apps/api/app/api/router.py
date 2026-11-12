@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from app.db import database_is_ready, get_engine
 from app.schemas.fx import FxHistory, FxQuote
+from app.schemas.fuel import FUEL_PRODUCTS, FuelHistory, FuelLatest, FuelPrice, FuelProduct, FuelRange, PriceType
 from app.schemas.bonds import (
     BOND_TENORS, BondTenor, GovernmentBondAuction, GovernmentBondsLatest, RejectedBondObservation,
     BondHistoryRange, GovernmentBondHistory,
@@ -19,6 +20,7 @@ from app.services.boz import get_boz_fx_quote
 from app.services.bond_store import BondConflictError, fetch_bond_history, save_bond_auctions
 from app.services.boz_bonds import get_boz_bonds, latest_per_tenor as latest_bonds, unverified_tenors
 from app.services.boz_treasury import LUSAKA, get_boz_tbills, latest_per_tenor
+from app.services.fuel_store import fetch_fuel_history, fetch_latest_fuel
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, save_fx_quote
 from app.services.tbill_store import TbillConflictError, fetch_tbill_history, save_tbill_auctions
 from app.services.provider_policy import PROVIDER_POLICIES, ProviderPolicy
@@ -26,6 +28,7 @@ from app.services.openbb import get_openbb_coverage, openbb_is_ready
 
 router = APIRouter(prefix="/api/v1")
 logger = logging.getLogger(__name__)
+type_name = lambda exc: type(exc).__name__
 
 
 @router.get("/fx/USDZMW", response_model=FxQuote)
@@ -155,6 +158,42 @@ async def government_bond(tenor: BondTenor) -> GovernmentBondAuction:
     match = [r for r in latest_bonds(rows, rejected) if r.tenor == tenor]
     if not match:
         raise HTTPException(status_code=404, detail=f"No valid BoZ auction found for {tenor}")
+    return match[0]
+
+
+@router.get("/fuel/latest", response_model=FuelLatest)
+async def fuel_latest() -> FuelLatest:
+    """Newest stored retail price per product (ERB archive; BoZ-style live fetch is not used)."""
+    try:
+        prices = await asyncio.to_thread(fetch_latest_fuel)
+    except Exception as exc:
+        logger.warning("Fuel read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored fuel prices unavailable") from exc
+    have = {p.product for p in prices}
+    return FuelLatest(prices=prices, missing_products=[p for p in FUEL_PRODUCTS if p not in have])
+
+
+@router.get("/fuel/history", response_model=FuelHistory)
+async def fuel_history(product: FuelProduct = "PETROL", range: FuelRange = "1Y", type: PriceType = "retail") -> FuelHistory:
+    """Stored observations only: ERB is never called here."""
+    try:
+        points = await asyncio.to_thread(fetch_fuel_history, product, type, range, today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("Fuel history read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored fuel prices unavailable") from exc
+    return FuelHistory(product=product, price_type=type, range=range, count=len(points), observations=points)
+
+
+@router.get("/fuel/{product}", response_model=FuelPrice)
+async def fuel_product(product: FuelProduct) -> FuelPrice:
+    try:
+        prices = await asyncio.to_thread(fetch_latest_fuel)
+    except Exception as exc:
+        logger.warning("Fuel read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored fuel prices unavailable") from exc
+    match = [p for p in prices if p.product == product]
+    if not match:
+        raise HTTPException(status_code=404, detail=f"No stored retail price for {product}")
     return match[0]
 
 
