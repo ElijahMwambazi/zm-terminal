@@ -8,8 +8,11 @@ from sqlalchemy import text
 
 from app.db import database_is_ready, get_engine
 from app.schemas.fx import FxHistory, FxQuote
+from app.schemas.bonds import BOND_TENORS, BondTenor, GovernmentBondAuction, GovernmentBondsLatest
 from app.schemas.tbills import TENORS, RejectedTender, Tenor, TreasuryBillAuction, TreasuryBillsLatest
 from app.services.boz import get_boz_fx_quote
+from app.services.bond_store import BondConflictError, save_bond_auctions
+from app.services.boz_bonds import get_boz_bonds, latest_per_tenor as latest_bonds
 from app.services.boz_treasury import get_boz_tbills, latest_per_tenor
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, save_fx_quote
 from app.services.tbill_store import TbillConflictError, save_tbill_auctions
@@ -78,6 +81,42 @@ async def treasury_bills_latest() -> TreasuryBillsLatest:
 async def treasury_bill(tenor: Tenor) -> TreasuryBillAuction:
     rows, rejected = await _load_tbills()
     match = [r for r in latest_per_tenor(rows, datetime.now(timezone.utc), rejected) if r.tenor == tenor]
+    if not match:
+        raise HTTPException(status_code=404, detail=f"No recent BoZ auction for {tenor}")
+    return match[0]
+
+
+async def _load_bonds() -> tuple[list[GovernmentBondAuction], list[RejectedTender]]:
+    try:
+        rows, rejected = await get_boz_bonds()
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="Bank of Zambia request timed out") from exc
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Bank of Zambia data unavailable or invalid") from exc
+    try:
+        await asyncio.to_thread(save_bond_auctions, rows)
+    except BondConflictError:
+        logger.warning("Bond persistence conflict; live data returned unsaved")
+    except Exception as exc:
+        logger.warning("Bond persistence failed (%s); live data returned unsaved", type(exc).__name__)
+    return rows, rejected
+
+
+@router.get("/government-bonds/latest", response_model=GovernmentBondsLatest)
+async def government_bonds_latest() -> GovernmentBondsLatest:
+    rows, rejected = await _load_bonds()
+    latest = latest_bonds(rows, rejected)
+    have = {r.tenor for r in latest}
+    return GovernmentBondsLatest(
+        tenors=latest, missing_tenors=[t for t in BOND_TENORS if t not in have],
+        skipped_tenders=[r.tender_number or "unknown" for r in rejected],
+    )
+
+
+@router.get("/government-bonds/{tenor}", response_model=GovernmentBondAuction)
+async def government_bond(tenor: BondTenor) -> GovernmentBondAuction:
+    rows, rejected = await _load_bonds()
+    match = [r for r in latest_bonds(rows, rejected) if r.tenor == tenor]
     if not match:
         raise HTTPException(status_code=404, detail=f"No recent BoZ auction for {tenor}")
     return match[0]

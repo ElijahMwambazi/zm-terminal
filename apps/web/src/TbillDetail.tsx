@@ -11,7 +11,7 @@ export function tbillProblem(state: TbillState): string | null {
 }
 
 /** Strong claim: only when a rejected tender newer than this row's auction exists. */
-export const fallbackWarning = (row: TreasuryBill): string | null =>
+export const fallbackWarning = (row: { newer_rejected_tenders: string[] }): string | null =>
   row.newer_rejected_tenders.length > 0
     ? `LATEST TENDER REJECTED (${row.newer_rejected_tenders.join(", ")}) · USING EARLIER VALID AUCTION`
     : null;

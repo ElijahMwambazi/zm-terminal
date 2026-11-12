@@ -59,7 +59,18 @@ BOZ_TBILL_POLICY = BOZ_USD_POLICY.model_copy(update={
     ),
 })
 
+BOZ_BOND_POLICY = BOZ_USD_POLICY.model_copy(update={
+    "dataset_id": "boz_government_bond_auction_results",
+    "source_url": "https://www.boz.zm/markets-securities/bonds",
+    "required_timestamps": ("auction_date", "retrieved_at"),
+    "request_guidance": (
+        "One request per user action to the BoZ JSON:API bond_auction (5 most recent auctions), "
+        "10 s timeout, no retries, no background polling. Auctions are irregular (21 to 63 days "
+        "apart in 2026). PDFs are not fetched."
+    ),
+})
+
 # Keyed by dataset: one provider may publish several datasets.
 PROVIDER_POLICIES: dict[str, ProviderPolicy] = {
-    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY)
+    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY)
 }

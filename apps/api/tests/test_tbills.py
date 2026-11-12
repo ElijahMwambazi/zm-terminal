@@ -159,7 +159,7 @@ def test_tbill_policy_is_separate_dataset_under_boz():
     assert p.normalized_storage_allowed and p.attribution_required
     assert p.redistribution == p.commercial_use == "review_required"
     assert set(p.required_timestamps) == {"auction_date", "retrieved_at"}
-    assert set(PROVIDER_POLICIES) == {BOZ_USD_POLICY.dataset_id, p.dataset_id}
+    assert {BOZ_USD_POLICY.dataset_id, p.dataset_id} <= set(PROVIDER_POLICIES)
 
 
 # ---- API ----

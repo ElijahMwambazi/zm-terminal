@@ -91,3 +91,29 @@ export type TreasuryBillsLatest = {
 };
 
 export const getTreasuryBills = () => getJson<TreasuryBillsLatest>("/api/v1/treasury-bills/latest");
+
+export const BOND_TENORS = ["2Y", "3Y", "5Y", "7Y", "10Y", "15Y"] as const;
+export type BondTenor = (typeof BOND_TENORS)[number];
+
+/** Rates are percent per annum, decimal strings exactly as BoZ publishes them. */
+export type GovernmentBond = {
+  tenor: BondTenor;
+  auction_date: string; // YYYY-MM-DD
+  tender_number: string;
+  isin: string;
+  coupon_rate: string;
+  yield_rate: string;
+  source: "boz";
+  source_url: string;
+  retrieved_at: string;
+  /** Rejected auctions dated after this auction; non-empty means this value is a fallback. */
+  newer_rejected_tenders: string[];
+};
+
+export type GovernmentBondsLatest = {
+  tenors: GovernmentBond[];
+  missing_tenors: BondTenor[];
+  skipped_tenders: string[];
+};
+
+export const getGovernmentBonds = () => getJson<GovernmentBondsLatest>("/api/v1/government-bonds/latest");

@@ -5,12 +5,12 @@ Implemented and verified on branch `feat/usdzmw-vertical-slice`:
 - **BoZ USD/ZMW adapter** (`GET /api/v1/fx/USDZMW`): unchanged validation and error behaviour (504 timeout, safe 502, 96 h stale flag, no OpenBB dependency).
 - **Persistence**: successful quotes stored in `fx_rates` (exact decimals, `retrieved_at`, `source_url`); idempotent; no raw payloads. Persistence failure does not fail the quote request.
 - **History**: `GET /api/v1/fx/USDZMW/history?range=1D|1W|1M|3M|1Y|ALL`.
-- **Provider policy**: `app/services/provider_policy.py`, exposed at `GET /api/v1/providers` (two BoZ datasets: USD/ZMW rates, Treasury Bill auction results).
+- **Provider policy**: `app/services/provider_policy.py`, exposed at `GET /api/v1/providers` (three BoZ datasets: USD/ZMW rates, Treasury Bill and Government Bond auction results).
 - **Historical backfill** (`python -m app.jobs.backfill_usdzmw`): bounded, atomic, idempotent import of BoZ observations from 2026-01-22 using the official JSON view's date filter; conflicts abort without overwriting; valid off-slot rows are reported as not selected. Manual only (no scheduler or HTTP endpoint).
 - **Web**: live USD/ZMW card, USD/ZMW detail view with provenance, range selector and Lightweight Charts `mid` line; command palette with `FX USDZMW` and `USDZMW` only.
 - **CI**: API job runs a PostgreSQL service so the integration tests execute.
 
-Not implemented: history before 2026-01-22 (the JSON view has none; the XLSX archive was not ingested, see README), LuSE, government bonds, T-bill history/PDF-only fields, BTC, copper, macro, watchlists (static placeholders), other commands, authentication, alerts, history backfill from BoZ, scheduled ingestion, frontend tests, a frontend lint step.
+Not implemented: history before 2026-01-22 (the JSON view has none; the XLSX archive was not ingested, see README), LuSE, T-bill history/PDF-only fields, BTC, copper, macro, watchlists (static placeholders), other commands, authentication, alerts, history backfill from BoZ, scheduled ingestion, frontend tests, a frontend lint step.
 
 Known limitations:
 
@@ -26,3 +26,12 @@ Known limitations:
 - `GET /api/v1/treasury-bills/latest` (newest row per tenor, each with its own auction date; `missing_tenors`, `skipped_tenders`) and `GET /api/v1/treasury-bills/{91D|182D|273D|364D}` (422 invalid tenor, 404 none recent, 504 timeout, 502 other). Fetches the 5 most recent tenders per request; a tender failing validation (bad number/date/ISIN/rate, duplicate tenor) is rejected whole, never repaired. `stale` = auction older than 21 days (heuristic).
 - Persistence: `treasury_bill_auctions` (`db/init/003_treasury_bill_auctions.sql`, apply manually to existing volumes), unique on `(auction_date, tender_number, tenor_days)`; same conflict-aware rules as `fx_rates` (identical = no-op, different = rollback, never overwritten). Best-effort: the live response is returned if saving fails.
 - No history endpoint yet (the API can page the archive; left for the next task). Commands: `TBILL ZM`, `TBILL 91D|182D|273D|364D`. No frontend test runner exists, so command parsing is verified by `tsc` only.
+
+## Government Bonds (feat/boz-government-bonds)
+- Source: official BoZ Drupal JSON:API `/jsonapi/node/bond_auction` (what the Government Bonds page reads; public, no auth). One node per auction (title `07/2026/BA`); `field_bond_auction_date` is an ISO datetime with explicit +02:00 offset, its calendar date being the auction date (every 2026 value is a Friday); one included `paragraph--<N>_year(s)_bond` per tenor (2/3/5/7/10/15) with ISIN, coupon, yield. Field names differ per tenor and are matched strictly; the tenor label must agree with the record type. Nodes before 12/2025 are empty placeholders (rejected as "no published tenors"). Amounts, cut-off coupon/yield and ranges exist only in PDFs and are **not** modelled.
+- Reopenings: 7Y/10Y/15Y repeat the same ISIN and coupon across auctions with new yields; 2Y/3Y (and 5Y) are new ISINs. Identity is `auction_date + tender_number + tenor_years`, never the ISIN.
+- `GET /api/v1/government-bonds/latest` and `/{2Y|3Y|5Y|7Y|10Y|15Y}`: newest row per tenor among auctions that contain it; `missing_tenors`; `skipped_tenders` (informational); per-row `newer_rejected_tenders` (rejected auctions dated after the row; non-empty = fallback; same semantics as T-bills). Fetches the 5 most recent auctions, so a tenor absent from them (currently 5Y, last auctioned 2026-02-13) is "missing", not invented. 422 invalid tenor, 404 none recent, 504 timeout, 502 other.
+- **No `stale` flag** by design: the issuance calendar is a quarterly PDF (not machine-readable) and observed gaps between 2026 auctions were 21 to 63 days, so no defensible threshold exists. Each row shows its own auction date.
+- Persistence: `government_bond_auctions` (`db/init/004_government_bond_auctions.sql`; apply to an existing volume with `docker compose exec -T postgres psql -U zm_terminal -d zm_terminal < db/init/004_government_bond_auctions.sql`), unique on auction identity; same conflict-aware rules as T-bills; best-effort save.
+- Live finding (2026-11-12): tender `03/2026/BA` has a malformed 15Y ISIN (`ZM100007709`, 11 characters). It is rejected whole and reported neutrally (older than every displayed row, so no fallback claim).
+- Commands: `BOND ZM`, `BOND 2Y|3Y|5Y|7Y|10Y|15Y`; dashboard card `10Y GRZ BOND`. No history, no yield curve.

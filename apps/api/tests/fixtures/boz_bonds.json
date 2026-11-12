@@ -1,0 +1,310 @@
+{
+ "jsonapi": {
+  "version": "1.0"
+ },
+ "data": [
+  {
+   "type": "node--bond_auction",
+   "id": "n4",
+   "attributes": {
+    "title": "99/2026/BA",
+    "field_bond_auction_date": "2026-11-27T15:00:00+02:00",
+    "status": true
+   },
+   "relationships": {
+    "field_auction_results": {
+     "data": [
+      {
+       "type": "x",
+       "id": "d2"
+      },
+      {
+       "type": "x",
+       "id": "d10"
+      },
+      {
+       "type": "x",
+       "id": "d10x"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "type": "node--bond_auction",
+   "id": "n3",
+   "attributes": {
+    "title": "98/2026/BA",
+    "field_bond_auction_date": "2026-10-30T15:00:00+02:00",
+    "status": true
+   },
+   "relationships": {
+    "field_auction_results": {
+     "data": [
+      {
+       "type": "x",
+       "id": "c2"
+      },
+      {
+       "type": "x",
+       "id": "c10"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "type": "node--bond_auction",
+   "id": "n2",
+   "attributes": {
+    "title": "97/2026/BA",
+    "field_bond_auction_date": "2026-10-02T15:00:00+02:00",
+    "status": true
+   },
+   "relationships": {
+    "field_auction_results": {
+     "data": [
+      {
+       "type": "x",
+       "id": "b2"
+      },
+      {
+       "type": "x",
+       "id": "b3"
+      },
+      {
+       "type": "x",
+       "id": "b5"
+      },
+      {
+       "type": "x",
+       "id": "b7"
+      },
+      {
+       "type": "x",
+       "id": "b10"
+      },
+      {
+       "type": "x",
+       "id": "b15"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "type": "node--bond_auction",
+   "id": "n1",
+   "attributes": {
+    "title": "96/2026/BA",
+    "field_bond_auction_date": "2026-09-04T15:00:00+02:00",
+    "status": true
+   },
+   "relationships": {
+    "field_auction_results": {
+     "data": [
+      {
+       "type": "x",
+       "id": "a2"
+      },
+      {
+       "type": "x",
+       "id": "a3"
+      },
+      {
+       "type": "x",
+       "id": "a7"
+      },
+      {
+       "type": "x",
+       "id": "a10"
+      },
+      {
+       "type": "x",
+       "id": "a15"
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "included": [
+  {
+   "type": "paragraph--2_year_bond",
+   "id": "a2",
+   "attributes": {
+    "field_bond_isin": "ZM9100000014",
+    "field_coupon_rate": "11.5000",
+    "field_tenor": "2_years",
+    "field_yield_rate": "11.5000",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--3_year_bond",
+   "id": "a3",
+   "attributes": {
+    "field_isin": "ZM9100000022",
+    "field_3_year_coupon_rate": "11.7500",
+    "field_3_year_tenor": "3_years",
+    "field_3_year_yield_rate": "11.7500",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--7_year_bond",
+   "id": "a7",
+   "attributes": {
+    "field_7_year_isin": "ZM9100000030",
+    "field_7_year_coupon_rate": "15.0000",
+    "field_7_year_tenor": "7_years",
+    "field_7_year_yield_rate": "13.2500",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--10_year_bond",
+   "id": "a10",
+   "attributes": {
+    "field_10_year_isin": "ZM9100000048",
+    "field_10_year_coupon_rate": "16.0000",
+    "field_10_year_tenor": "10_years",
+    "field_10_year_yield_rate": "14.0000",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--15_year_bond",
+   "id": "a15",
+   "attributes": {
+    "field_15_year_isin": "ZM9100000055",
+    "field_15_year_coupon_rate": "17.0000",
+    "field_15_year_tenor": "15_years",
+    "field_15_year_yield_rate": "15.0000",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--2_year_bond",
+   "id": "b2",
+   "attributes": {
+    "field_bond_isin": "ZM9100000063",
+    "field_coupon_rate": "11.2500",
+    "field_tenor": "2_years",
+    "field_yield_rate": "11.2500",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--3_year_bond",
+   "id": "b3",
+   "attributes": {
+    "field_isin": "ZM9100000071",
+    "field_3_year_coupon_rate": "11.4000",
+    "field_3_year_tenor": "3_years",
+    "field_3_year_yield_rate": "11.4000",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--5_years_bond",
+   "id": "b5",
+   "attributes": {
+    "field_5_year_isin": "ZM9100000089",
+    "field_5_year_coupon_rate": "14.5000",
+    "field_5_year_tenor": "5_years",
+    "field_5_year_yield_rate": "14.5000",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--7_year_bond",
+   "id": "b7",
+   "attributes": {
+    "field_7_year_isin": "ZM9100000030",
+    "field_7_year_coupon_rate": "15.0000",
+    "field_7_year_tenor": "7_years",
+    "field_7_year_yield_rate": "13.0000",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--10_year_bond",
+   "id": "b10",
+   "attributes": {
+    "field_10_year_isin": "ZM9100000048",
+    "field_10_year_coupon_rate": "16.0000",
+    "field_10_year_tenor": "10_years",
+    "field_10_year_yield_rate": "13.8000",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--15_year_bond",
+   "id": "b15",
+   "attributes": {
+    "field_15_year_isin": "ZM9100000055",
+    "field_15_year_coupon_rate": "17.0000",
+    "field_15_year_tenor": "15_years",
+    "field_15_year_yield_rate": "14.7500",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--2_year_bond",
+   "id": "c2",
+   "attributes": {
+    "field_bond_isin": "ZM9100000097",
+    "field_coupon_rate": "11.0000",
+    "field_tenor": "2_years",
+    "field_yield_rate": "11.0000",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--10_year_bond",
+   "id": "c10",
+   "attributes": {
+    "field_10_year_isin": "ZM9100000048",
+    "field_10_year_coupon_rate": "16.0000",
+    "field_10_year_tenor": "10_years",
+    "field_10_year_yield_rate": "13.5000",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--2_year_bond",
+   "id": "d2",
+   "attributes": {
+    "field_bond_isin": "ZM9100000105",
+    "field_coupon_rate": "10.7500",
+    "field_tenor": "2_years",
+    "field_yield_rate": "10.7500",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--10_year_bond",
+   "id": "d10",
+   "attributes": {
+    "field_10_year_isin": "ZM9100000048",
+    "field_10_year_coupon_rate": "16.0000",
+    "field_10_year_tenor": "10_years",
+    "field_10_year_yield_rate": "13.2500",
+    "status": true
+   }
+  },
+  {
+   "type": "paragraph--10_year_bond",
+   "id": "d10x",
+   "attributes": {
+    "field_10_year_isin": "ZM9100000113",
+    "field_10_year_coupon_rate": "16.0000",
+    "field_10_year_tenor": "10_years",
+    "field_10_year_yield_rate": "13.2000",
+    "status": true
+   }
+  }
+ ],
+ "links": {}
+}

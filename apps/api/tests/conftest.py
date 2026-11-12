@@ -9,3 +9,4 @@ def no_database_by_default(monkeypatch):
     router = importlib.import_module("app.api.router")
     monkeypatch.setattr(router, "save_fx_quote", lambda quote: True)
     monkeypatch.setattr(router, "save_tbill_auctions", lambda rows: (0, 0))
+    monkeypatch.setattr(router, "save_bond_auctions", lambda rows: (0, 0))
