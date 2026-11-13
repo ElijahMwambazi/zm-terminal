@@ -63,6 +63,56 @@ Potential coverage:
 
 Likely sources include Bank of Zambia, Zambia Statistics Agency and the Ministry of Finance and National Planning.
 
+#### Economic benchmarks and signature metrics
+
+Add a compact benchmark layer that gives Zambia's market data broader economic context without treating long-run or derived indicators as live market prices.
+
+Potential benchmark families:
+- purchasing power parity (PPP) conversion factors
+- GDP per capita, nominal and PPP
+- price-level ratios
+- real policy rates
+- debt-to-GDP and fiscal-balance-to-GDP ratios
+- current-account-to-GDP
+- reserve import cover
+- terms of trade
+- yield-curve slope
+- unemployment-plus-inflation "misery" measures
+- copper export dependence
+- insurance penetration
+- business density
+
+Potential Zambia-specific derived metrics:
+- PPP FX Gap: market USD/ZMW versus a clearly identified PPP conversion factor
+- Copper Export Dependence: copper exports as a share of total merchandise exports
+- Kwacha-Copper Relationship: rolling correlation or sensitivity analysis
+- Energy Dependence: electricity imports as a share of relevant supply
+- Business Density: operating establishments per 1,000 residents
+- Insurance Penetration: gross written premium relative to GDP
+
+PPP rules:
+- keep World Bank/ICP PPP and IMF/WEO implied PPP series separate; do not combine vintages or methodologies
+- distinguish economy-wide PPP from household-consumption PPP and other PPP concepts
+- label PPP as a long-run purchasing-power benchmark, not a live exchange rate
+- a derived "PPP FX Gap" must not be described as proof that the kwacha is overvalued or undervalued, and must not be presented as an exchange-rate forecast
+
+Potential commands and views:
+- `BENCHMARKS ZM`
+- `PPP ZM`
+- `REAL RATE ZM`
+- `DEBT ZM`
+- `EXTERNAL ZM`
+- `MISERY ZM`
+
+`BENCHMARKS ZM` should be the main entry point rather than creating one command for every ratio.
+
+All benchmark outputs must identify whether they are:
+- official observations
+- ratios calculated from official observations
+- derived analytical indicators
+
+Methodology, source period and source vintage must be retained for calculated metrics. Correlation, valuation gaps and composite indices must not be presented as causal findings or official statistics.
+
 #### Power and energy intelligence
 Potential coverage:
 - installed generation capacity
