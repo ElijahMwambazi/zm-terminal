@@ -32,6 +32,7 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
   - Proposed data model, distinguishing price kinds rather than one "price" column:
     `commodity`, `market_type = spot | national_average | procurement`, `provider`, `source_unit`, `price_zmw`,
     `normalized_zmw_per_kg`, `observed_date`
+    (observation identity is defined per `market_type` with partial `NULLS NOT DISTINCT` unique indexes; see the research doc)
 
 ## Planned
 - Global oil: Brent + WTI through an approved provider / OpenBB

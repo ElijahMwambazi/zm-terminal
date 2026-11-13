@@ -257,14 +257,58 @@ zambia_agricultural_prices
   source                 provider/publication name
   source_url             the exact PDF or endpoint
   source_period_label    text, e.g. "JANUARY", printed label for audit
+  source_record_id       text, nullable: the source's own row id (ZAMACE spot rows carry a UUID `id`)
   retrieved_at           timestamptz
-  UNIQUE (provider, market_type, commodity, period_start, period_end, observed_date, grade, location, source_unit)
+  -- no universal UNIQUE key: identity is per market_type, see "Observation identity" below
 ```
 
 Only fields justified by discovery are included. Not included: `% change` (unreliable in the source), bids/offers and
 order references, volume (ZAMACE only; add if ZAMACE is later permitted), raw payload (never stored). The
+`source_record_id` exists because discovery found it (section 2); no `observed_at` is proposed because ZAMACE rows carry a date only. The
 `price_basis` column is how the model keeps "indicative average" distinct from "executed trade" for the Ministry
 disclaimer. Reusing one table is fine because every row carries `market_type`; queries must always filter on it.
+
+### Observation identity (per market type)
+
+A single `UNIQUE` over the nullable columns is wrong here for two reasons. The datasets have different time semantics
+(a monthly period, a crop season, a trade date), so most time columns are legitimately NULL for any one market type.
+And PostgreSQL (including 17, the version in `compose.yml`) treats NULLs as **distinct** in an ordinary `UNIQUE`
+constraint, so two rows that differ only by NULL columns (national `location`, absent `grade`, FRA `period_start`)
+would never collide and duplicates would pass. Use one **partial unique index per `market_type`**, with
+`NULLS NOT DISTINCT` (PostgreSQL 15 and later) so a NULL dimension that is part of the identity compares equal. The
+partial index also encodes each market's own meaning.
+
+Never part of any identity: `retrieved_at`, `publication_date`, `source_url`, `source_price`, `normalized_zmw_per_kg`.
+Behaviour on a re-import of the same identity: same price is idempotent (no-op); a different price is a **conflict /
+source revision that needs review**, never a silent overwrite and never a second row.
+
+| `market_type` | Time identity | Identity (partial unique index, `NULLS NOT DISTINCT`) |
+|---|---|---|
+| `national_average` (Ministry) | the reporting period | `(provider, commodity, period_start, period_end, grade, variety, location_scope, location, source_unit)` where `market_type = 'national_average'` |
+| `procurement` (FRA) | the crop marketing season | `(provider, commodity, season, grade, variety, location_scope, location, source_unit)` where `market_type = 'procurement'` |
+| `government_sale` (FRA) | the programme/season or published sale period, whichever the source supplies | `(provider, commodity, season, grade, variety, location_scope, location, source_unit)` where `market_type = 'government_sale'`, plus the sale period if one is published |
+| `spot` (ZAMACE) | **unresolved**, see below | provisional: `(provider, source_record_id)` where `market_type = 'spot'` |
+
+- **`national_average`.** A re-published bulletin for the same month and unit is the same observation. A different
+  value for it is a revision to review. The Ministry's national rows have `location_scope = 'national'` and NULL
+  `location`, `grade`, `variety`, which is exactly why `NULLS NOT DISTINCT` is required.
+- **`procurement`.** Keyed by `season` ("2025"), because `observed_date`, `period_start` and `period_end` are NULL for FRA
+  announcements and the season is all the source gives (section 7). Different seasons never collapse. Discovery found
+  one procurement price per commodity per season, so no `programme` field is added; if FRA is later seen to issue two
+  procurement programmes for the same commodity and season, add `programme` to this index at that point.
+- **`government_sale`.** Kept apart from procurement even though FRA publishes both: a sale programme is a different
+  event with different semantics, units and (today) no published price (section 4). Nothing is implemented for it in
+  v1, so its final key (programme year versus a published sale window) is settled when a priced sale source exists.
+- **`spot`.** ZAMACE spot rows (`public_retrieve_zmw_*spot_market_prices`) expose **a date only** (`"date":
+  "2026-10-26"`, 10 characters on all 20 rows seen), **not a time of day**. So there is no `observed_at timestamptz`,
+  and none is proposed: that would invent precision the source does not provide. The natural key
+  `(date, location, commodity, quality_grade)` is **not unique**: across the 20 rows observed, Kabwe, maize, grade A on
+  2026-10-01 appears twice. The rows do carry a UUID `id` (20 distinct in 20 rows), which is why `source_record_id`
+  is proposed as the provisional identity. **Unresolved, to settle before any spot implementation:** whether that `id` is
+  stable across polls and across the "current" and "historical" endpoints (no row overlapped between the two windows,
+  so this could not be tested), and whether two same-date rows are distinct trades or a re-issued price. If the `id`
+  is not stable, spot deduplication has no sound key and spot should not be ingested. This is moot until ZAMACE grants
+  permission (section 5).
 
 ## 10. Proposed commands and UI semantics
 
