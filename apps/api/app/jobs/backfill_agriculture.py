@@ -40,7 +40,10 @@ def validate_range(start: date, end: date, *, today: date) -> None:
 
 def _ssl_context() -> ssl.SSLContext:
     settings = get_settings()
-    return ssl.create_default_context(cafile=settings.moa_ca_bundle or None)
+    context = ssl.create_default_context()
+    if settings.moa_ca_bundle:
+        context.load_verify_locations(cafile=settings.moa_ca_bundle)
+    return context
 
 
 async def run_backfill(
