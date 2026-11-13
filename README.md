@@ -2,7 +2,7 @@
 
 A personal, Zambia-first market intelligence terminal built with React, FastAPI, PostgreSQL, OpenBB and Docker.
 
-> Status: **v0.1 with one live vertical slice: Bank of Zambia USD/ZMW** (adapter, PostgreSQL persistence, history API, live quote, detail view, chart, and `FX USDZMW` / `USDZMW` commands). The application deliberately does not display fabricated market prices. LuSE, crypto, commodity and other adapters remain pending.
+> Status: **active Zambia-first market terminal with multiple implemented vertical slices**: Bank of Zambia USD/ZMW, Treasury bills, Government bonds, stored fixed-income history, and ERB fuel prices/build-ups. The application deliberately does not display fabricated market prices. Agriculture source research is complete and the Ministry maize/soya national-average slice is next; LuSE, BTC, copper, broader macro and other planned domains remain pending.
 
 ## Goals
 
@@ -80,7 +80,7 @@ make web-build
 make clean
 ```
 
-## API scaffold
+## Implemented API
 
 ```text
 GET /api/v1/health
@@ -88,9 +88,23 @@ GET /api/v1/system
 GET /api/v1/instruments
 GET /api/v1/markets/overview
 GET /api/v1/openbb/coverage
-GET /api/v1/fx/USDZMW
-GET /api/v1/fx/USDZMW/history?range=1D|1W|1M|3M|1Y|ALL   (default 1M)
 GET /api/v1/providers
+
+GET /api/v1/fx/USDZMW
+GET /api/v1/fx/USDZMW/history?range=1D|1W|1M|3M|1Y|ALL
+
+GET /api/v1/treasury-bills/latest
+GET /api/v1/treasury-bills/{91D|182D|273D|364D}
+GET /api/v1/treasury-bills/history?tenor=...&range=1M|3M|6M|1Y|ALL
+
+GET /api/v1/government-bonds/latest
+GET /api/v1/government-bonds/{2Y|3Y|5Y|7Y|10Y|15Y}
+GET /api/v1/government-bonds/history?tenor=...&range=3M|6M|1Y|ALL
+
+GET /api/v1/fuel/latest
+GET /api/v1/fuel/{PETROL|DIESEL|KEROSENE|JET_A1|LSGO}
+GET /api/v1/fuel/history?product=...&range=1Y|3Y|5Y|ALL&type=retail|wholesale
+GET /api/v1/fuel/build-up?product=...&type=pump|wholesale&month=YYYY-MM
 ```
 
 ### Bank of Zambia USD/ZMW backend
@@ -108,7 +122,7 @@ Requests use a 10-second HTTPX timeout and a ZM Terminal User-Agent, without ret
 
 Each successful quote is persisted (exact `NUMERIC` values, `observed_at`, `retrieved_at`, `source`, `source_url`) to `fx_rates`, idempotently on `(pair, observed_at, source)` using the same conflict-aware logic as the backfill: a new row is inserted, identical values (numeric comparison, `19.8 == 19.8000`) are a silent no-op, and different values for the same key are **never overwritten**. Raw BoZ responses are never stored. If persistence fails or conflicts, the live quote is still returned and only a generic warning is logged (`USDZMW persistence conflict; live quote returned unsaved`, or the exception type). Nothing is cached.
 
-`GET /api/v1/fx/USDZMW/history` returns stored observations ascending by `observed_at` as `{symbol, range, count, observations[{observed_at, buy, mid, sell, source}]}` with decimal strings. Invalid ranges return 422; a database failure returns a safe 503. **History only contains observations this app has retrieved and stored**; it is not backfilled from BoZ, so it starts empty/sparse on a new database.
+`GET /api/v1/fx/USDZMW/history` returns stored observations ascending by `observed_at` as `{symbol, range, count, observations[{observed_at, buy, mid, sell, source}]}` with decimal strings. Invalid ranges return 422; a database failure returns a safe 503. History can include both live observations saved by the app and rows imported by the manual BoZ backfill job; the verified BoZ JSON history begins on 2026-01-22.
 
 `GET /api/v1/providers` exposes the provider policy (`app/services/provider_policy.py`): public market data, no personal data, no authentication, normalized storage allowed, raw storage disabled, attribution required, redistribution and commercial use *review required*, and request guidance (one request per user action, no background polling).
 
@@ -140,22 +154,32 @@ The overview shows a live USD/ZMW card (mid, buy/sell, BoZ, Africa/Lusaka observ
 Backend tests: `cd apps/api && python -m pytest`. PostgreSQL integration tests run when `TEST_DATABASE_URL` points to a disposable database whose name ends in `_test` (CI provides one); otherwise they are skipped.
 Offline tests use a small sanitized JSON fixture with altered test values, a preserved upstream structure, and mocked HTTP; they require neither BoZ access, PostgreSQL, nor OpenBB. Run `cd apps/api && python -m pytest` (or the existing Docker-based `make api-test`).
 
-## Planned terminal commands
+## Implemented terminal commands
 
 ```text
 FX USDZMW
-LU CECZ
-LU ZNCO
-BTC
-BTCZMW
-COPPER
+USDZMW
 TBILL ZM
+TBILL 91D
+TBILL 182D
+TBILL 273D
+TBILL 364D
 BOND ZM
-MACRO ZM
-WATCH
-CHART USDZMW 1Y
-COMPARE BTC COPPER USDZMW
+BOND 2Y
+BOND 3Y
+BOND 5Y
+BOND 7Y
+BOND 10Y
+BOND 15Y
+FUEL ZM
+FUEL PETROL
+FUEL DIESEL
+FUEL KEROSENE
+FUEL JET
+FUEL LSGO
 ```
+
+Future command ideas such as agriculture, BTC, copper, macro, yield-curve and cross-market research commands are tracked in `docs/ROADMAP.md`.
 
 ## Data-provider strategy
 
@@ -190,38 +214,9 @@ zm-terminal/
 
 ## Roadmap
 
-### v0.1 — Foundation
+The canonical sequencing lives in [`docs/ROADMAP.md`](docs/ROADMAP.md), while [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) records implemented behavior and known limitations.
 
-- [x] Docker Compose development environment
-- [x] React terminal shell
-- [x] FastAPI application API
-- [x] PostgreSQL schema
-- [x] OpenBB V5 API service
-- [x] CI scaffold
-- [x] Bank of Zambia USD/ZMW backend adapter
-- [ ] Frontend FX integration
-- [ ] LuSE market-data adapter
-- [ ] BTC/USD provider
-- [ ] BTC/ZMW derived instrument
-- [ ] Copper data provider
-- [ ] Historical charting
-- [ ] Command parser
-- [ ] Watchlist persistence
-
-### v0.2 — Research
-
-- Yield curve views
-- Instrument comparisons
-- Correlation tools
-- Zambia/global macro overlays
-- Historical data ingestion jobs
-
-### v0.3 — Intelligence
-
-- Research queries over structured market data
-- Source-aware explanations
-- Alerts
-- Optional agent/MCP workflows
+Current implemented domains are USD/ZMW, BoZ Treasury bills and Government bonds with stored history, and ERB fuel prices/build-ups. Agriculture source discovery is complete; the next planned implementation is the Ministry of Agriculture maize and soya national-average vertical slice.
 
 ## Development principles
 

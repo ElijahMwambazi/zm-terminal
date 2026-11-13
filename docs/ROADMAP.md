@@ -9,30 +9,25 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - Government Bonds (live, stored history, manual backfill)
 - Fixed-income history (APIs, charts)
 - ERB fuel price history (XLSX archive import, API, UI, `FUEL` commands)
+- ERB latest-month retail prices + fuel build-ups (monthly PDF discovery, strict text parsing, narrow OCR fallback, stored build-up API/UI)
+- Zambia agriculture source discovery (`docs/research/zambia-agriculture-sources.md`)
 
 ## Current
-- ERB latest-month + fuel build-ups (this branch: monthly PDF discovery and strict parsing, `zambia_fuel_build_up_items`,
-  `/fuel/build-up`, pump and wholesale build-up views). Press-statement retail prices come from text PDFs and, for image-only statements, an OCR fallback;
-  scanned statements fall back to the narrow two-pass Tesseract reader (see CURRENT_STATE).
+- No active implementation branch. The repository is ready for the Ministry agriculture vertical slice below.
 
 ## Next
-- **Zambia agriculture price discovery / vertical slice**
+- **Ministry of Agriculture maize + soya national-average vertical slice**
   - Commodities: `MAIZE`, `SOYA_BEANS`
-  - Potential official / regulated sources:
-    - ZAMACE: exchange / spot-market price
-    - Ministry of Agriculture: national average market price
-    - FRA: procurement / policy price
-  - **Critical rule: FRA procurement prices must never be presented as market prices.**
-  - Discovery done: `docs/research/zambia-agriculture-sources.md`. Findings that change the plan:
-    - **ZAMACE spot integration pending permission / suitable public access.** A public JSON feed exists but is 10 rows of
-      maize only, and ZAMACE's website terms prohibit copying and redistributing material; write to ZAMACE first.
-    - **First branch is the Ministry national-average bulletins** (maize and soya, monthly; newest found covers Jan 2026).
-    - FRA is a second branch: maize only (no soya procurement), one price per season, 2026 price not yet in an official document.
-  - Planned commands: `AGRI ZM`, `MAIZE ZM`, `SOYA ZM`, `MAIZE MARKET`, `SOYA MARKET`, `MAIZE FRA`
-  - Proposed data model, distinguishing price kinds rather than one "price" column:
-    `commodity`, `market_type = spot | national_average | procurement`, `provider`, `source_unit`, `price_zmw`,
-    `normalized_zmw_per_kg`, `observed_date`
-    (observation identity is defined per `market_type` with partial `NULLS NOT DISTINCT` unique indexes; see the research doc)
+  - Provider: Ministry of Agriculture, Department of Agribusiness and Marketing
+  - First supported source family: verified recent Layout B bulletins
+  - Initial confirmed monthly coverage: April 2025 to January 2026
+  - Market semantics: `market_type = national_average`, `price_basis = indicative_average`
+  - Preserve calendar-month `period_start` / `period_end`; do not present bulletin values as trade dates or live market quotes
+  - Planned first commands/views: `AGRI ZM`, `MAIZE ZM`, `SOYA ZM`, `MAIZE AVG`, `SOYA AVG`
+  - Older Layout A bulletins remain deferred until the printed `ZMK` currency-label semantics are resolved
+  - FRA follows in a separate branch as maize procurement/policy data; FRA procurement must never be presented as a market price
+  - ZAMACE spot integration remains blocked pending written permission / suitable reuse rights and a sound stable observation identity
+  - Observation identity is defined per `market_type` with partial `NULLS NOT DISTINCT` unique indexes; see the agriculture research document
 
 ## Planned
 - Global oil: Brent + WTI through an approved provider / OpenBB
