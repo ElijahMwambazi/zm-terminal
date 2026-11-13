@@ -95,7 +95,30 @@ ERB_FUEL_POLICY = ProviderPolicy(
     ),
 )
 
+MOA_AGRICULTURE_POLICY = ProviderPolicy(
+    provider_id="moa",
+    dataset_id="moa_national_average_grain_prices",
+    name="Ministry of Agriculture, Department of Agribusiness and Marketing",
+    source_url="https://www.agriculture.gov.zm/monthly-market-information-bullet/",
+    classification="public_market_data",
+    personal_data_expected=False,
+    authentication="none",
+    normalized_storage_allowed=True,
+    raw_response_storage="disabled",
+    attribution_required=True,
+    required_provenance=("source", "source_url", "source_period_label"),
+    required_timestamps=("period_start", "period_end", "publication_date", "retrieved_at"),
+    redistribution="review_required",
+    commercial_use="review_required",
+    request_guidance=(
+        "Manual import only. Discover official market-bulletin PDFs through the Ministry WordPress media API, "
+        "download each candidate once, accept the verified Layout B family only, and fail closed on layout or "
+        "cross-table inconsistencies. The Ministry site may require an explicit trusted intermediate CA bundle; "
+        "TLS verification must never be disabled."
+    ),
+)
+
 # Keyed by dataset: one provider may publish several datasets.
 PROVIDER_POLICIES: dict[str, ProviderPolicy] = {
-    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY, ERB_FUEL_POLICY)
+    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY, ERB_FUEL_POLICY, MOA_AGRICULTURE_POLICY)
 }
