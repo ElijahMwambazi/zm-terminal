@@ -11,26 +11,20 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - ERB fuel price history (XLSX archive import, API, UI, `FUEL` commands)
 - ERB latest-month retail prices + fuel build-ups (monthly PDF discovery, strict text parsing, narrow OCR fallback, stored build-up API/UI)
 - Zambia agriculture source discovery (`docs/research/zambia-agriculture-sources.md`)
+- Ministry maize + soya national-average vertical slice (Layout B, Apr 2025-Jan 2026, stored API/history/UI and `AGRI` commands)
 
 ## Current
-- No active implementation branch. The repository is ready for the Ministry agriculture vertical slice below.
+- No active implementation branch after the Ministry agriculture slice.
 
 ## Next
-- **Ministry of Agriculture maize + soya national-average vertical slice**
-  - Commodities: `MAIZE`, `SOYA_BEANS`
-  - Provider: Ministry of Agriculture, Department of Agribusiness and Marketing
-  - First supported source family: verified recent Layout B bulletins
-  - Initial confirmed monthly coverage: April 2025 to January 2026
-  - Market semantics: `market_type = national_average`, `price_basis = indicative_average`
-  - Preserve calendar-month `period_start` / `period_end`; do not present bulletin values as trade dates or live market quotes
-  - Planned first commands/views: `AGRI ZM`, `MAIZE ZM`, `SOYA ZM`, `MAIZE AVG`, `SOYA AVG`
-  - Older Layout A bulletins remain deferred until the printed `ZMK` currency-label semantics are resolved
-  - FRA follows in a separate branch as maize procurement/policy data; FRA procurement must never be presented as a market price
-  - ZAMACE spot integration remains blocked pending written permission / suitable reuse rights and a sound stable observation identity
-  - Observation identity is defined per `market_type` with partial `NULLS NOT DISTINCT` unique indexes; see the agriculture research document
+- **Global oil: Brent + WTI**
+  - Use an approved provider through the existing FastAPI/OpenBB boundary
+  - Preserve provider/source timestamps and units
+  - Establish stored history before derived Zambia oil analytics
+  - Keep Brent and WTI as separate benchmark series
+  - Do not derive `OIL ZM` until the underlying oil series and BoZ FX semantics are stable
 
 ## Planned
-- Global oil: Brent + WTI through an approved provider / OpenBB
 - `OIL ZM` (Brent converted at the BoZ USD/ZMW rate)
 - Zambia sovereign yield curve (needs the stored T-bill and bond history)
 - Gold provider discovery (licensing first)
