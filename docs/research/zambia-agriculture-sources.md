@@ -1,6 +1,6 @@
 # Zambia agriculture price sources: discovery and ingestion plan
 
-Research only. Nothing here is implemented: no adapter, migration, API, UI, command or job exists for agriculture.
+Source-discovery record. The Ministry Layout B national-average slice described here is now implemented; FRA and ZAMACE remain research/planning items.
 Discovery date: 2026-11-13. Everything below was read from public, unauthenticated URLs with plain GET requests, a
 few requests per source, no login, no cookies and no automation of any authenticated flow. No raw payload was stored in
 the repository. Counts and dates are as observed on that day.
