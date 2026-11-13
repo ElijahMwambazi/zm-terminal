@@ -188,7 +188,7 @@ MAIZE AVG
 SOYA AVG
 ```
 
-Future command ideas such as agriculture, BTC, copper, macro, yield-curve and cross-market research commands are tracked in `docs/ROADMAP.md`.
+Future command ideas such as BTC, copper, oil, macro, yield-curve and cross-market research commands are tracked in `docs/ROADMAP.md`.
 
 ## Data-provider strategy
 
