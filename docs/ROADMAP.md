@@ -23,10 +23,16 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
     - Ministry of Agriculture: national average market price
     - FRA: procurement / policy price
   - **Critical rule: FRA procurement prices must never be presented as market prices.**
+  - Discovery done: `docs/research/zambia-agriculture-sources.md`. Findings that change the plan:
+    - **ZAMACE spot integration pending permission / suitable public access.** A public JSON feed exists but is 10 rows of
+      maize only, and ZAMACE's website terms prohibit copying and redistributing material; write to ZAMACE first.
+    - **First branch is the Ministry national-average bulletins** (maize and soya, monthly; newest found covers Jan 2026).
+    - FRA is a second branch: maize only (no soya procurement), one price per season, 2026 price not yet in an official document.
   - Planned commands: `AGRI ZM`, `MAIZE ZM`, `SOYA ZM`, `MAIZE MARKET`, `SOYA MARKET`, `MAIZE FRA`
   - Proposed data model, distinguishing price kinds rather than one "price" column:
     `commodity`, `market_type = spot | national_average | procurement`, `provider`, `source_unit`, `price_zmw`,
     `normalized_zmw_per_kg`, `observed_date`
+    (observation identity is defined per `market_type` with partial `NULLS NOT DISTINCT` unique indexes; see the research doc)
 
 ## Planned
 - Global oil: Brent + WTI through an approved provider / OpenBB
