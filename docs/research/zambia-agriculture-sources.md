@@ -42,7 +42,7 @@ Two facts the owner should know before the first branch: the newest Ministry bul
 
 What is and is not exposed:
 
-- **Spot prices:** only `maize`, grade `A`, unit `Metric Tonnes`, currency `zmw`, six locations (Chingola, Kabwe,
+- **Spot prices:** only `maize`, grade `A`, unit `Metric Tonnes`, currency `zmw`, seven locations across the two windows (Chingola, Kabwe,
   Kalulushi, Lusaka, Mwembeshi, Monze, Ndola). Every observed `price` was `5000.0`, so the series carries almost no
   information today. **No soya beans.** These look like reported trade/reference prices, but the payload does not say
   whether a row is a last trade, settlement or reference price, so those cannot be told apart.
@@ -120,7 +120,7 @@ What a parser must handle (observed):
 and the header states an end date ("Bulletin No: 020430 - 30th April 2025 to 31st January 2026",
 "AS AT 30/04/24"). Observation granularity is therefore **a calendar month**: `period_start` = first day,
 `period_end` = last day. The month's price is an average of weekly averages, so there is no single trade date, and
-the upload date is a different thing (about 2 to 5 months later in the files found; 16 to 17 weeks for layout B).
+the upload date is a different thing (2 weeks to about 4 months after the period end in the files found).
 
 **Recency caveat:** at time of writing (2026-11-13) the newest bulletin found covers January 2026, uploaded in May 2026.
 A "latest national average" view built on this source would be ten months old. The UI must show the period, not imply
@@ -283,7 +283,7 @@ the seed/grain distinction by listing only grain.
 
 | Provider id | authentication | personal_data_expected | normalized_storage_allowed | raw_storage | attribution | redistribution | commercial_use | required timestamps |
 |---|---|---|---|---|---|---|---|---|
-| `zamace_commodity_market` | none for public endpoints; **login endpoints out of scope** | false for `*_spot_*`; **true-ish** (order detail) for the offers feed, do not ingest | **no, pending permission** | no | "Zambian Commodities Exchange" | review_required (terms prohibit) | review_required | `observed_date`, `retrieved_at` |
+| `zamace_commodity_market` | none for public endpoints; **login endpoints out of scope** | false for `*_spot_*`; order-level detail in the offers feed (do not ingest it) | **no, pending permission** | no | "Zambian Commodities Exchange" | review_required (terms prohibit) | review_required | `observed_date`, `retrieved_at` |
 | `moa_agricultural_market_bulletin` | none | false | yes (normalized rows only) | no (no PDFs stored) | "Ministry of Agriculture, Department of Agribusiness and Marketing" + PDF URL | review_required | review_required | `period_start`, `period_end`, `publication_date`, `retrieved_at` |
 | `fra_procurement_prices` | none | false | yes (price, season, unit) | no | "Food Reserve Agency" or the Ministry statement it came from | review_required | review_required | `season`, `publication_date`, `retrieved_at` |
 
