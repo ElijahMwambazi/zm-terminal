@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     boz_treasury_bills_url: str = "https://www.boz.zm/jsonapi/node/tbills_auction_results"
     boz_bond_auctions_url: str = "https://www.boz.zm/jsonapi/node/bond_auction"
     erb_media_url: str = "https://www.erb.org.zm/wp-json/wp/v2/media"
+    moa_media_url: str = "https://www.agriculture.gov.zm/wp-json/wp/v2/media"
+    moa_ca_bundle: str = ""
     cors_origins: str = "http://localhost:5173"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
