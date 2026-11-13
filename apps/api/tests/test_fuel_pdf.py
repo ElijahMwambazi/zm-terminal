@@ -100,10 +100,15 @@ def jet_lines(month="NOVEMBER 2026", extra=()):
 
 def press_lines(month="OCTOBER 2026", prices=("31.05", "32.45", "30.08", "31.85"), midnight="30th September", layout="new"):
     head = [f"REVISION OF PETROLEUM PUMP PRICES FOR {month}", "The ERB announces new prices for the month under review."]
-    if layout == "new":  # CURRENT / NEW / VARIANCE, with the first row wrapped like the real PDF
-        table = ["NATIONAL UNIFORM PUMP PRICES K/LITRE", "ABSOLUTE", "PRODUCT  CURRENT  NEW", "VARIANCE", "PETROL",
-                 f"25.29  {prices[0]}  6.17", f"DIESEL  26.86  {prices[1]}  6.41", f"KEROSENE  27.02  {prices[2]}  2.75",
-                 f"JET A-1  28.71  {prices[3]}  3.14"]
+    currents = ("25.29", "26.86", "27.02", "28.71")
+    if layout in ("new", "pct"):  # CURRENT / NEW / VARIANCE [/ % CHANGE], first row wrapped like the real PDF
+        def cells(i):
+            delta = Decimal(prices[i]) - Decimal(currents[i])
+            out = f"{currents[i]}  {prices[i]}  {delta:.2f}"
+            return out + (f"  {delta / Decimal(currents[i]) * 100:.2f}" if layout == "pct" else "")
+        head_row = "PRODUCT  CURRENT  NEW" + ("  % CHANGE" if layout == "pct" else "")
+        table = ["NATIONAL UNIFORM PUMP PRICES K/LITRE", "ABSOLUTE", head_row, "VARIANCE", "PETROL", cells(0),
+                 f"DIESEL  {cells(1)}", f"KEROSENE  {cells(2)}", f"JET A-1  {cells(3)}"]
     else:  # single "NEW PUMP PRICE" column
         table = ["PRODUCT  NEW PUMP PRICE (K/Litre)", f"PETROL  {prices[0]}", f"DIESEL (LSG)  {prices[1]}",
                  f"KEROSENE  {prices[2]}", f"JET A-1  {prices[3]}"]
@@ -292,7 +297,7 @@ def test_jet_a1_is_a_separate_wholesale_publication():
 
 
 # ---------------- press statement ----------------
-@pytest.mark.parametrize("layout,midnight,month", [("new", "30th September", "OCTOBER 2026"), ("old", "30th September", "OCTOBER 2026")])
+@pytest.mark.parametrize("layout,midnight,month", [("new", "30th September", "OCTOBER 2026"), ("pct", "30th September", "OCTOBER 2026"), ("old", "30th September", "OCTOBER 2026")])
 def test_press_statement_prices_and_month(layout, midnight, month):
     parsed = erb_pdf.parse_press_statement(press_lines(layout=layout, midnight=midnight, month=month))
     assert parsed.month == date(2026, 10, 1) and parsed.effective_midnight == date(2026, 9, 30)
@@ -313,6 +318,89 @@ def test_press_statement_missing_product_and_malformed_table_fail_or_omit():
         erb_pdf.parse_press_statement([l for l in lines if not l.startswith(("PRODUCT", "PETROL", "DIESEL", "KEROSENE", "JET"))])
     with pytest.raises(FuelPdfError):  # duplicate product
         erb_pdf.parse_press_statement(lines[:-2] + ["PETROL  1.00  2.00  3.00"] + lines[-2:])
+
+
+def _set_row(lines, start, replacement):
+    return [replacement if l.startswith(start) else l for l in lines]
+
+
+def _never_persisted(lines):
+    """A rejected press statement yields no ParsedPress, so there is nothing a job could persist."""
+    with pytest.raises(FuelPdfError):
+        erb_pdf.parse_press_statement(lines)
+
+
+def test_press_complete_current_new_variance_row_accepted_and_new_is_the_price():
+    parsed = erb_pdf.parse_press_statement(press_lines())
+    assert parsed.prices["JET_A1"] == Decimal("31.85")  # NEW, never CURRENT (28.71) or VARIANCE (3.14)
+
+
+@pytest.mark.parametrize("row", [
+    "JET A-1  31.85  3.14",            # Codex's case: CURRENT missing, VARIANCE read as NEW
+    "JET A-1  28.71  31.85",           # VARIANCE missing
+    "JET A-1  28.71  3.14",            # NEW missing (CURRENT + a variance-looking value)
+    "JET A-1  28.71  31.85  3.14  9.99",  # extra unexpected numeric cell
+    "JET A-1  28.71  31.85  3.14  -",  # extra cell, even a dash
+    "JET A-1  28.71  31.85  4.00",     # variance that is not NEW - CURRENT
+    "JET A-1  28.71  31.8  3.14",      # NEW is not a two-decimal price
+    "JET A-1  28.71  0.00  -28.71",    # non-positive NEW
+])
+def test_press_incomplete_or_inconsistent_jet_row_rejects_whole_statement(row):
+    _never_persisted(_set_row(press_lines(), "JET A-1", row))
+
+
+@pytest.mark.parametrize("product,row", [("PETROL", "25.29  6.17"), ("DIESEL", "DIESEL  26.86  6.41")])
+def test_press_incomplete_row_for_any_product_rejects(product, row):
+    lines = press_lines()
+    if product == "PETROL":  # the wrapped row: label on its own line, then the values
+        lines = _set_row(lines, "25.29", row)
+    else:
+        lines = _set_row(lines, "DIESEL", row)
+    _never_persisted(lines)
+
+
+def test_press_pct_layout_requires_four_values_and_a_matching_percentage():
+    assert erb_pdf.parse_press_statement(press_lines(layout="pct")).prices["JET_A1"] == Decimal("31.85")
+    lines = press_lines(layout="pct")
+    _never_persisted(_set_row(lines, "JET A-1", "JET A-1  28.71  31.85  3.14"))            # percentage missing
+    _never_persisted(_set_row(lines, "JET A-1", "JET A-1  28.71  31.85  3.14  99.00"))      # percentage inconsistent
+    _never_persisted(_set_row(lines, "JET A-1", "JET A-1  28.71  31.85  3.14  10.94  1.00"))  # extra cell
+
+
+def test_press_unchanged_price_prints_dashes_only_when_it_is_unchanged():
+    lines = press_lines(layout="pct")
+    ok = _set_row(lines, "JET A-1", "JET A-1  31.85  31.85  -  -")
+    assert erb_pdf.parse_press_statement(ok).prices["JET_A1"] == Decimal("31.85")
+    _never_persisted(_set_row(lines, "JET A-1", "JET A-1  28.71  31.85  -  -"))   # changed but no variance
+
+
+def test_press_variance_tolerates_erbs_own_one_cent_rounding_only():
+    ok = _set_row(press_lines(), "KEROSENE", "KEROSENE  27.02  30.08  3.07")   # 30.08 - 27.02 = 3.06
+    assert erb_pdf.parse_press_statement(ok).prices["KEROSENE"] == Decimal("30.08")
+    _never_persisted(_set_row(press_lines(), "KEROSENE", "KEROSENE  27.02  30.08  3.08"))
+
+
+def test_press_single_column_layout_exact_count():
+    assert erb_pdf.parse_press_statement(press_lines(layout="old")).prices["JET_A1"] == Decimal("31.85")
+    _never_persisted(_set_row(press_lines(layout="old"), "JET A-1", "JET A-1  31.85  3.14"))  # extra value
+    _never_persisted(_set_row(press_lines(layout="old"), "JET A-1", "JET A-1"))             # no value
+
+
+def test_press_unrecognised_heading_is_rejected():
+    lines = [l.replace("PRODUCT  CURRENT  NEW", "PRODUCT  OLD  NEW") for l in press_lines()]
+    _never_persisted(lines)
+    _never_persisted([l.replace("VARIANCE", "") for l in press_lines()])  # CURRENT/NEW without a VARIANCE column
+
+
+def test_press_row_order_does_not_change_validation():
+    lines = press_lines()
+    base = erb_pdf.parse_press_statement(lines).prices
+    rest = [l for l in lines if not l.startswith("JET A-1")]
+    at = rest.index("PETROL")
+    good_first = rest[:at] + ["JET A-1  28.71  31.85  3.14"] + rest[at:]
+    assert erb_pdf.parse_press_statement(good_first).prices == base
+    _never_persisted(rest[:at] + ["JET A-1  31.85  3.14"] + rest[at:])  # same malformed row, now first
+    _never_persisted(rest[:-2] + ["JET A-1  31.85  3.14"] + rest[-2:])  # ... and last
 
 
 # ---------------- reconciliation (checks only, never replaces a published value) ----------------
@@ -427,14 +515,14 @@ def total_items():
     return sum(len(b.items) for b, _ in parsed_set())
 
 
-def job_world(*, press_prices=("31.05", "32.45", "30.08", "31.85"), scanned_press=False, with_pump=True):
+def job_world(*, press_prices=("31.05", "32.45", "30.08", "31.85"), scanned_press=False, with_pump=True, press_override=None):
     urls = {
         "press": f"{B}/PressStatements/CurrentFuelPumpPricesOctober2026.pdf",
         "pump": f"{B}/files/FuelPumpPrices/OCTOBER-2026-PUMP-PRICE-BUILD-UP.pdf",
         "wholesale": f"{B}/files/FuelPumpPrices/WHOLESALE-PRICE-BUILD-UP-FOR-OCTOBER-2026.pdf",
         "jet": f"{B}/files/FuelPumpPrices/OCTOBER-2026-WHOLESALE-PRICE-BUILD-UP-FOR-JET-A-1.pdf",
     }
-    press_pdf = make_pdf([], text=False) if scanned_press else make_pdf(press_lines(prices=press_prices))
+    press_pdf = make_pdf([], text=False) if scanned_press else make_pdf(press_override or press_lines(prices=press_prices))
     pdfs = {urls["press"]: (press_pdf, "application/pdf"),
             urls["pump"]: (make_pdf(pump_lines(month="OCTOBER 2026")), "application/pdf"),
             urls["wholesale"]: (make_pdf(wholesale_lines(month="OCTOBER 2026")), "application/pdf"),
@@ -473,6 +561,15 @@ def test_job_reports_missing_scanned_and_reconciliation_failures():
     assert scanned["scanned_documents"] == 1 and scanned["ocr_rejected"] == 1 and scanned["retail_rows"] == 0 and scanned["build_up_items"] == total_items()  # build-ups still imported
     bad = run_job(job_world(press_prices=("33.45", "32.45", "30.08", "31.85")), dry_run=True)
     assert bad["reconciliation_failures"] == 1 and bad["retail_rows"] == 0 and bad["build_up_items"] == 0  # the whole month is skipped
+
+
+def test_job_malformed_text_press_row_yields_no_retail_row_and_never_ocr():
+    """Codex's Jet A-1 case through the job: the statement is unsupported, no retail row exists, and OCR is not tried."""
+    def no_ocr(data):
+        raise AssertionError("a text PDF must never be OCR'd")
+    bad = _set_row(press_lines(), "JET A-1", "JET A-1  31.85  3.14")
+    r = run_job(job_world(press_override=bad), dry_run=True, ocr=no_ocr)
+    assert r["retail_rows"] == 0 and r["unsupported_documents"] >= 1 and r["ocr_parsed"] == 0 and r["text_press_parsed"] == 0
 
 
 def test_job_rejects_future_inverted_and_oversized_ranges():

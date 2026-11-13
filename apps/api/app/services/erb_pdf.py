@@ -360,6 +360,68 @@ class ParsedPress:
     extraction_method: str = "text"  # "text" (text layer) or "ocr" (scanned statement); operational metadata only
 
 
+@dataclass(frozen=True)
+class PressLayout:
+    """The verified column schema of a press-statement table, derived from its heading (never guessed)."""
+    selected: int           # index of the NEW pump price among the row's values
+    count: int              # exact number of values every product row must carry
+    has_variance: bool      # CURRENT, NEW, absolute VARIANCE[, % CHANGE]
+    has_percent: bool
+
+
+def _press_layout(heading: str) -> PressLayout:
+    if "CURRENT" in heading and "NEW" in heading:
+        if "VARIANCE" not in heading:
+            raise FuelPdfError("Unexpected price table heading")
+        percent = bool(re.search(r"%|PERCENT|CHANGE", heading))
+        return PressLayout(1, 3 + percent, True, percent)  # CURRENT, NEW, VARIANCE[, % CHANGE]
+    if "PUMP PRICE" in heading and "CURRENT" not in heading:
+        return PressLayout(0, 1, False, False)  # a single NEW PUMP PRICE column
+    raise FuelPdfError("Unexpected price table heading")
+
+
+_PRICE_CELL = re.compile(r"\d+\.\d{2}")
+_DELTA_CELL = re.compile(r"-?\d+\.\d{2}|\(\d+\.\d{2}\)|-")  # a signed figure, or "-" for no change
+
+
+def _delta(token: str) -> Decimal | None:
+    if token == "-":
+        return None
+    return -Decimal(token.strip("()")) if token.startswith("(") else Decimal(token)
+
+
+def _press_row_price(tokens: list[str], layout: PressLayout) -> Decimal:
+    """One logical product row (possibly wrapped across PDF lines) -> its NEW price, or reject the statement."""
+    if len(tokens) != layout.count:
+        raise FuelPdfError("Press statement row does not have the columns its heading declares")
+    if not _PRICE_CELL.fullmatch(tokens[layout.selected]):
+        raise FuelPdfError("Malformed press statement price row")
+    new = Decimal(tokens[layout.selected])
+    if new <= 0:
+        raise FuelPdfError("Press statement price is not positive")
+    if not layout.has_variance:
+        return new
+    if not _PRICE_CELL.fullmatch(tokens[0]) or Decimal(tokens[0]) <= 0:
+        raise FuelPdfError("Malformed CURRENT price in the press statement")
+    current = Decimal(tokens[0])
+    if not all(_DELTA_CELL.fullmatch(t) for t in tokens[2:]):
+        raise FuelPdfError("Malformed variance cell in the press statement")
+    variance = _delta(tokens[2])
+    if (variance is None) != (new == current):  # "-" is printed only for an unchanged price
+        raise FuelPdfError("Press statement variance does not match its prices")
+    # ERB computes the variance from unrounded prices, so it can differ from NEW - CURRENT by 0.01 (real: Oct 2026
+    # kerosene 29.76 - 27.02 = 2.74, printed 2.75). Never used as a price; any larger gap rejects the statement.
+    if variance is not None and abs(variance - (new - current)) > Decimal("0.01"):
+        raise FuelPdfError("Press statement variance does not match its prices")
+    if layout.has_percent:
+        percent = _delta(tokens[3])
+        expected = None if variance is None else (variance / current * 100)
+        if (percent is None) != (expected is None) or (
+                percent is not None and abs(percent - expected) > Decimal("0.01")):
+            raise FuelPdfError("Press statement percentage does not match its prices")
+    return new
+
+
 def parse_press_statement(lines: list[str]) -> ParsedPress:
     text = re.sub(r"\s+", " ", " ".join(lines))
     titles = {(int(y), MONTH_NAMES.index(m.upper()) + 1)
@@ -384,28 +446,17 @@ def parse_press_statement(lines: list[str]) -> ParsedPress:
     first = re.search(r"\b(PETROL|DIESEL|KEROSENE|JET A-?1)\b", body)
     if first is None:
         raise FuelPdfError("No prices found in the press statement")
-    heading = body[:first.start()].upper()
-    if "CURRENT" in heading and "NEW" in heading:
-        column = 1  # CURRENT, NEW, ABSOLUTE VARIANCE: the new price is the second column
-    elif "PUMP PRICE" in heading:
-        column = 0
-    else:
-        raise FuelPdfError("Unexpected price table heading")
+    layout = _press_layout(body[:first.start()].upper())
     rows = re.findall(_PRESS_ROW, body[first.start():])
     leftover = re.sub(_PRESS_ROW, "", body[first.start():]).strip()
     if leftover:
         raise FuelPdfError("Unexpected text inside the price table")
     prices: dict[str, Decimal] = {}
     for label, values in rows:
-        tokens = values.split()
         product = _PRESS_PRODUCTS[re.sub(r"\s+", "", label)]
-        if len(tokens) <= column or not re.fullmatch(r"\d+\.\d{2}", tokens[column]):
-            raise FuelPdfError("Malformed press statement price row")
         if product in prices:
             raise FuelPdfError("Duplicate product in press statement")
-        prices[product] = Decimal(tokens[column])
-        if prices[product] <= 0:
-            raise FuelPdfError("Press statement price is not positive")
+        prices[product] = _press_row_price(values.split(), layout)
     if not prices:
         raise FuelPdfError("No prices found in the press statement")
     return ParsedPress(start, prices, midnight)
