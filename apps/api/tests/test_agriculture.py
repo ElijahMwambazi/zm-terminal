@@ -183,7 +183,11 @@ def pg_engine():
     migration = Path(__file__).parents[3] / "db" / "init" / "008_zambia_agricultural_prices.sql"
     with engine.begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS zambia_agricultural_prices"))
-        for statement in migration.read_text().split(";"):
+        sql = "\n".join(
+            line for line in migration.read_text().splitlines()
+            if not line.lstrip().startswith("--")
+        )
+        for statement in sql.split(";"):
             if statement.strip():
                 conn.exec_driver_sql(statement)
     yield engine
