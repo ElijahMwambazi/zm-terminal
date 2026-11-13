@@ -13,6 +13,7 @@ from app.main import app
 from app.schemas.agriculture import AgricultureHistoryPoint, AgriculturePrice
 from app.services import agriculture_store, moa_agriculture
 from app.services.moa_agriculture import AgricultureSourceError, UnsupportedLayoutError
+from app.services.provider_policy import MOA_AGRICULTURE_POLICY, PROVIDER_POLICIES
 
 router_module = importlib.import_module("app.api.router")
 NOW = datetime(2026, 11, 13, 10, tzinfo=timezone.utc)
@@ -75,6 +76,17 @@ def test_layout_b_extracts_only_grain_monthly_prices_and_ignores_printed_changes
     assert all(r.source_unit == "kg" and r.source_currency == "ZMW" for r in rows)
     assert all(r.market_type == "national_average" and r.price_basis == "indicative_average" for r in rows)
     assert not any("SEED" in r.commodity for r in rows)
+
+
+
+def test_ministry_provider_policy_is_review_required_and_registered():
+    policy = MOA_AGRICULTURE_POLICY
+    assert policy.provider_id == "moa"
+    assert policy.dataset_id in PROVIDER_POLICIES
+    assert policy.authentication == "none"
+    assert policy.raw_response_storage == "disabled"
+    assert policy.redistribution == policy.commercial_use == "review_required"
+    assert set(policy.required_timestamps) == {"period_start", "period_end", "publication_date", "retrieved_at"}
 
 
 def test_table1_must_reconcile_december_and_january():
