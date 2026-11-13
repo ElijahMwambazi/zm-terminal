@@ -9,6 +9,9 @@ from sqlalchemy import text
 
 from app.db import database_is_ready, get_engine
 from app.schemas.fx import FxHistory, FxQuote
+from app.schemas.agriculture import (
+    AGRICULTURE_COMMODITIES, AgricultureCommodity, AgricultureHistory, AgricultureLatest, AgriculturePrice, AgricultureRange,
+)
 from app.schemas.fuel_buildup import BuildUpType, FuelBuildUp
 from app.schemas.fuel import FUEL_PRODUCTS, FuelHistory, FuelLatest, FuelPrice, FuelProduct, FuelRange, PriceType
 from app.schemas.bonds import (
@@ -19,6 +22,7 @@ from app.schemas.tbills import (
     TENORS, HistoryRange, RejectedTender, Tenor, TreasuryBillAuction, TreasuryBillHistory, TreasuryBillsLatest,
 )
 from app.services.boz import get_boz_fx_quote
+from app.services.agriculture_store import fetch_agriculture_history, fetch_latest_agriculture
 from app.services.bond_store import BondConflictError, fetch_bond_history, save_bond_auctions
 from app.services.boz_bonds import get_boz_bonds, latest_per_tenor as latest_bonds, unverified_tenors
 from app.services.boz_treasury import LUSAKA, get_boz_tbills, latest_per_tenor
@@ -213,6 +217,49 @@ async def fuel_product(product: FuelProduct) -> FuelPrice:
     match = [p for p in prices if p.product == product]
     if not match:
         raise HTTPException(status_code=404, detail=f"No stored retail price for {product}")
+    return match[0]
+
+
+@router.get("/agriculture/latest", response_model=AgricultureLatest)
+async def agriculture_latest() -> AgricultureLatest:
+    """Newest stored Ministry national-average grain price per commodity."""
+    try:
+        prices = await asyncio.to_thread(fetch_latest_agriculture)
+    except Exception as exc:
+        logger.warning("Agriculture read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored agriculture prices unavailable") from exc
+    have = {p.commodity for p in prices}
+    return AgricultureLatest(
+        prices=prices,
+        missing_commodities=[c for c in AGRICULTURE_COMMODITIES if c not in have],
+    )
+
+
+@router.get("/agriculture/history", response_model=AgricultureHistory)
+async def agriculture_history(
+    commodity: AgricultureCommodity = "MAIZE", range: AgricultureRange = "1Y",
+) -> AgricultureHistory:
+    """Stored Ministry observations only; the Ministry is never called here."""
+    try:
+        points = await asyncio.to_thread(fetch_agriculture_history, commodity, range, today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("Agriculture history read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored agriculture prices unavailable") from exc
+    return AgricultureHistory(
+        commodity=commodity, range=range, count=len(points), observations=points,
+    )
+
+
+@router.get("/agriculture/{commodity}", response_model=AgriculturePrice)
+async def agriculture_commodity(commodity: AgricultureCommodity) -> AgriculturePrice:
+    try:
+        prices = await asyncio.to_thread(fetch_latest_agriculture)
+    except Exception as exc:
+        logger.warning("Agriculture read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored agriculture prices unavailable") from exc
+    match = [p for p in prices if p.commodity == commodity]
+    if not match:
+        raise HTTPException(status_code=404, detail=f"No stored Ministry national-average price for {commodity}")
     return match[0]
 
 
