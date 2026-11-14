@@ -22,7 +22,8 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - No active implementation branch after the sovereign yield curve.
 
 ## Next
-- **Gold licence confirmation (blocker before `GOLD`):** send the drafted licence question to data@worldbank.org (it covers the oil series and Gold, `docs/research/gold-provider-discovery.md` section 8) and wait for a written answer; the Gold series also changed definition in June 2025. No gold code until the source is approved
+- **1. Gold licence confirmation (blocker):** obtain World Bank written clarification for dataset 0038238 covering the monthly workbook, Gold, Brent and WTI (drafted, unsent: `docs/research/gold-provider-discovery.md` section 8); the Gold series also changed definition in June 2025
+- **2. `GOLD` vertical slice, only if that clarification permits it:** not approved and not started; no gold code until then
 - **Before public deployment:** confirm with data@worldbank.org that the World Bank Data Catalog licence (CC BY 4.0, dataset 0038238) applies to the monthly Pink Sheet workbook used for oil; `OIL ZM` inherits Brent as an input, so it must not be described as freely redistributable until then. Not a blocker for development or the code PR.
 
 ## Planned

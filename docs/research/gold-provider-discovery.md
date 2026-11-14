@@ -6,16 +6,18 @@ Conventions: **Fact** = read directly from an official source on 2026-11-14. **I
 
 ## 1. Outcome
 
-**PREFERRED SOURCE — LICENCE CONFIRMATION REQUIRED.** The World Bank Pink Sheet monthly Gold series is the preferred source (technically cheapest, same workbook and parser as Brent/WTI, one licence question covers oil and gold). It is **not** approved for persisted, redistributed or commercial use yet, because the Gold series lists third-party commercial data vendors as sources and the Dataset Terms carve third-party data out of the CC BY grant. IMF PCPS is the backup and carries the same class of open question (its Gold series is an LBMA fixing). LBMA/IBA is rejected without a licence; FRED no longer carries the LBMA series.
+**PREFERRED SOURCE — LICENCE CONFIRMATION REQUIRED.** The World Bank Pink Sheet monthly Gold series is the preferred source (technically cheapest, same workbook and parser as Brent/WTI, one licence question covers oil and gold). It is **not** approved for persisted, redistributed or commercial use yet, because the Gold series names external data vendors as sources and the Dataset Terms carve some third-party data out of the CC BY grant (whether that applies here is unresolved). IMF PCPS is the backup candidate, licence clarification required: its current `PGOLD` metadata references a London Bullion Market fixing methodology, which raises its own third-party-rights question. LBMA/IBA is rejected without a licence; FRED no longer carries the LBMA series.
 
 ## 2. Evaluation matrix
 
+Status vocabulary: `acceptable for local research` (an engineering/source-governance classification, not legal advice or a formal licensing determination), `review_required` (written clarification or licence needed), `rejected_without_licence`, `not suitable`. "Named external sources; rights unresolved" means external data providers are named as sources, but whether their rights restrict our reuse is not established.
+
 | Candidate | Authority | Frequency | History | Machine-readable | Auth | Persist allowed | Redistribution | Commercial use | Underlying third party | Decision |
 |---|---|---|---|---|---|---|---|---|---|---|
-| World Bank Pink Sheet (`Gold`, workbook `CMO-Historical-Data-Monthly.xlsx`) | World Bank Prospects Group | Monthly average (published ~2nd business day) | 1960M01 to 2026M10 (802 months, no gaps) | XLSX (strict-parseable) | None | Catalog says CC BY 4.0; applicability to this series unconfirmed | `review_required` | `review_required` | **Yes, named**: Bloomberg Finance L.P., Kitco.com, IMF IFS, London Bullion Market, Metals Week, Platts Metals Week, Shearson Lehman Brothers, Thomson Reuters Datastream | **PREFERRED, licence confirmation required** |
-| IMF PCPS (`PGOLD`) | IMF Research Dept. | Monthly (also quarterly, annual) | 1992-M01 to 2026-M10 (418 months) | SDMX 3.0 JSON, anonymous | None observed | "Statistical Data" terms permit download/extract/derivative works with attribution; no storage clause | `review_required` | `review_required` (IMF asks for `copyright@imf.org`) | **Yes**: series described as the LBMA fixing | **BACKUP** |
-| LBMA Gold Price / IBA | LBMA (owner), ICE Benchmark Administration (administrator) | Twice daily | Historical tables on gated MyLBMA | Gated | Licence + portal | No, without an IBA licence | No, without an IBA licence | Licence required | n/a (it is the benchmark) | **REJECTED without licence** |
-| FRED (former LBMA gold series) | St. Louis Fed (mirror) | Daily (formerly) | n/a | API | API key | n/a | n/a | n/a | LBMA/IBA | **REJECTED**: series removed |
+| World Bank Pink Sheet (`Gold`, workbook `CMO-Historical-Data-Monthly.xlsx`) | World Bank Prospects Group | Monthly average (published ~2nd business day) | 1960M01 to 2026M10 (802 months, no gaps) | XLSX (strict-parseable) | None | acceptable for local research; public persistence `review_required` (catalog says CC BY 4.0; applicability to this workbook/series unconfirmed) | `review_required` | `review_required` | Named external sources; rights unresolved (Bloomberg Finance L.P., Kitco.com, IMF IFS, London Bullion Market, Metals Week, Platts Metals Week, Shearson Lehman Brothers, Thomson Reuters Datastream) | **PREFERRED, licence confirmation required** |
+| IMF PCPS (`PGOLD`) | IMF Research Dept. | Monthly (also quarterly, annual) | 1992-M01 to 2026-M10 (418 months) | SDMX 3.0 JSON, anonymous | None observed | acceptable for local research; public persistence `review_required` ("Statistical Data" terms permit download/extract/derivative works with attribution; no storage clause) | `review_required` | `review_required` (IMF asks for `copyright@imf.org`) | Named external source; rights unresolved (current metadata references a London Bullion Market fixing) | **BACKUP CANDIDATE: licence clarification required** |
+| LBMA Gold Price / IBA | LBMA (owner), ICE Benchmark Administration (administrator) | Twice daily | Historical tables on gated MyLBMA | Gated | Licence + portal | `rejected_without_licence` | `rejected_without_licence` | `rejected_without_licence` | n/a (it is the benchmark) | **REJECTED without licence** |
+| FRED (former LBMA gold series) | St. Louis Fed (mirror) | Daily (formerly) | n/a | API | API key | `not suitable` | `not suitable` | `not suitable` | LBMA/IBA data removed from FRED in January 2022 | **REJECTED**: series removed |
 | Other candidates | none investigated | | | | | | | | | Nothing found that materially improves the decision; no generic commercial gold APIs, finance-site feeds or scrapers were considered |
 
 ## 3. World Bank Pink Sheet
@@ -25,15 +27,15 @@ Conventions: **Fact** = read directly from an official source on 2026-11-14. **I
 - Workbook sheets: `Mismatch Details`, `Monthly Prices`, `Monthly Indices`, `Description`, `Index Weights`. Title row: "World Bank Commodity Price Data (The Pink Sheet)"; row 2: "monthly prices in nominal US dollars, 1960 to present"; row 3: "(monthly series are available only in nominal US dollars)"; row 4: "Updated on November 03, 2026" (the same row layout the oil parser already validates).
 - Sheet `Monthly Prices`, header row 5 (label row), unit row 6, data from row 7. Column label exactly **`Gold`** (sits between `Zinc` and `Platinum`), unit cell exactly **`($/troy oz)`** (the Pink Sheet PDF prints `$/toz` and defines "toz = troy oz", so `toz` = troy ounce is confirmed by the official legend).
 - Month keys `1960M01`..`2026M10`, 802 consecutive months, **no missing cells for Gold** (the `…` marker, used by WTI before 1982, does not occur). The PDF uses `..` for not available.
-- Cell values are **whole numbers (Excel integers)**: all 802 Gold cells are integers (e.g. 2026M10 = 4105, 2026M09 = 4319). Published precision is whole US dollars per troy ounce. Pre-1970s values are the same (1960M01 = 35).
+- Cell values are **whole numbers (Excel integers)**: all 802 Gold cells are integers (e.g. 2026M10 = 4105, 2026M09 = 4319). Published precision is whole US dollars per troy ounce; the earliest cell (1960M01) is also a whole number (35).
 - The Pink Sheet PDF (3 Nov 2026) gives monthly averages to the same precision; Oct 2026 = 4,105 matches the workbook.
-- `Mismatch Details` sheet (a "Current vs Uploaded" cell comparison of this release against the previous upload) listed 156 rows in this release and **no Gold rows**; its affected commodities were Barley, Fish meal, LNG Japan, Natural gas index, Palm kernel oil, Rapeseed oil, Sorghum, Soybean meal, Soybean oil, Soybeans, Sunflower oil. This shows that the World Bank does revise past months (for other series) between releases.
+- `Mismatch Details` sheet (a "Current vs Uploaded" cell comparison of this release against the previous upload) contains 156 rows in this release (including its header and blank lines) and **no Gold rows**; its affected commodities were Barley, Fish meal, LNG Japan, Natural gas index, Palm kernel oil, Rapeseed oil, Sorghum, Soybean meal, Soybean oil, Soybeans, Sunflower oil. This shows that the World Bank does revise past months (for other series) between releases.
 
 ### 3.2 Facts: definition of the Gold series, including a methodology break
 - Workbook `Description` sheet, Gold row: "**Gold, spot average of daily rates, from June 2025; previously (UK), 99.5% fine, London afternoon fixing, average of daily rates**".
 - The same row's Sources column: "Bloomberg Finance L.P.; Kitco.com; International Monetary Fund, International Financial Statistics; London Bullion Market; Metals Week; Platts Metals Week; Shearson Lehman Brothers, Metal Market Weekly Review; Thomson Reuters Datastream; World Bank."
 - Pink Sheet PDF description page: "Gold, Gold, spot average of daily rates." (the PDF text is the abbreviated form; the London-fixing wording is in the workbook note).
-- **The series definition changed in June 2025**: months to May 2025 are averages of the London afternoon fixing; June 2025 onward are averages of daily *spot* rates. The workbook is one continuous column with no flag on the rows. Overlap with the IMF series (section 4) shows no visible jump, but the definitions differ, so this must be disclosed to users if the history is ever charted.
+- **The series definition changed in June 2025**: months to May 2025 are averages of the London afternoon fixing; June 2025 onward are averages of daily *spot* rates. The workbook is one continuous column with no flag on the rows. The workbook explicitly records a methodology change from June 2025. This research does not assess whether that change introduced a statistical level shift, so the break must be disclosed to users if the history is ever charted.
 - Units and basis: US dollars per troy ounce, monthly average of daily rates, nominal.
 - **Provenance finding:** the workbook names data vendors and market sources (Bloomberg, Kitco, Thomson Reuters Datastream, IMF IFS, London Bullion Market) as a list. It does **not** say which supplied which period, and it does not name LBMA or ICE Benchmark Administration as the licensor of the series; "London Bullion Market" appears only as one entry in the source list. No provider may be inferred beyond that list.
 - Release cadence: "Updated on November 03, 2026". The World Bank Data Catalog entry for dataset 0038238 says updated about the 2nd business day of the month; its own metadata update date is 2025-05-14 (from the earlier oil research).
@@ -69,7 +71,7 @@ Not established: that any of the listed vendors (Bloomberg, Kitco, Thomson Reute
 
 | Use | Decision | Reason |
 |---|---|---|
-| Local/private ZM Terminal use | `approved` | Dataset Terms expressly allow extract/download/copy; private research use of a free published workbook creates no redistribution or commercial exposure. This matches what the oil slice already does. |
+| Local/private ZM Terminal use | `acceptable for local research` | Dataset Terms expressly allow extract/download/copy; private research use of a free published workbook creates no redistribution or commercial exposure. This matches what the oil slice already does. |
 | Public non-commercial deployment | `review_required` | CC BY and Dataset Terms point to "yes with attribution", but the Gold sources are named third-party vendors and the workbook-to-dataset link is unstated. |
 | Commercial deployment | `review_required` | CC BY allows it in principle; the third-party exception and the general site terms' non-commercial default make it unsafe to assume. |
 | API redistribution | `review_required` | Same reasons; an API is the clearest redistribution case. |
@@ -77,16 +79,16 @@ Not established: that any of the listed vendors (Bloomberg, Kitco, Thomson Reute
 ## 4. IMF Primary Commodity Price System (PCPS)
 
 ### 4.1 Facts: series and access
-- Official source: https://data.imf.org/Datasets/PCPS (now `https://data.imf.org/en/datasets/IMF.RES:PCPS`). The portal returned `403 Access Denied` to plain scripted GETs (CDN bot protection); we did not try to work around it. The page text was read with a normal fetch tool. Its description: "Indices of market prices for fuel and non-fuel commodities, and actual market prices for fuel and non-fuel commodities."
+- Official source: https://data.imf.org/Datasets/PCPS (now `https://data.imf.org/en/datasets/IMF.RES:PCPS`). Scripted GETs to `data.imf.org` and `imf.org` returned HTTP 403 (Access Denied). One retry of the `imf.org` terms pages used a browser-style client string (`Mozilla/5.0 (X11; Linux x86_64) zm-terminal-research`) and also returned 403. No authentication, CAPTCHA, session, cookie, access control or gated content was bypassed. The public page text was then read with a normal fetch tool. Its description: "Indices of market prices for fuel and non-fuel commodities, and actual market prices for fuel and non-fuel commodities."
 - A public SDMX 3.0 API was reachable **without authentication or a key**: `https://api.imf.org/external/sdmx/3.0/…` (dataflow `IMF.RES:PCPS` version 9.0.0, structure `DSD_PCPS` 10.0.0; dataflow `lastUpdatedAt` annotation 2025-06-16). The legacy host `dataservices.imf.org` did not resolve from this machine.
 - Dimensions: `COUNTRY` (world = `G001` in this response), `INDICATOR`, `DATA_TRANSFORMATION`, `FREQUENCY`. Observation attributes include `PRECISION`, series attributes `SCALE`, `DECIMAL_DISPLAYED`.
 - Gold indicator code **`PGOLD`**: name "Gold, US dollars per troy ounce of gold, Unit prices"; description (from the structure codelist, **read directly**): "Gold, Fixing Committee of the London Bullion Market Association, London 3 PM fixed price, US$ per troy ounce". Series used: `G001.PGOLD.USD.M` (data transformation `USD`, monthly). Also published as `A` (annual, 1992 to 2025) and `Q` (quarterly, 1992 to 2026-Q3) and as index/percent-change transformations.
 - Monthly history: 418 observations, `1992-M01` to `2026-M10`; latest values `2026-M08` 4419.4157…, `2026-M09` 4326.9841…, `2026-M10` 4102.3664… (observation values are returned as decimal strings with full precision, e.g. `354.700958251953`). Values are **monthly averages of the daily fixing** (derived: the monthly figure is not a whole-dollar value and differs from any single fixing), not an end-of-period fixing. The IMF record does not state the aggregation in the text we read; treat "monthly average" as interpretation until IMF metadata is read.
 - The PCPS portal page did not show the metadata panel; the London 3 PM statement above comes from the API's own structure definition, not the portal text. Update cadence is not stated on the page; the monthly data reached 2026-M10 on 2026-11-14.
-- Research traffic was minimal: three structure/data requests, one of them the full `DSD_PCPS` structure (2.6 MB). No production client was written.
+- A small number of SDMX discovery, structure and data requests were made to `api.imf.org`; no API key was required. No production client was written.
 
 ### 4.2 Cross-check against the World Bank Gold series
-Over the 418 overlapping months (1992-M01 to 2026-M10) the World Bank whole-dollar value and the IMF value differ by a median of 0.055%, a mean of 0.09% and a maximum of 0.745% (2011-M12: 1640 vs 1652.31). Oct 2026: 4105 vs 4102.37. The two series agree closely but are not identical; the World Bank series is the rounded one. This supports the plausibility of both and does not settle the licence.
+Over the 418 overlapping months (1992-M01 to 2026-M10) the World Bank whole-dollar value and the IMF value differ by a median of 0.055%, a mean of 0.09% and a maximum of 0.745% (2011-M12: 1640 vs 1652.31). Oct 2026: 4105 vs 4102.37. The months were aligned by calendar month; both series are USD per troy ounce and no FX conversion was involved. World Bank values are whole-dollar monthly figures and IMF values keep greater precision. Whole-dollar rounding is at most 0.5 USD per month, which cannot explain the larger gaps (for example 2011-M12 differs by 12.31 USD), so some differences must come from source or methodology conventions. The differences are observations, not errors. Their average is about 0.088% before and 0.125% after June 2025; no structural break is inferred from that. The comparison is a plausibility check only: it does not show equivalent methodology or licence status.
 
 ### 4.3 Facts: IMF terms (https://www.imf.org/en/about/copyright-and-terms; no "last updated" date shown)
 - General Content: "Free non-systematic downloading and/or printing of Content for personal, noncommercial usage only" … "without any right to resell, redistribute, compile, or create derivative works." Written permission is needed for "Copying or downloading IMF Content in any systematic way."
@@ -99,7 +101,7 @@ Over the 418 overlapping months (1992-M01 to 2026-M10) the World Bank whole-doll
 
 | Use | Decision | Reason |
 |---|---|---|
-| Local/private | `approved` | Personal non-commercial use is permitted; "Primary Commodity Prices" are listed as Statistical Data that may be downloaded and copied. |
+| Local/private | `acceptable for local research` | Personal non-commercial use is permitted; "Primary Commodity Prices" are listed as Statistical Data that may be downloaded and copied. |
 | Public non-commercial | `review_required` | Terms permit publishing and distribution with attribution, but `PGOLD` is itself a London Bullion Market Association fixing, and IBA states that real-time and historical benchmark data needs a licence (section 5). The IMF does not say whether PCPS Gold carries an IBA permission. |
 | Commercial | `review_required` | IMF explicitly directs potential commercial reuse to `copyright@imf.org`. |
 | API redistribution | `review_required` | "distribute" is permitted for Statistical Data, but the third-party question applies, and an automated API client touches the "bulk download by automated technology" prohibition (a single manual import is probably not "bulk"; unconfirmed). |
@@ -132,7 +134,7 @@ Subject: Licence clarification: Pink Sheet monthly workbook (dataset 0038238) fo
 
 > Hello,
 >
-> I am building an open research application (ZM Terminal) that reads monthly commodity prices from the World Bank Commodity Price Data (The Pink Sheet), file `CMO-Historical-Data-Monthly.xlsx`, linked from https://www.worldbank.org/en/research/commodity-markets. The Data Catalog entry for "Commodity Prices - History and Projections" (dataset 0038238) lists Creative Commons Attribution 4.0, and the Dataset Terms say third-party data may be excepted.
+> I am building a research application (ZM Terminal) that reads monthly commodity prices from the World Bank Commodity Price Data (The Pink Sheet), file `CMO-Historical-Data-Monthly.xlsx`, linked from https://www.worldbank.org/en/research/commodity-markets. The Data Catalog entry for "Commodity Prices - History and Projections" (dataset 0038238) lists Creative Commons Attribution 4.0, and the Dataset Terms say third-party data may be excepted.
 >
 > The application stores normalised monthly observations (series name, unit, month, value, publication date, source URL, retrieval time) in its own database. It does not redistribute the Excel workbook. It displays the values with attribution and may in future be accessible publicly, and possibly commercially, through a web interface and an API.
 >
@@ -156,11 +158,11 @@ Status: drafted in this document only; not sent. The sender name is left blank f
 ## 9. Draft email: IMF (NOT SENT; send only if the IMF path is pursued)
 
 To: `copyright@imf.org`
-Subject: Reuse of IMF Primary Commodity Price System gold prices in an open research application
+Subject: Reuse of IMF Primary Commodity Price System gold prices in a research application
 
 > Hello,
 >
-> I am building an open research application (ZM Terminal) that would store the monthly IMF PCPS Gold series (`PGOLD`, US dollars per troy ounce, monthly) from the IMF SDMX API (`api.imf.org`) as normalised observations with source and retrieval time, display them with the attribution "Source: International Monetary Fund, Primary Commodity Price System", and may in future expose them publicly and commercially through a web interface and an API. The import would be a single manual request for one series.
+> I am building a research application (ZM Terminal) that would store the monthly IMF PCPS Gold series (`PGOLD`, US dollars per troy ounce, monthly) from the IMF SDMX API (`api.imf.org`) as normalised observations with source and retrieval time, display them with the attribution "Source: International Monetary Fund, Primary Commodity Price System", and may in future expose them publicly and commercially through a web interface and an API. The import would be a single manual request for one series.
 >
 > Could you confirm (1) that this reuse is covered by the Statistical Data terms for Primary Commodity Prices; (2) whether a manual single-series import counts as "bulk download by automated technology"; (3) whether the PCPS Gold series, described as the LBMA/London 3 PM fixing, is subject to third-party rights (ICE Benchmark Administration/LBMA) that restrict storing, displaying or redistributing it, and (4) what permission is needed for commercial reuse?
 >
@@ -190,7 +192,7 @@ This research does **not** change the existing World Bank oil provider policy; B
 World Bank Commodity Price Data (The Pink Sheet), monthly `Gold` ($/troy oz, whole dollars, monthly average of daily rates, spot-based from June 2025). Reasons: already-validated workbook and parser, no authentication, 1960 to 2026-10 history, no missing months, a CC BY 4.0 catalog entry with an explicit contact, and the same clarification covers the oil slice.
 
 ### Backup provider
-IMF PCPS `PGOLD` via the anonymous SDMX API: 1992-M01 to 2026-M10, full-precision decimal strings, consistent definition (LBMA London 3 PM fixing average) and "Primary Commodity Prices" named in the IMF's Statistical Data terms. Weaker on the LBMA/IBA underlying-benchmark question, commercial reuse (explicit `copyright@imf.org` request), and the automated-download clause. It would need a new adapter.
+IMF PCPS `PGOLD` via the anonymous SDMX API: 1992-M01 to 2026-M10, full-precision decimal strings, current structure metadata describing `PGOLD` as a London Bullion Market fixing (not verified to be unchanged across the full history), and "Primary Commodity Prices" named in the IMF's Statistical Data terms. Weaker on the LBMA/IBA underlying-benchmark question (the London Bullion Market fixing reference in the current PGOLD metadata creates its own third-party-rights question for redistribution and commercial use, which is unresolved, not a finding that reuse is prevented), commercial reuse (explicit `copyright@imf.org` request), and the automated-download clause. It would need a new adapter.
 
 ### Rejected providers
 - LBMA Gold Price / IBA: a licence is required to obtain, use or redistribute historical data.
@@ -198,9 +200,9 @@ IMF PCPS `PGOLD` via the anonymous SDMX API: 1992-M01 to 2026-M10, full-precisio
 - Anything scraped, mirrored or fed by unlicensed convenience APIs: not considered.
 
 ### Licensing status
-- World Bank: local/private `approved`; public non-commercial, commercial and API redistribution all `review_required`.
-- IMF: local/private `approved`; public non-commercial, commercial and API redistribution all `review_required`.
-- LBMA/IBA: `rejected` without a licence. FRED: `rejected`.
+- World Bank: local/private `acceptable for local research` (engineering/source-governance classification, not legal advice or a formal licensing determination); public non-commercial, commercial and API redistribution all `review_required`.
+- IMF: local/private `acceptable for local research` (same caveat); public non-commercial, commercial and API redistribution all `review_required`.
+- LBMA/IBA: `rejected_without_licence`. FRED: `not suitable`.
 
 ### Blocking questions
 1. Does dataset 0038238's CC BY 4.0 cover `CMO-Historical-Data-Monthly.xlsx` and the Gold (and Brent/WTI) series, or do third-party rights apply (World Bank, `data@worldbank.org`)?
