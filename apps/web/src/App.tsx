@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getSystemStatus, type AgricultureCommodity, type BondTenor, type FuelProduct, type SystemStatus, type Tenor } from "./api";
+import { getSystemStatus, type AgricultureCommodity, type BondTenor, type FuelProduct, type OilBenchmark, type SystemStatus, type Tenor } from "./api";
 import { COMMAND_NAMES, parseCommand } from "./commands";
 import FuelDetail, { archiveLags, perLitre } from "./FuelDetail";
 import AgricultureDetail, { perKg } from "./AgricultureDetail";
+import OilDetail, { perBarrel } from "./OilDetail";
+import { useOil } from "./useOil";
 import { formatDate, formatLusaka, formatMonth } from "./format";
 import { useFuel } from "./useFuel";
 import { useAgriculture } from "./useAgriculture";
@@ -34,7 +36,9 @@ export default function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [command, setCommand] = useState("");
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | null>(null);
+  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | null>(null);
+  const [oilFocus, setOilFocus] = useState<OilBenchmark | null>(null);
+  const { state: oilState, refresh: refreshOil } = useOil();
   const [fuelFocus, setFuelFocus] = useState<FuelProduct | null>(null);
   const { state: fuelState, refresh: refreshFuel } = useFuel();
   const [agricultureFocus, setAgricultureFocus] = useState<AgricultureCommodity | null>(null);
@@ -90,6 +94,12 @@ export default function App() {
     requestAnimationFrame(() => detailRef.current?.focus());
   };
 
+  const openOil = (benchmark: OilBenchmark | null) => {
+    setOilFocus(benchmark);
+    setDetail("oil");
+    requestAnimationFrame(() => detailRef.current?.focus());
+  };
+
   const runCommand = () => {
     const result = parseCommand(command);
     if (!result.ok) return setCommandError(result.error);
@@ -99,6 +109,7 @@ export default function App() {
     else if (result.action.type === "open-tbill") openTbill(result.action.tenor);
     else if (result.action.type === "open-bond") openBond(result.action.tenor);
     else if (result.action.type === "open-fuel") openFuel(result.action.product);
+    else if (result.action.type === "open-oil") openOil(result.action.benchmark);
     else openAgriculture(result.action.commodity);
   };
 
@@ -111,6 +122,7 @@ export default function App() {
   const bond10 = bondState.status === "ready" ? bondState.data.tenors.find((t) => t.tenor === "10Y") : undefined;
   const petrol = fuelState.status === "ready" ? fuelState.data.prices.find((p) => p.product === "PETROL") : undefined;
   const maize = agricultureState.status === "ready" ? agricultureState.data.prices.find((p) => p.commodity === "MAIZE") : undefined;
+  const brent = oilState.status === "ready" ? oilState.data.observations.find((o) => o.benchmark === "BRENT") : undefined;
   const tbillSkipped = tbillState.status === "ready" ? tbillState.data.skipped_tenders : [];
 
   const now = useMemo(
@@ -138,7 +150,7 @@ export default function App() {
         <span><StatusDot ok={status?.api} /> API</span>
         <span><StatusDot ok={status?.database} /> POSTGRES</span>
         <span><StatusDot ok={status?.openbb} /> OPENBB</span>
-        <span className="status-note">v0.1 — USD/ZMW, BoZ fixed income, ERB fuel, and Ministry agriculture averages</span>
+        <span className="status-note">v0.1 — USD/ZMW, BoZ fixed income, ERB fuel, Ministry agriculture averages, and global oil benchmarks</span>
       </section>
 
       <section className="market-grid" aria-label="Market overview">
@@ -216,6 +228,17 @@ export default function App() {
             {maize && <><br /><span className="text-stale">Published period, not a live market quote</span></>}
           </small>
         </button>
+        <button type="button" className="market-card market-card--live" onClick={() => openOil("BRENT")}>
+          <span className="market-label">BRENT</span>
+          {brent ? <strong>{perBarrel(brent.value)}</strong> : <strong>{oilState.status === "loading" ? "…" : "—"}</strong>}
+          <small>
+            {oilState.status === "loading" && "Loading Brent benchmark…"}
+            {oilState.status === "error" && `${oilState.message}. No price is shown.`}
+            {oilState.status === "ready" && !brent && "No recent Brent observation"}
+            {brent && <>Global benchmark · FRED · {formatDate(brent.observed_date)}</>}
+            {brent && <><br /><span className="text-stale">{brent.stale ? "Stale: " : ""}Daily value, not a live quote</span></>}
+          </small>
+        </button>
         {markets.map((market) => (
           <article className="market-card" key={market.label}>
             <span className="market-label">{market.label}</span>
@@ -232,6 +255,8 @@ export default function App() {
           <FuelDetail ref={detailRef} state={fuelState} focus={fuelFocus} onRefresh={refreshFuel} />
         ) : detail === "agriculture" ? (
           <AgricultureDetail ref={detailRef} state={agricultureState} focus={agricultureFocus} navigationKey={agricultureNavigationKey} onRefresh={refreshAgriculture} />
+        ) : detail === "oil" ? (
+          <OilDetail ref={detailRef} state={oilState} focus={oilFocus} onRefresh={refreshOil} />
         ) : detail === "bond" ? (
           <BondDetail ref={detailRef} state={bondState} focus={bondFocus} onRefresh={refreshBonds} />
         ) : detail === "tbill" ? (
@@ -239,7 +264,7 @@ export default function App() {
         ) : (
           <article className="panel">
             <div className="panel-heading"><span>WORKSPACE</span></div>
-            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, or <code>AGRI ZM</code> for Ministry agriculture averages.</p>
+            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, or <code>OIL</code> for global Brent and WTI benchmarks.</p>
           </article>
         )}
 

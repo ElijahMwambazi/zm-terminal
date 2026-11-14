@@ -14,18 +14,12 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - Ministry maize + soya national-average vertical slice (Layout B, Apr 2025-Jan 2026, stored API/history/UI and `AGRI` commands)
 
 ## Current
-- No active implementation branch after the Ministry agriculture slice.
+- **Global oil: Brent + WTI** is implemented on `feat/global-oil-benchmarks` (OpenBB/FRED, stored history, API, UI, `OIL` commands) and verified offline. It moves to Completed once a live run with a real `FRED_API_KEY` confirms the OpenBB response shape and the first backfill.
 
 ## Next
-- **Global oil: Brent + WTI**
-  - Use an approved provider through the existing FastAPI/OpenBB boundary
-  - Preserve provider/source timestamps and units
-  - Establish stored history before derived Zambia oil analytics
-  - Keep Brent and WTI as separate benchmark series
-  - Do not derive `OIL ZM` until the underlying oil series and BoZ FX semantics are stable
+- **`OIL ZM`** (Brent converted at the BoZ USD/ZMW rate): derived view, only after the stored Brent history and BoZ FX semantics are confirmed stable. Not implemented.
 
 ## Planned
-- `OIL ZM` (Brent converted at the BoZ USD/ZMW rate)
 - Zambia sovereign yield curve (needs the stored T-bill and bond history)
 - Gold provider discovery (licensing first)
 - `GOLD` / `GOLD ZM` once a gold source is approved

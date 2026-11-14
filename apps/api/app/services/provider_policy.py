@@ -118,7 +118,31 @@ MOA_AGRICULTURE_POLICY = ProviderPolicy(
     ),
 )
 
+FRED_OIL_POLICY = ProviderPolicy(
+    provider_id="fred",
+    dataset_id="fred_crude_oil_spot_prices",
+    name="Federal Reserve Bank of St. Louis (FRED), series published by the U.S. Energy Information Administration",
+    source_url="https://fred.stlouisfed.org/series/DCOILBRENTEU",
+    classification="public_market_data",
+    personal_data_expected=False,
+    authentication="api_key",
+    normalized_storage_allowed=True,
+    raw_response_storage="disabled",
+    attribution_required=True,
+    required_provenance=("source", "series_id", "source_url", "unit", "currency"),
+    required_timestamps=("observed_date", "retrieved_at"),
+    redistribution="review_required",
+    commercial_use="review_required",
+    request_guidance=(
+        "Through the OpenBB boundary only (fred provider, /commodity/price/spot; commodity brent=DCOILBRENTEU, "
+        "wti=DCOILWTICO; both USD per barrel, daily). Requires FRED_API_KEY on the OpenBB service. One request per "
+        "benchmark per user action (30-day window), 20 s timeout, no retries, no background polling. Manual bounded "
+        "backfill via app.jobs.backfill_oil. FRED/EIA publish with a lag of days; non-trading days have no value and "
+        "are never filled. Source terms (FRED API and EIA) were not reviewed in this release."
+    ),
+)
+
 # Keyed by dataset: one provider may publish several datasets.
 PROVIDER_POLICIES: dict[str, ProviderPolicy] = {
-    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY, ERB_FUEL_POLICY, MOA_AGRICULTURE_POLICY)
+    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY, ERB_FUEL_POLICY, MOA_AGRICULTURE_POLICY, FRED_OIL_POLICY)
 }
