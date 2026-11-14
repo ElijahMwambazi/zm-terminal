@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useMemo, useState } from "react";
 import { ApiError, COPPER_RANGES, getCopperZmHistory, type CopperRange, type CopperZmHistory } from "./api";
+import CopperKwachaCorrelationSection from "./CopperKwachaCorrelation";
 import CopperKwachaCompareChart, { type CompareSeries } from "./CopperKwachaCompareChart";
 import { rebaseTo100 } from "./compareIndex";
 import { formatFixed, formatMonth } from "./format";
@@ -114,10 +115,10 @@ const CopperKwachaDetail = forwardRef<HTMLElement, object>(function CopperKwacha
               Values are the stored and derived figures from the COPPER ZM history, shown rounded for display. {points.some((p) => p.fx_coverage === "partial_source_window") && <>Months marked partial are those in which the stored BoZ history began, so the FX component covers only part of the month. </>}
               BOZ DAYS and FX OBS show how much stored BoZ data supports each month. Months before stored BoZ history cannot be compared, and no value is filled for them.
               {history.data.copper_months_without_fx > 0 && <> {history.data.copper_months_without_fx} stored Copper month(s) in this selected range have no eligible stored BoZ FX and are omitted.</>}
-              {" "}Rolling correlation and sensitivity are not implemented.
             </p>
           </>
         )}
+        <CopperKwachaCorrelationSection range={range} reloadKey={reloadKey} />
       </div>
     </article>
   );

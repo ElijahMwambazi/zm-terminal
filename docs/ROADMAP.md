@@ -24,6 +24,7 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - Global Copper benchmark, **local/internal implementation**: IMF PCPS `G001.PCOPP.USD.M` (monthly average, nominal USD per metric ton; copper, grade A cathode, LME spot price, CIF European ports), manual strict one-request importer, append-only `global_copper_prices` with conflict detection (migration 011), stored-only `GET /api/v1/copper/latest|history`, `COPPER` command, dashboard card, watchlist value and a monthly history chart. Public display, API redistribution, commercial use and public derived use remain `review_required` (the IMF clarification email is unsent); World Bank Copper stays a research-only backup; the derived `COPPER ZM` is the next bullet
 - `COPPER ZM`, **local/internal derived implementation** (`copper_zm_v1`): IMF PCPS Copper monthly average × the mean of stored BoZ daily USD/ZMW mid averages across observed days (each day weighted equally, the same FX method as `OIL ZM`), computed on request from PostgreSQL with nothing persisted and no migration; sparse months stay derivable, availability is the overlap of the stored histories (partial source window flagged), `GET /api/v1/copper/zm/latest|history`, the `COPPER ZM` command, a `COPPER ZM · DERIVED` card and a detail/history view. Not an official series or a Zambia copper price; public display, API redistribution, commercial use and public derived use remain `review_required`
 - Copper–Kwacha comparison (`COPPER FX`, alias `COPPER KWACHA`), **local/internal descriptive view** over the COPPER ZM history: COPPER USD, USD/ZMW and COPPER ZMW on the same matched months, each indexed to 100 at the first matched month of the range (visualization only), with a values table. No new API, migration or persistence; no correlation or regression metric yet; public rights unchanged (`review_required`)
+- Copper–Kwacha rolling correlation, **local/internal descriptive statistic** (`copper_kwacha_corr_v1`): Pearson r between month-over-month fractional changes of Copper USD and USD/ZMW (not levels, not COPPER ZMW), consecutive calendar months only, excluding the partial FX source-start transition and nonpositive analytical inputs, full-sample r (N >= 6) and 6M/12M rolling windows of consecutive eligible changes, computed on request by `GET /api/v1/copper/kwacha/correlation` with exclusion counts; no persistence, significance test, strength label or causal claim; public rights unchanged (`review_required`)
 
 
 ## Current
@@ -38,7 +39,7 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 
 ## Planned
 - `GOLD` / `GOLD ZM` once the World Bank (preferred) or IMF (backup) gold source is approved in writing; not started
-- Copper-versus-kwacha statistics (rolling correlation, sensitivity/beta, lead/lag research only if later approved) and Zambian copper production/export research, after the IMF rights answer where public use is concerned
+- Copper-versus-kwacha sensitivity/beta (the next Copper analytics PR) and regression only if justified, lead/lag research only if later approved, Zambian copper production/export research, and a generic cross-market `CORR` framework
 - Further yield-curve analytics: historical spread charts, inversion interpretation, steepening/flattening, curvature, PCA, real-yield curves, term premium
 - `OIL ZM` versus ERB petrol/diesel comparisons (lagged comparisons or spreads); `OIL ZM` is not a pump price and is not combined with ERB fuel anywhere today
 - Cross-market `COMPARE` / `CHART` / `CORR` (after the underlying histories are stable)
@@ -90,7 +91,7 @@ Potential benchmark families:
 Potential Zambia-specific derived metrics:
 - PPP FX Gap: market USD/ZMW versus a clearly identified PPP conversion factor
 - Copper Export Dependence: copper exports as a share of total merchandise exports
-- Kwacha-Copper Relationship: rolling correlation or sensitivity analysis
+- Kwacha-Copper Relationship: sensitivity/beta analysis (the descriptive rolling correlation is implemented)
 - Energy Dependence: electricity imports as a share of relevant supply
 - Business Density: operating establishments per 1,000 residents
 - Insurance Penetration: gross written premium relative to GDP
