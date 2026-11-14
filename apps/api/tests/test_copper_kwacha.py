@@ -1,7 +1,7 @@
 import importlib
 import os
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from pathlib import Path
 
 import pytest
@@ -219,6 +219,51 @@ def test_mixed_defined_and_undefined_rolling_windows_are_all_returned():
     r = analyse(series((2026, 2), levels), "ALL", "6M")
     assert len(r.rolling) == 5 and r.rolling[0].correlation is None and r.rolling[-1].correlation is not None
     assert [p.correlation is None for p in r.rolling][0] and any(p.correlation is not None for p in r.rolling)
+
+
+THIRDS = ["729", "243", "81", "27", "9", "3", "1"]  # six identical changes of exactly -2/3, a repeating Decimal
+
+
+def repeating_constant_levels(varying):
+    """varying: 'none' = both change series are the repeating -2/3; 'fx' = Copper constant, FX varies; 'copper' = FX constant, Copper varies."""
+    moving_copper = ["100", "110", "99", "120", "118", "130", "126"]
+    moving_fx = ["20", "21", "19", "23", "22", "26", "24"]
+    copper = moving_copper if varying == "copper" else THIRDS
+    fx = moving_fx if varying == "fx" else THIRDS
+    return list(zip(copper, fx))
+
+
+def test_repeating_decimal_constant_changes_are_exactly_equal_and_pearson_is_undefined():
+    entries, _ = build_changes(series((2026, 2), repeating_constant_levels("none")))
+    assert len(entries) == 6 and all(isinstance(e, Change) for e in entries)
+    assert len({e.copper for e in entries}) == 1 and len({e.fx for e in entries}) == 1  # exactly equal stored Decimals
+    with localcontext() as ctx:
+        ctx.prec = 40
+        mean = sum((e.copper for e in entries), D(0)) / 6
+    assert mean != entries[0].copper  # the rounding hazard this regression guards against: the mean is not the value
+    assert pearson([e.copper for e in entries], [e.fx for e in entries]) is None
+
+
+@pytest.mark.parametrize("varying", ["none", "fx", "copper"])
+def test_full_sample_with_a_repeating_constant_series_is_zero_variance_never_one(varying):
+    r = analyse(series((2026, 2), repeating_constant_levels(varying)), "ALL", "6M")
+    assert r.changes_used == 6 and r.full_sample.sample_size == 6
+    assert r.full_sample.status == "zero_variance" and r.full_sample.correlation is None
+    assert r.full_sample.reason and "constant" in r.full_sample.reason
+
+
+def test_rolling_window_over_repeating_constant_changes_exists_with_a_null_coefficient():
+    r = analyse(series((2026, 2), repeating_constant_levels("fx")), "ALL", "6M")
+    (point,) = r.rolling
+    assert point.window_end_month == date(2026, 8, 1) and point.sample_size == 6 and point.correlation is None and r.rolling_reason is None
+
+
+def test_a_later_varying_window_still_gets_a_numeric_coefficient_after_a_repeating_constant_one():
+    # Copper changes are the repeating -2/3 for six months, then move; FX always moves: window 1 is undefined, a later one is numeric
+    copper = THIRDS + ["2", "5", "3"]
+    fx = ["20", "21", "19", "23", "22", "26", "24", "27", "25", "29"]
+    r = analyse(series((2026, 2), list(zip(copper, fx))), "ALL", "6M")
+    assert r.rolling[0].correlation is None and r.rolling[-1].correlation is not None and -1 <= r.rolling[-1].correlation <= 1
 
 
 def test_twelve_month_window_needs_twelve_changes_and_current_style_data_gives_none():

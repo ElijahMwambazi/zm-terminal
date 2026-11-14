@@ -46,6 +46,11 @@ def pearson(xs: list[Decimal], ys: list[Decimal]) -> Decimal | None:
     """Pearson product-moment correlation in Decimal; None when fewer than two pairs or either series has zero variance."""
     if len(xs) != len(ys) or len(xs) < 2:
         return None
+    # Zero variance is known exactly when all analytical values are equal. Decide it here, before any mean: a repeating
+    # Decimal (e.g. -2/3 rounded to 40 digits) averaged and divided can differ from the identical inputs by rounding and
+    # would otherwise leave a spurious tiny variance (and r = 1).
+    if all(x == xs[0] for x in xs) or all(y == ys[0] for y in ys):
+        return None
     with localcontext() as context:
         context.prec = MATH_PRECISION
         n = Decimal(len(xs))
