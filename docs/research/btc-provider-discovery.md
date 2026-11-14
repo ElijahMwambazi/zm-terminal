@@ -1,16 +1,16 @@
 # BTC/USD and BTC/ZMW provider discovery
 
-Decision record, 2026-11-14. **Research only.** No BTC adapter, table, route, command or UI exists or was added; nothing was persisted. Scratch downloads (Bitstamp candles, provider pages) were kept outside the repository. No account, API key or credential was created or used: every Bitstamp, Kraken, Coinbase and CoinGecko request was an unauthenticated public GET with the client name `zm-terminal-research/1.0`.
+Decision record, 2026-11-14. **Research only.** No BTC adapter, table, route, command or UI exists or was added; nothing was persisted. Scratch downloads (Bitstamp candles, provider pages) were kept outside the repository. No account, API key or credential was created or used. The scripted API requests made directly during this research were unauthenticated public GETs that used the client identifier `zm-terminal-research/1.0`; public documentation and terms pages were also read using normal fetch tooling, whose client identity was not verified.
 
 Conventions: **Fact** = read or measured on 2026-11-14. **Interpretation** = our reading. **Unresolved** = needs the provider's written answer. Status vocabulary: `acceptable for local research` (an engineering/source-governance classification, not legal advice or a formal licensing determination), `review_required`, `rejected_without_licence`, `rejected_without_written_consent`, `not suitable`.
 
 ## 1. Outcome
 
-**APPROVED FOR LOCAL IMPLEMENTATION — PUBLIC RIGHTS PENDING**, with one stated gap: the Bitstamp Terms of Use page could not be read (section 3.5), so the user should read it in a browser before the first BTC code is written.
+**APPROVED FOR LOCAL IMPLEMENTATION — PUBLIC RIGHTS PENDING**. This means only local/internal development, local testing and local normalised storage: no public deployment, no API redistribution to others and no commercial use. It carries one stated gap: the Bitstamp Terms of Use page could not be read (section 3.5), so the user must read it in a browser before the first BTC code is written; local implementation is gated on that check.
 
 - Preferred BTC/USD source: **Bitstamp BTC/USD spot market** (live ticker `last`; completed daily OHLCV history from 2011-08-18). Public endpoints, no authentication.
 - Public display, public API redistribution and commercial use are **`review_required`**: Bitstamp's API page directs commercial users to a Data License Agreement (DLA) and the text does not say what a non-commercial public site needs.
-- BTC/ZMW: **derived** from Bitstamp BTC/USD and the stored Bank of Zambia USD/ZMW `mid`; no acceptable direct BTC/ZMW market source was identified.
+- BTC/ZMW: **derived** from Bitstamp BTC/USD and the stored Bank of Zambia USD/ZMW `mid`; no acceptable direct BTC/ZMW market source was identified among the evaluated providers.
 - Coinbase is `rejected_without_written_consent` for a public deployment; CoinGecko only fits as a non-stored cross-check; Kraken is a technical backup with unverified terms.
 
 ## 2. Evaluation matrix
@@ -19,7 +19,7 @@ Conventions: **Fact** = read or measured on 2026-11-14. **Interpretation** = our
 |---|---|---|---|---|---|---|---|---|---|---|
 | Bitstamp | One exchange's BTC/USD spot (last trade) | Ticker, no auth | OHLCV 60 s to 3 d candles | None | Daily from 2011-08-18 | `acceptable for local research` | `review_required` | `review_required` | `review_required` (DLA stated) | **PREFERRED** |
 | CoinGecko | Aggregated multi-exchange VWAP | Keyless (~5 calls/min) or key | Daily/hourly | Optional key | Demo 1 y, Basic 2 y, Analyst and above from 2013 | `review_required` (terms say do not store or derive) | Paid plan + attribution | Enterprise / Executed Agreement | Paid plan | **Cross-check only; Enterprise for our architecture** |
-| Kraken | One exchange's XBT/USD spot | Ticker, no auth | OHLC, 720 candles per call | None | About 720 daily candles via REST; download unverified | `review_required` | `review_required` | `review_required` | `review_required` | **Technical backup; licence unverified** |
+| Kraken | One exchange's XBT/USD spot | Ticker, no auth | OHLC, 720 candles per call | None | 720 candles per OHLC call per its endpoint docs; separate historical-data/download path not reconciled (verify) | `review_required` | `review_required` | `review_required` | `review_required` | **Technical backup; licence unverified** |
 | Coinbase | One exchange's BTC-USD spot | Ticker, no auth | Candles, 300 per call | None | Not assessed | `acceptable for local research` | `rejected_without_written_consent` | `rejected_without_written_consent` | `rejected_without_written_consent` | **REJECTED for public deployment** |
 | CoinPaprika | Aggregated | API key | Daily | Key | Free 1 y daily, Starter 5 y | Not assessed | Unclear | Enterprise only | Paid plans (internal use) | **Paid fallback, not preferred** |
 
@@ -27,19 +27,19 @@ Conventions: **Fact** = read or measured on 2026-11-14. **Interpretation** = our
 
 ### 3.1 Facts: ticker (`GET /api/v2/ticker/btcusd/`)
 - The official docs (https://www.bitstamp.net/api/, read directly) describe each field: `last` "Last price."; `high` "Last 24 hours price high."; `low` "Last 24 hours price low."; `vwap` "Last 24 hours volume weighted average price."; `volume` "Last 24 hours volume."; `bid` "Highest buy order."; `open` "First price of the day."; `open_24` "24 hours time delta transaction price"; `timestamp` "Unix timestamp date and time."; `side` "Ticker side: 0 - buy; 1 - sell."; `market_type` SPOT or PERPETUAL.
-- Live response (unauthenticated, HTTP 200, `Cache-Control: max-age=1`): `last` 67185.23, `timestamp` 1794656512 (2026-11-14 11:41:52 UTC), `market_type` `SPOT`, prices to 2 decimals, volume to 8 decimals, no `pair` field on this single-market response.
+- Live response (unauthenticated, HTTP 200, `Cache-Control: max-age=1`): `last` 67185.23, `timestamp` 1794656512 (2026-11-14 11:41:52 UTC), `market_type` `SPOT`; in the observations tested, prices carried up to 2 decimal places and volume up to 8 (observed behaviour, not a documented precision guarantee). The single-market response has **no `pair` or `market` field**.
 - **Interpretation:** the right quote field is `last` (the latest executed BTC/USD trade). `bid`/`ask` (an order-book quote), `vwap`, `open`, `high`, `low` and `volume` mean different things and must not be substituted.
-- **Behaviour to remember:** an unknown market in the ticker path (`/ticker/btczmw/`) returned HTTP 200 with a 79 KB array of all 272 markets, not an error; an uppercase `BTCUSD` also worked. A future adapter must therefore check that the response is an object whose `market`/pair is `BTC/USD` and `market_type` is `SPOT`, and must not trust the HTTP status alone.
+- **Behaviour to remember:** an unknown market in the ticker path (`/ticker/btczmw/`) returned HTTP 200 with a 79 KB array of all 272 markets, not an error; an uppercase `BTCUSD` also worked. **HTTP 200 is insufficient.** The single-market body carries no pair identifier, so it cannot independently prove which market it describes; identity rests on the request path (the configured `btcusd` market). A future adapter must therefore: request exactly one market; reject any array body for a single-market request; require a JSON object containing the expected ticker fields (at least `last` and `timestamp`); require `market_type == "SPOT"`; and require every numeric field it uses to be a valid finite decimal string. Pair validation beyond request-path identity would need a separate market-metadata lookup (for example the all-markets response, whose entries do carry `pair`/`market`), not an assumption about the single-market body.
 
 ### 3.2 Facts: OHLC (`GET /api/v2/ohlc/btcusd/`)
 Docs and measurements agree:
 - Parameters: `step` (a fixed set of seconds from 60 up to 259200, including 86400), `limit` (1 to 1000; 1001 gave HTTP 400 `validation-error`), optional `start`, `end`, `exclude_current_candle` (default false; "results won't include current (open) candle"). An invalid `step` gave HTTP 400; an unknown pair gave HTTP 404 with an empty body.
 - Docs: "If both start and end timestamps are posted, end timestamp will be used." Measured: with `start` and `end` and `limit=1000`, the API returned the 1000 candles *ending at* `end` and ignored `start` as a lower bound. **Use `start` + `limit` only for forward pagination** and filter dates on our side.
-- Each candle: `timestamp`, `open`, `high`, `low`, `close`, `volume` as strings (prices 2 decimals, volume 8 decimals).
+- Each candle: `timestamp`, `open`, `high`, `low`, `close`, `volume` as strings. In the observations tested, prices carried up to 2 decimal places and volume up to 8; this was observed behaviour, not a documented precision guarantee.
 - **Daily candles (`step=86400`) are UTC calendar days**: all 5,553 timestamps measured were exactly 00:00:00 UTC.
 - Earliest daily candle: **2011-08-18** (`start=2011-08-17` returns it first; `start=2011-08-16` returns an empty list). Latest completed candle with `exclude_current_candle=true`: **2026-11-13**.
 - Full forward pagination (6 requests at 1.5 s spacing, `start` + `limit=1000`, `exclude_current_candle=true`, from 2011-09-01): 5,553 candles to 2026-11-13, strictly ascending, no duplicates, **no gaps** in the daily sequence (candles 2011-08-18 to 2011-08-30 were not gap-checked), low ≤ open/close ≤ high on every candle.
-- **Empty days are synthesized:** 28 candles (all in 2011 and 2015) have volume 0.00000000; 27 of those are flat at the previous close (open = high = low = close). So a candle with zero volume is a carry-forward, not a trade. A future importer must store volume as published and must not treat a zero-volume candle as an observed trade.
+- **Zero-volume candles (observed source behaviour; generation methodology not documented):** 28 daily candles in the tested history (all in 2011 and 2015) have volume 0.00000000, and 27 of those are flat at the previous close (open = high = low = close). Bitstamp's documentation does not explain how such candles are generated, so they are not characterised here as synthetic. A future importer must preserve them exactly as published: not delete them, not convert them to missing observations, not forward-fill them itself, and not infer that any trade occurred.
 - Rate limits stated on the page: "400 requests per second" and "10,000 requests per 10 minutes". Total Bitstamp research traffic: a few dozen small requests, well inside the stated limits.
 - No authentication was requested at any point; no redirect or access gate was met. (The Bitstamp page `www.bitstamp.net/api/` itself was fetched once with the same client name.)
 
@@ -49,7 +49,9 @@ Docs and measurements agree:
 - Bitstamp is **one exchange's** BTC/USD market. It must be labelled "Bitstamp BTC/USD spot", never "the Bitcoin price" or a global reference rate.
 
 ### 3.4 Direct BTC/ZMW
-- None of Bitstamp's 272 listed markets contains ZMW (BTC pairs seen: USD, EUR, GBP, USDC, USDT, RLUSD, EURC, EURCV and a USD perpetual). **No acceptable direct BTC/ZMW market source was identified.** This is a statement about the sources examined, not a claim that no BTC/ZMW market exists anywhere. P2P adverts, OTC offers, mobile-money merchant quotes and informal exchange quotes were not used and are not benchmarks.
+- Read-only checks of the evaluated providers (2026-11-14): **Bitstamp**, no ZMW market among its 272 listed markets (BTC pairs seen: USD, EUR, GBP, USDC, USDT, RLUSD, EURC, EURCV and a USD perpetual); **Kraken**, no ZMW pair among 1,432 asset pairs; **Coinbase Exchange**, no ZMW product among 847 products; **CoinGecko**, `zmw` absent from its 63 supported quote currencies.
+- These are different kinds of evidence: an exchange trading pair, a supported quote currency and an aggregator's quote support are not the same thing, and CoinGecko not listing ZMW as a quote currency says nothing about whether any exchange market exists.
+- **No acceptable direct BTC/ZMW market source was identified among the evaluated providers.** This does not say that no BTC/ZMW market exists. P2P adverts, OTC offers, mobile-money merchant quotes and informal exchange quotes were not used and are not benchmarks.
 
 ### 3.5 Licensing
 Facts (verbatim from the API page, "Commercial Use of Bitstamp's Exchange Data"):
@@ -69,7 +71,7 @@ Interpretation and unresolved points:
 | Public API redistribution of normalised observations | `review_required` | Redistribution is mentioned only under commercial use. |
 | Commercial display | `review_required` | DLA stated as required. |
 | Commercial API redistribution | `review_required` | DLA stated as required. |
-| Derived BTC/ZMW (local) | `acceptable for local research` | Calculations are expressly contemplated. |
+| Derived BTC/ZMW (local) | `acceptable for local research` | Public unauthenticated market-data endpoints were accessible for local research; no restriction on local, non-redistributed research use was found in the material successfully read, but the Bitstamp Terms of Use remain unread. |
 | Derived BTC/ZMW (public/commercial) | `review_required` | Calculations are contemplated under the commercial wording; public status unclear. |
 
 The DLA is **required for commercial use** (stated), **unclear** for any other public redistribution and for persistence.
@@ -84,7 +86,7 @@ The DLA is **required for commercial use** (stated), **unclear** for any other p
 - One keyless request for the plausibility check returned `{"bitcoin":{"usd":67163,"last_updated_at":1794656781}}` (whole dollars).
 
 ### 4.2 Kraken (one exchange, XBT/USD)
-- Public REST needs no account. Ticker (read from docs.kraken.com): `c` "Last trade closed", `o` "Today's opening price", "Today's prices start at midnight UTC"; pair `XBTUSD` returns the key `XXBTZUSD`. OHLC: "Returns up to 720 of the most recent entries (older data cannot be retrieved, regardless of the value of `since`)" with the last row the current, uncommitted candle. So REST daily history is about two years, not the full history.
+- Public REST needs no account. Ticker (read from docs.kraken.com): `c` "Last trade closed", `o` "Today's opening price", "Today's prices start at midnight UTC"; pair `XBTUSD` returns the key `XXBTZUSD`. OHLC: "Returns up to 720 of the most recent entries (older data cannot be retrieved, regardless of the value of `since`)" with the last row the current, uncommitted candle. That limit comes from the OHLC endpoint documentation (720 daily candles is about two years). Kraken also publishes separate historical-data and download guidance, which this research did not fully reconcile with that limit, so Kraken's full historical depth and import mechanics remain **to verify**; it should not be assumed permanently limited to 720 candles.
 - Licensing: the Kraken API support page lists "Market data licensing | marketdata@kraken.com". I could not find or verify a clause requiring prior permission for non-personal commercial use of public market data (the fetch tool's summary of Kraken's global terms mentions restrictions on making "Our Content" available to third parties; that wording was not seen verbatim). The downloadable OHLCVT history and its terms were not found.
 - Decision: `review_required` for every public/commercial use; technical backup only.
 
@@ -98,7 +100,7 @@ The DLA is **required for commercial use** (stated), **unclear** for any other p
 - Whether showing values to the public counts as redistribution was not stated in the official text read. Decision: paid fallback, not preferred; `review_required`.
 
 ### 4.5 OpenBB is not a shortcut
-- The repository's OpenBB image installs `openbb-platform-api`, `openbb-cboe`, `openbb-oecd` and `openbb-fred` only: it exposes no Bitcoin price. The V5 provider table on docs.openbb.co (per the fetch report) has no crypto price extension; the only crypto-related package is `openbb-deribit` (derivatives), and `openbb-fmp`, `openbb-tiingo` and `openbb-yfinance` are listed as removed in V5. OpenBB v4 docs were not checked. Whatever OpenBB offered, the underlying provider's rights would govern. Not used.
+- The repository's OpenBB image installs `openbb-platform-api`, `openbb-cboe`, `openbb-oecd` and `openbb-fred` only: it exposes no Bitcoin price. The V5 provider table on docs.openbb.co (per the fetch report) has no crypto price extension; the only crypto-related package is `openbb-deribit` (derivatives), and `openbb-fmp`, `openbb-tiingo` and `openbb-yfinance` are listed as removed in V5. OpenBB v4 docs were not checked. OpenBB would remain an access/integration layer, not the underlying market-data source or licence holder: whatever it offered, the underlying provider's rights would govern. This finding is specific to the provider extensions installed and inspected in the present ZM Terminal environment and is not a permanent statement about OpenBB crypto support. If a suitable OpenBB provider integration appears later, identify the underlying provider, preserve its provenance, apply that provider's licence, and compare direct against OpenBB integration. Not used now.
 
 ## 5. Plausibility cross-check
 At about 11:47 UTC on 2026-11-14 (single requests, not averaged, not used to choose a value): Bitstamp `last` 67166.18, Kraken `c` 67166.80, Coinbase ticker `price` 67169.42, CoinGecko (aggregate, whole dollars, about 66 s old) 67163. They agree within roughly 0.01% at that instant. Exchange prices differ slightly from each other and from the aggregate by construction; the comparison shows plausibility only, does not make the methodologies equivalent and says nothing about licence status.
@@ -107,16 +109,16 @@ At about 11:47 UTC on 2026-11-14 (single requests, not averaged, not used to cho
 
 ### 6.1 BTC/USD
 - Live: Bitstamp ticker `last`, with the ticker `timestamp` as the observation time. Label "Bitstamp BTC/USD spot". Do not use `bid`/`ask` midpoint, VWAP, index or mark price.
-- History: **full daily OHLCV** (option B) rather than close only. Reasons: one request already carries all fields; about 5,550 rows for the whole history; charts and later analytics need no reconstruction; no extra licensing difference. Cost is a wider table and a note that zero-volume candles are carry-forwards. Provisional fields (not a final schema): market `BTC/USD`, base, quote, provider `bitstamp`, interval `1d`, `period_start`/`period_end` (UTC day), open, high, low, close, `volume_btc`, source URL, `retrieved_at`. Persist only candles returned with `exclude_current_candle=true` and also require `period_end` to be in the past on our clock. Never forward-fill, interpolate or synthesise candles; store the provider's zero-volume candles as published.
-- Values are exact decimal strings (2 and 8 places); store as `Decimal`, no quantisation; rounding is presentation only.
+- History: **full daily OHLCV** (option B) rather than close only. Reasons: one request already carries all fields; about 5,550 rows for the whole history; charts and later analytics need no reconstruction; no extra licensing difference. Cost is a wider table and the need to keep the published zero-volume candles as they are (section 3.2). Provisional fields (not a final schema): market `BTC/USD`, base, quote, provider `bitstamp`, interval `1d`, `period_start`/`period_end` (UTC day), open, high, low, close, `volume_btc`, source URL, `retrieved_at`. Persist only candles returned with `exclude_current_candle=true` and also require `period_end` to be in the past on our clock. Never forward-fill, interpolate or synthesise candles; store the provider's zero-volume candles as published.
+- Values arrive as decimal strings (observed up to 2 and 8 places, not a guarantee); store as `Decimal` at the published precision, with no unnecessary quantisation; rounding is presentation only.
 - Storage: a dedicated BTC/USD daily table of the same shape family as `global_oil_prices`; no raw JSON archive (normalised data plus provenance suffice). Do not persist ticker snapshots (a tick archive would build an unlicensed history). Follow the oil rule that a changed stored candle is a conflict, never a silent overwrite.
 
 ### 6.2 Live BTC/ZMW
 `btc_zmw = btc_usd_last × boz_usdzmw_mid` in `Decimal`, no float, computed on request and not persisted. Return both components with their own source and observation time (BTC ticker timestamp; BoZ `observed_at`), the derived time, and each component's age. Notice: "Derived from an external BTC/USD market price and Bank of Zambia USD/ZMW. It is an indicative conversion, not an executable BTC/ZMW market quote." It is not an exchange-traded price, dealer quote, P2P price, mobile-money rate or Bitstamp BTC/ZMW market.
 
-Staleness (measured from the stored data): BoZ USD/ZMW has 492 stored observations on 167 Lusaka dates since 2026-01-22, normally three per business day at 09:30, 12:30 and 15:30 CAT (07:30, 10:30, 13:30 UTC); the newest is 2026-11-13 13:30 UTC, so on a Saturday the FX leg is already about a day old while Bitcoin trades continuously. The existing FX flag (`FX_STALE_AFTER = 96 h`) will not mark an ordinary weekend stale (Friday 15:30 CAT to Monday 09:30 CAT is about 66 h). Recommendations:
+Staleness (measured from the stored data): BoZ USD/ZMW has 492 stored observations on 167 Lusaka dates since 2026-01-22, normally three per business day at 09:30, 12:30 and 15:30 CAT (07:30, 10:30, 13:30 UTC); the newest is 2026-11-13 13:30 UTC, so on a Saturday the FX leg is already about a day old while Bitcoin trades continuously. The existing FX flag (`FX_STALE_AFTER = 96 h`) will not mark an ordinary weekend stale (Friday 15:30 CAT to Monday 09:30 CAT is about 66 h). **The existing BoZ USD/ZMW stale flag (and its 96-hour threshold) remains unchanged**; BTC/ZMW does not redefine it. A normal weekend can leave the BTC leg current and the BoZ leg older but still inside 96 hours, and that age difference must stay visible. Recommendations:
 - BTC/USD live: its own flag from the ticker timestamp, for example stale after a few minutes (threshold to be chosen at implementation).
-- BTC/ZMW live: **stale if either input is stale**, never "fresh" because Bitcoin just updated; always show the FX age in words ("USD/ZMW from Fri 13 Nov 15:30 CAT") even when it is not flagged.
+- BTC/ZMW live: add its own derived-status context from both component ages and both existing stale states (the BTC stale state and the unchanged BoZ stale state), possibly with a BTC/ZMW-specific notice; it is **stale if either input is stale**, never "fresh" because Bitcoin just updated; always show the FX age in words ("USD/ZMW from Fri 13 Nov 15:30 CAT") even when it is not flagged.
 - Never invent an FX rate: no stored BoZ observation means no BTC/ZMW.
 
 ### 6.3 Historical BTC/ZMW
@@ -126,7 +128,7 @@ Staleness (measured from the stored data): BoZ USD/ZMW has 492 stored observatio
 - **BoZ limit:** stored USD/ZMW history begins 2026-01-22, so derived BTC/ZMW cannot honestly begin earlier. No alternative FX source should be added for this.
 
 ### 6.4 Errors (future)
-BTC/USD live: provider timeout 504, invalid or unavailable provider response 502 (including an HTTP 200 whose body is not the expected `BTC/USD` object). Stored history: 503 on database failure, no upstream request. Derived BTC/ZMW: distinguish provider failure (502/504) from missing FX (no stored BoZ observation); never return BTC/USD labelled as BTC/ZMW.
+BTC/USD live: provider timeout 504, invalid or unavailable provider response 502 (including an HTTP 200 whose body is an array or lacks the expected ticker fields). Stored history: 503 on database failure, no upstream request. Derived BTC/ZMW: distinguish provider failure (502/504) from missing FX (no stored BoZ observation); never return BTC/USD labelled as BTC/ZMW.
 
 ### 6.5 Secrets and raw data
 Bitstamp public endpoints need no key (verified). If a key is ever needed it belongs in a backend-only environment variable, never in the frontend, repository or logs. Do not store raw upstream payloads.
@@ -145,10 +147,10 @@ Subject: Data licensing question: public BTC/USD data in a research application
 
 > Hello,
 >
-> I am building a research application (ZM Terminal) that would use Bitstamp's public BTC/USD market data. It would not proxy the Bitstamp API, resell data or use Bitstamp credentials. Before launching publicly I would like to confirm what rights are needed. Could you please tell me whether:
+> I am building a research application (ZM Terminal) that would use Bitstamp's public BTC/USD market data. It would not proxy the Bitstamp API, resell data or redistribute any credentials. Normalised observations would keep provenance (provider, market, source endpoint, source timestamp and retrieval time). Before launching publicly I would like to confirm what rights are needed. Could you please tell me whether:
 > 1. use of the public `BTC/USD` ticker is covered without an agreement;
-> 2. storing normalised ticker values and daily OHLC candles (`/api/v2/ohlc/btcusd/`, `step=86400`) is allowed, and whether full daily OHLCV history may be persisted;
-> 3. displaying normalised BTC/USD prices and charts in a public research application is allowed, and on what terms for non-commercial and commercial use;
+> 2. storing normalised ticker values and daily OHLC candles (`/api/v2/ohlc/btcusd/`, `step=86400`) locally is allowed, and whether full daily OHLCV history may be persisted;
+> 3. displaying normalised BTC/USD prices and historical charts in a public research application is allowed, and on what terms for public non-commercial and for commercial use;
 > 4. exposing those normalised observations through the application's own API is allowed;
 > 5. deriving and displaying an indicative BTC/ZMW value from Bitstamp BTC/USD and the Bank of Zambia USD/ZMW rate is allowed;
 > 6. a commercial Data License Agreement is required before public launch, and for which of the above;
@@ -165,7 +167,7 @@ Status: drafted here only; not sent. The sender name is left blank.
 Bitstamp BTC/USD spot (ticker `last`, completed daily OHLCV).
 
 ### Backup provider
-Kraken XBT/USD (same single-exchange spot semantics, no authentication, but only about 720 daily candles by REST and unverified licence). CoinGecko is a cross-check only (aggregate; terms conflict with storing and re-serving data).
+Kraken XBT/USD (same single-exchange spot semantics, no authentication, but a 720-candle OHLC endpoint limit with a separate historical-data path not reconciled, and an unverified licence). CoinGecko is a cross-check only (aggregate; terms conflict with storing and re-serving data).
 
 ### Rejected providers
 Coinbase for public deployment (`rejected_without_written_consent`); CoinPaprika as preferred (redistribution Enterprise only); anything P2P, OTC or scraped.
