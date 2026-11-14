@@ -1,10 +1,11 @@
-import type { AgricultureCommodity, BondTenor, FuelProduct, Tenor } from "./api";
+import type { AgricultureCommodity, BondTenor, FuelProduct, OilBenchmark, Tenor } from "./api";
 
 export type CommandResult =
   | { ok: true; action: { type: "open-usdzmw" } | { type: "open-tbill"; tenor: Tenor | null }
     | { type: "open-bond"; tenor: BondTenor | null }
     | { type: "open-fuel"; product: FuelProduct | null }
-    | { type: "open-agriculture"; commodity: AgricultureCommodity | null } }
+    | { type: "open-agriculture"; commodity: AgricultureCommodity | null }
+    | { type: "open-oil"; benchmark: OilBenchmark | null } }
   | { ok: false; error: string };
 
 /** Normalized command text -> action. Add new commands here. */
@@ -27,6 +28,9 @@ const COMMANDS: Record<string, CommandResult & { ok: true }> = {
   "SOYA ZM": { ok: true, action: { type: "open-agriculture", commodity: "SOYA_BEANS" } },
   "MAIZE AVG": { ok: true, action: { type: "open-agriculture", commodity: "MAIZE" } },
   "SOYA AVG": { ok: true, action: { type: "open-agriculture", commodity: "SOYA_BEANS" } },
+  OIL: { ok: true, action: { type: "open-oil", benchmark: null } },
+  "OIL BRENT": { ok: true, action: { type: "open-oil", benchmark: "BRENT" } },
+  "OIL WTI": { ok: true, action: { type: "open-oil", benchmark: "WTI" } },
   "BOND ZM": { ok: true, action: { type: "open-bond", tenor: null } },
   "BOND 2Y": { ok: true, action: { type: "open-bond", tenor: "2Y" } },
   "BOND 3Y": { ok: true, action: { type: "open-bond", tenor: "3Y" } },

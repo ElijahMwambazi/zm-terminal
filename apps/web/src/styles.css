@@ -93,6 +93,7 @@ h1 {
 
 .market-label { color: #ffb000; font-size: 0.75rem; }
 .market-card strong { font-size: 2rem; font-weight: 500; }
+.market-card strong.market-value--long { font-size: 1.6rem; white-space: nowrap; }
 .market-card small { color: #6f6f6f; line-height: 1.4; }
 
 .workspace-grid {

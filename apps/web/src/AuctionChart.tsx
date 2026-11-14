@@ -12,11 +12,13 @@ type Props = {
   formatPrice?: (value: number) => string;
   /** Show crosshair dates as months (monthly series). */
   monthly?: boolean;
+  /** Per-observation markers (default on). Turn off for very long series; the line and data are unchanged. */
+  markers?: boolean;
 };
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export default function AuctionChart({ points, label, precision = 4, formatPrice, monthly }: Props) {
+export default function AuctionChart({ points, label, precision = 4, formatPrice, monthly, markers = true }: Props) {
   const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,7 +36,7 @@ export default function AuctionChart({ points, label, precision = 4, formatPrice
       },
     });
     const series = chart.addSeries(LineSeries, {
-      color: "#ffb000", lineWidth: 1, pointMarkersVisible: true, pointMarkersRadius: 4,
+      color: "#ffb000", lineWidth: 1, pointMarkersVisible: markers, pointMarkersRadius: 4,
       priceFormat: { type: "price", precision, minMove: 10 ** -precision },
     });
     let last = "";
@@ -47,7 +49,7 @@ export default function AuctionChart({ points, label, precision = 4, formatPrice
     );
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [points, precision, formatPrice, monthly]);
+  }, [points, precision, formatPrice, monthly, markers]);
 
   return <div ref={container} className="price-chart" role="img" aria-label={label} />;
 }

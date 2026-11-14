@@ -12,6 +12,7 @@ from app.schemas.fx import FxHistory, FxQuote
 from app.schemas.agriculture import (
     AGRICULTURE_COMMODITIES, AgricultureCommodity, AgricultureHistory, AgricultureLatest, AgriculturePrice, AgricultureRange,
 )
+from app.schemas.oil import OIL_BENCHMARKS, OilBenchmark, OilHistory, OilLatest, OilObservation, OilRange
 from app.schemas.fuel_buildup import BuildUpType, FuelBuildUp
 from app.schemas.fuel import FUEL_PRODUCTS, FuelHistory, FuelLatest, FuelPrice, FuelProduct, FuelRange, PriceType
 from app.schemas.bonds import (
@@ -30,6 +31,7 @@ from app.services.fuel_buildup_store import fetch_build_up
 from app.services.fuel_store import fetch_fuel_history, fetch_latest_fuel
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, save_fx_quote
 from app.services.tbill_store import TbillConflictError, fetch_tbill_history, save_tbill_auctions
+from app.services.oil_store import fetch_latest_oil, fetch_oil_history
 from app.services.provider_policy import PROVIDER_POLICIES, ProviderPolicy
 from app.services.openbb import get_openbb_coverage, openbb_is_ready
 
@@ -260,6 +262,42 @@ async def agriculture_commodity(commodity: AgricultureCommodity) -> AgricultureP
     match = [p for p in prices if p.commodity == commodity]
     if not match:
         raise HTTPException(status_code=404, detail=f"No stored Ministry national-average price for {commodity}")
+    return match[0]
+
+
+@router.get("/oil/latest", response_model=OilLatest)
+async def oil_latest() -> OilLatest:
+    """Newest stored World Bank Pink Sheet month per benchmark (monthly averages, USD/bbl); the World Bank is never called here."""
+    try:
+        observations = await asyncio.to_thread(fetch_latest_oil, today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("Oil read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored oil benchmarks unavailable") from exc
+    have = {o.benchmark for o in observations}
+    return OilLatest(observations=observations, missing_benchmarks=[b for b in OIL_BENCHMARKS if b not in have])
+
+
+@router.get("/oil/history", response_model=OilHistory)
+async def oil_history(benchmark: OilBenchmark = "BRENT", range: OilRange = "1Y") -> OilHistory:
+    """Stored months only, ascending; the World Bank is never called here."""
+    try:
+        points = await asyncio.to_thread(fetch_oil_history, benchmark, range, today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("Oil history read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored oil benchmarks unavailable") from exc
+    return OilHistory(benchmark=benchmark, range=range, count=len(points), observations=points)
+
+
+@router.get("/oil/{benchmark}", response_model=OilObservation)
+async def oil_benchmark(benchmark: OilBenchmark) -> OilObservation:
+    try:
+        observations = await asyncio.to_thread(fetch_latest_oil, today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("Oil read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored oil benchmarks unavailable") from exc
+    match = [o for o in observations if o.benchmark == benchmark]
+    if not match:
+        raise HTTPException(status_code=404, detail=f"No stored World Bank monthly price for {benchmark}")
     return match[0]
 
 
