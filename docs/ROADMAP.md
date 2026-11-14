@@ -14,19 +14,20 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - Ministry maize + soya national-average vertical slice (Layout B, Apr 2025-Jan 2026, stored API/history/UI and `AGRI` commands)
 - Global oil: Brent + WTI monthly averages from the World Bank Pink Sheet (catalog licence CC BY 4.0; applicability to the workbook still to be confirmed), stored API/history/UI and `OIL` commands (FRED/EIA daily spot was evaluated and set aside because it did not provide a sufficiently clear fit for ZM Terminal's persisted-history design)
 - `OIL ZM`: derived monthly Brent-in-ZMW indicator (stored World Bank Brent monthly average x the mean of stored daily BoZ USD/ZMW mid-rate averages over the observed days; sparse BoZ months stay derivable and carry their day/observation counts; January 2026 is marked partial because the stored source begins on 22 January), stored-only API, UI and `OIL ZM` command; derived on request and never persisted; available only where both stored histories overlap (from January 2026)
+- Zambia sovereign yield curve, modelled as the **derived published-auction-yield tenor curve**: the latest stored accepted BoZ T-bill (91D/182D/273D/364D) and Government-bond (2Y/3Y/5Y/7Y/10Y/15Y) auction yield per published tenor bucket at or before an as-of date, stored-only API, `CURVE ZM` / `YIELD CURVE ZM` view with an AS OF control; mixed auction vintages are shown, nothing is interpolated, fitted or bootstrapped, no maturity dates exist, and nothing is persisted
 
 ## Current
-- No active implementation branch after global oil.
+- No active implementation branch after the sovereign yield curve.
 
 ## Next
-- **Zambia sovereign yield curve** (needs the stored T-bill and bond history)
+- **Gold provider discovery** (licensing first)
 - **Before public deployment:** confirm with data@worldbank.org that the World Bank Data Catalog licence (CC BY 4.0, dataset 0038238) applies to the monthly Pink Sheet workbook used for oil; `OIL ZM` inherits Brent as an input, so it must not be described as freely redistributable until then. Not a blocker for development or the code PR.
 
 ## Planned
-- Gold provider discovery (licensing first)
 - `GOLD` / `GOLD ZM` once a gold source is approved
 - BTC/USD + BTC/ZMW
 - Copper
+- Yield-curve slope and spread metrics between published tenor buckets (for example long minus short), built on the stored curve; not part of the first curve slice
 - `OIL ZM` versus ERB petrol/diesel comparisons (lagged comparisons or spreads); `OIL ZM` is not a pump price and is not combined with ERB fuel anywhere today
 - Cross-market `COMPARE` / `CHART` / `CORR` (after the underlying histories are stable)
 
@@ -364,7 +365,7 @@ Any extracted observation must still pass source-specific validation before beco
 These phases do not override the existing `Next` or `Planned` sections.
 
 #### Phase A - current market-terminal roadmap
-Complete the already planned agriculture, global oil / `OIL ZM`, sovereign yield curve, gold source discovery, BTC, copper and `COMPARE` / `CHART` / `CORR`.
+Complete the remaining planned items: gold source discovery, BTC, copper and `COMPARE` / `CHART` / `CORR` (agriculture, global oil, `OIL ZM` and the sovereign yield curve are done).
 
 #### Phase B - Zambia economic core
 Prioritise:

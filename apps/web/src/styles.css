@@ -220,3 +220,11 @@ th { text-align: left; color: #8c8c8c; font-weight: normal; padding: 6px 4px; }
   .market-card strong.market-value--long { font-size: 1.15rem; white-space: normal; overflow-wrap: anywhere; }
 }
 .derived-support { padding-top: 0; color: #f0b429; font-size: 0.82rem; }
+.curve-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 6px 16px; font-size: 0.75rem; color: #8c8c8c; }
+.curve-controls input[type="date"] { background: #0f0f0f; color: #e6e6e6; border: 1px solid #292929; padding: 4px 8px; font: inherit; color-scheme: dark; }
+.curve-vintage { margin: 0; padding: 8px 16px 0; font-size: 0.8rem; color: #bdbdbd; overflow-wrap: anywhere; }
+.curve-svg { display: block; width: 100%; height: auto; max-width: 560px; margin: 4px 0 0; }
+.curve-legend { margin: 0; padding: 4px 16px 10px; font-size: 0.72rem; color: #8c8c8c; overflow-wrap: anywhere; }
+.legend-mark { display: inline-block; width: 9px; height: 9px; margin: 0 2px 0 0; vertical-align: baseline; }
+.legend-bill { background: #ffb000; border-radius: 50%; }
+.legend-bond { background: #7cc4ff; }
