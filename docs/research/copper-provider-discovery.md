@@ -13,9 +13,9 @@ A global, monthly, USD-per-metric-ton copper benchmark relevant to Zambia's mini
 |---|---|---|---|---|---|---|
 | IMF PCPS | `PCOPP` (USD, monthly) | Copper, grade A cathode, LME spot price, CIF European ports (IMF's own code description) | Monthly average | 1992-M01 to 2026-M10, 418 months, no gaps | Anonymous SDMX 3.0 JSON | **PREFERRED** |
 | World Bank Pink Sheet | `Copper` ($/mt) | Copper (LME), grade A, minimum 99.9935% purity, cathodes and wire bar shapes, settlement price | Monthly average | 1960M01 to 2026M10, 802 months | Public XLSX workbook | **BACKUP** |
-| FRED | `PCOPPUSDM` | A copy of the IMF series | Monthly | 1992-01 to 2026-09 (one month behind IMF today) | API key requires a FRED account | **Cross-check only** |
-| LME direct | Official prices | LME Grade A, cash and 3-month | Daily | Sold as a licensed product | Login / licence | **REJECTED for this implementation** (official pages not readable) |
-| Futures (CME/COMEX etc.) | Futures settlements | A futures contract, not a physical/spot benchmark | Daily | Licensed | Licensed | **Not evaluated further** (semantics mismatch) |
+| FRED | `PCOPPUSDM` | A copy of the IMF series | Monthly | 1992-01 to 2026-09 (one month behind IMF today) | Public series page/table: anonymous. API: key (obtained through a FRED account) | **Cross-check / secondary access layer** |
+| LME direct | Official prices | LME Grade A, cash and 3-month | Daily | Registered or paid historical products (per the later review; not read in this branch) | Some limited registered access; rights use-dependent | **REJECTED for current implementation** (a project decision; rights for the proposed use unresolved) |
+| Futures (CME/COMEX etc.) | Futures settlements | A futures contract, not a physical/spot benchmark | Daily | Not evaluated | Not evaluated | **Not evaluated further** (semantics mismatch) |
 
 ## 3. IMF Primary Commodity Prices (PCPS)
 
@@ -64,19 +64,25 @@ A global, monthly, USD-per-metric-ton copper benchmark relevant to Zambia's mini
 - Status: local `acceptable for local research`; public, API and commercial use `review_required`.
 
 ## 5. LME direct
-- **Not read.** Every `lme.com` request made by the fetch tool returned HTTP 403 (no page body), so the official LME pricing and licensing pages could not be verified. I did not scrape, create an account, or bypass anything.
-- Secondary evidence (search-engine summaries of lme.com and datalicensing.lme.com pages, not read directly): showing LME data on a website or application requires a **distribution licence** (fees differ for real-time, 30-minute and next-day delayed data; a next-day website display is described as requiring approval as a licensed distributor); building products or reference values that use LME data as an input can require a **derived data licence**; a **non-display licence** covers other uses; LME historical prices and data are sold for research and market analysis; LME market-data reports are described as free of charge, with Official Prices included in the purchasable historical reports.
-- **Interpretation:** direct LME is licence-gated for public display, redistribution, derived use and historical data. For current implementation it is **rejected**: it is not free, the terms could not be read, and a licence would cost money. The IMF/World Bank series already carry the LME-linked benchmark at monthly frequency.
-- Local development against direct LME is not recommended (no free historical access was established) and persisted historical storage is not shown to be permitted without a licence.
+
+Three kinds of evidence are kept apart.
+
+- **Initial research evidence (this branch).** Every direct `lme.com` request made by the fetch tool during the initial research returned HTTP 403 with no page body, so no official LME pricing or licensing page was read at that time. No scraping, account creation or bypass was attempted. Search-engine summaries of lme.com and datalicensing.lme.com pages (not read directly) pointed to a distribution licence for displaying or distributing LME data (with fee tiers by delay class), a derived-data licence for products that use LME data as an input, a non-display licence for other uses, sold historical data, and some free market-data reports.
+- **Later review verification (reported, not re-read here).** During the Codex review, official LME material was accessible and showed more nuanced distinctions than the initial summaries: some limited or free registered market-data access exists; internal use and external distribution are treated differently; external distribution can require appropriate licensing depending on the use; derived-data uses may require a licence depending on the activity or product; and historical market-data access can involve registered or paid products. That official material was not re-read in this branch, so these points are recorded as the reviewer's finding.
+- **What is and is not established.** It was **not** established that every use of LME data requires a licence, and it was **not** established that ZM Terminal's proposed persisted, public or derived use is permitted without one. **Rights for the proposed ZM Terminal use remain unresolved.**
+- **Project recommendation: direct LME is rejected for the current implementation.** This is a project-source decision, not a legal conclusion about LME data use in general. Reasons: direct access is more restrictive and higher-friction, the historical-access and product structure is less convenient for a stored monthly series, external-distribution and derived-use rights raise additional licensing questions, and authoritative statistical alternatives that already carry the LME-linked benchmark at monthly frequency exist (IMF and World Bank).
 
 ## 6. FRED `PCOPPUSDM`
 - Facts (series page and `data/PCOPPUSDM.txt`, read through a fetch tool): "Global price of Copper (PCOPPUSDM)", source International Monetary Fund, release "Primary Commodity Prices", units "U.S. Dollars per Metric Ton, Not Seasonally Adjusted", monthly, 1992-01-01 to 2026-09-01, "Updated: Oct 22, 2026". Notes: "Value represents the benchmark prices which are representative of the global market.", "Prices are period averages in nominal U.S. dollars.", "Copyright © 2016, International Monetary Fund. Reprinted with permission.", a banner "Data in this graph are copyrighted. Please review the copyright information in the series notes before sharing.", and "Complete terms of use and contact details are available at http://www.imf.org/external/terms.htm."
-- FRED API: "All web service requests require an API key", and a key can only be requested after logging into a FRED account. That conflicts with the no-account constraint. A direct request for the public `fredgraph.csv` download timed out twice, so the full FRED history was not downloaded.
+- **Public page and table:** the series page and `data/PCOPPUSDM.txt` were read through a fetch tool without any account, so the Copper series page and table are publicly accessible and usable for manual cross-checking.
+- **FRED API:** "All web service requests require an API key", and a key can only be requested after logging into a FRED account. That is an API requirement, not a requirement for all FRED access.
+- **Direct download attempt:** a request for the public `fredgraph.csv` download timed out twice (HTTP/2 stream error, then a 40 s timeout). A timeout does not establish an account or authentication requirement, a prohibition, or that the download is unavailable; the attempt is inconclusive, and the full FRED history was simply not downloaded.
+- Access and rights are separate: an API key says nothing about reuse. The underlying source is the IMF, and FRED's notes defer to the IMF terms.
 - FRED API terms: series "may be owned by third parties and subject to copyright restrictions"; for use beyond personal use "you must contact the data owner" and FRED "cannot give you such permission"; no storage or commercial-use clause was found.
-- **Conclusion:** FRED is an access layer over the IMF series, adds no rights (the notes defer to IMF terms), requires an account for API use, and lags the IMF by about a month. Cross-check only; it must not become a shortcut around IMF or LME rights.
+- **Conclusion:** FRED is a secondary access layer over the IMF series. It does not provide broader downstream rights than the source data (the notes defer to the IMF terms), its API needs a key, and its copy lagged the IMF by about a month. It remains a cross-check, not a preferred source, and must not become a shortcut around IMF or LME rights.
 
 ## 7. Futures and other alternatives
-CME/COMEX copper futures and commercial vendors were not evaluated further: a futures settlement is not the physical/spot benchmark wanted, and vendor feeds are licensed products.
+CME/COMEX copper futures and commercial vendors were not evaluated further: a futures settlement is not the physical/spot benchmark wanted, and vendor feeds are typically commercial products that were not assessed.
 
 ## 8. Cross-source comparison (exact published values)
 
@@ -93,20 +99,25 @@ IMF `PCOPP` (API, 2026-11-14), World Bank `Copper` (November 3 workbook, whole d
 | 2026-M09 | 14473.05590909091 | 14474 | 14473.055909090910 |
 | 2026-M10 | 14507.97363636364 | 14508 | not yet in FRED's copy |
 
-- **IMF equals FRED exactly** (Decimal comparison, ignoring a trailing zero) for the six months FRED printed (2026-M04 to 2026-M09). Only six values were compared because the FRED CSV download timed out.
-- **World Bank versus IMF** over the 418 overlapping months (1992-M01 to 2026-M10): median absolute difference 0.052%, maximum 1.21% (60.3 USD in one month). Only 162 of the 418 months are within the 0.5 USD that whole-dollar rounding allows, so **256 months differ by more than rounding**. **Interpretation:** the two are related but not the same series: the IMF describes "LME spot price, CIF European ports", the World Bank "LME … settlement price", and the averaging windows may differ. Their agreement does not prove equivalent methodology or licence status, and equal LME mention is not evidence of equality.
+- **IMF equals FRED exactly** (Decimal comparison, ignoring a trailing zero) for the six months FRED printed (2026-M04 to 2026-M09). Only six values were compared because the FRED CSV download attempt timed out (inconclusive, see section 6).
+- **World Bank versus IMF** over the 418 overlapping months (1992-M01 to 2026-M10), both USD per metric ton (the World Bank in whole dollars):
+  - median absolute percentage difference: **0.052123%**;
+  - **maximum absolute percentage difference: 1.207142%, in 2009-M01** (World Bank 3221, IMF 3260.357142857143, a 39.357143 USD gap);
+  - **maximum absolute dollar difference: 60.312273 USD per metric ton, in 2026-M04** (World Bank 12951, IMF 12890.68772727273, only 0.467875% there). The two maxima occur in different months and must not be read as one event;
+  - only 162 of the 418 months are within the 0.5 USD that whole-dollar rounding allows, so **256 months differ by more than rounding**.
+  - **IMF and World Bank Copper should not be treated as interchangeable series.** Their published descriptions and source lists differ (IMF: "LME spot price, CIF European ports"; World Bank: "LME … settlement price", with the vendor sources listed in section 4), but **the cause of the observed numeric differences was not established in this research**, and no specific methodological cause is claimed. Agreement between them would not prove equivalent methodology or licence status either.
 - Latest: IMF 2026-M10 14507.97363636364; World Bank 2026-M10 14508; FRED ends at 2026-M09 (14473.055909090910). LME's daily official price is contextual only and was not read; a daily price is not comparable to a monthly average.
 
 ## 9. Rights and licensing matrix
 
 | Use | IMF PCPS | World Bank Copper | LME direct | FRED |
 |---|---|---|---|---|
-| Local/private research | `acceptable for local research` | `acceptable for local research` | not recommended (not free, terms unread) | n/a (needs an account) |
-| Persist normalized monthly values | `acceptable for local research` (the statistical-data terms permit download, extract and copy; no storage clause) | `acceptable for local research` | `rejected` without a licence | n/a |
-| Public non-commercial display | `review_required` (explicit grant for Primary Commodity Prices with attribution; LME origin unresolved) | `review_required` | `rejected` without a licence | `review_required` |
-| API redistribution | `review_required` (same) | `review_required` | `rejected` without a licence | `review_required` |
-| Commercial use | `review_required` (the IMF says to email `copyright@imf.org` for commercial reuse) | `review_required` | `rejected` without a licence | `review_required` |
-| Derived data (Copper x USD/ZMW) | `review_required` (derivative works are permitted with attribution and a stated transformation; LME origin unresolved) | `review_required` | `rejected` without a derived-data licence | `review_required` |
+| Local/private research | `acceptable for local research` | `acceptable for local research` | Use-dependent / unresolved (not pursued) | `acceptable for local research` (manual cross-check of the public page; notes defer to IMF terms) |
+| Persist normalized monthly values | `acceptable for local research` (the statistical-data terms permit download, extract and copy; no storage clause) | `acceptable for local research` | Unresolved | Not intended (cross-check only) |
+| Public non-commercial display | `review_required` (explicit grant for Primary Commodity Prices with attribution; LME origin unresolved) | `review_required` | External distribution rights unresolved | `review_required` (inherits the IMF terms) |
+| API redistribution | `review_required` (same) | `review_required` | External distribution rights unresolved | `review_required` (inherits the IMF terms) |
+| Commercial use | `review_required` (the IMF says to email `copyright@imf.org` for commercial reuse) | `review_required` | Unresolved | `review_required` (inherits the IMF terms) |
+| Derived data (Copper x USD/ZMW) | `review_required` (derivative works are permitted with attribution and a stated transformation; LME origin unresolved) | `review_required` | Derived-use rights may require a licence (activity-dependent) | `review_required` (inherits the IMF terms) |
 
 Final IMF classification: **`review_required`** (not `permitted`) for every use beyond local research. Reasons: the LME third-party question is unresolved, commercial reuse is expressly permission-gated, the IMF prohibits "bulk download … by automated technology" without permission (a single manual import of one series is probably not "bulk", unconfirmed), and the portal-level licence metadata could not be read.
 
@@ -114,7 +125,7 @@ Final IMF classification: **`review_required`** (not `permitted`) for every use 
 
 | | IMF PCPS | World Bank | FRED |
 |---|---|---|---|
-| Auth | none | none | API key (account) |
+| Auth | none | none | Public page: none. API: key (obtained through a FRED account) |
 | Format | SDMX 3.0 JSON | XLSX workbook, strict parser exists | JSON/CSV |
 | Request cost | one request for the monthly series (~97 KB for all `PCOPP` views) | one workbook (~0.6 MB, shared with oil and Gold) | one request after a key exists |
 | Precision | full (12 decimals observed) | whole dollars | full |
@@ -128,21 +139,21 @@ Facts and recommendation are in section 3.2. All three sources are complete mont
 
 | Criterion | IMF PCPS | World Bank | LME direct | FRED |
 |---|---|---|---|---|
-| Semantics | Strong (documented grade, spot, CIF Europe, monthly average) | Good (LME settlement, grade A), averaging rule not stated | Strongest (the primary benchmark) | Copy of IMF |
+| Semantics | Strong (documented grade, spot, CIF Europe, monthly average) | Good (LME settlement, grade A), averaging rule not stated | Strongest (the primary benchmark; not read directly here) | Copy of IMF |
 | Source authority | High (IMF) | High (World Bank) | Primary | Secondary |
-| Technical access | Best (anonymous API) | Good (workbook, parser exists) | Gated | Needs an account |
-| History | 1992 to now, full precision | 1960 to now, whole dollars | Licensed | 1992 to last month |
-| Persistence | Acceptable locally | Acceptable locally | Licence needed | n/a |
-| Public display | `review_required` | `review_required` | Licence needed | `review_required` |
-| API redistribution | `review_required` | `review_required` | Licence needed | `review_required` |
-| Commercial | `review_required` (permission) | `review_required` | Licence needed | `review_required` |
-| Derived data | `review_required` | `review_required` | Licence needed | `review_required` |
-| Maintenance cost | New small adapter | Extend an existing parser | High | Needs a key |
+| Technical access | Best (anonymous API) | Good (workbook, parser exists) | Registered or licensed options (not fully read) | Public page anonymous; API needs a key |
+| History | 1992 to now, full precision | 1960 to now, whole dollars | Registered or paid historical products (per the later review) | 1992 to last month |
+| Persistence | Acceptable locally | Acceptable locally | Unresolved | Not intended |
+| Public display | `review_required` | `review_required` | External distribution rights unresolved | `review_required` |
+| API redistribution | `review_required` | `review_required` | External distribution rights unresolved | `review_required` |
+| Commercial | `review_required` (permission) | `review_required` | Unresolved | `review_required` |
+| Derived data | `review_required` | `review_required` | Derived-use rights may require a licence | `review_required` |
+| Maintenance cost | New small adapter | Extend an existing parser | Higher (registration, licensing questions) | Needs a key |
 
 - **Preferred provider:** IMF PCPS `PCOPP` (strongest written reuse grant, full precision, anonymous API, a documented benchmark definition).
 - **Backup provider:** World Bank Pink Sheet `Copper` (reuses the workbook path, but whole dollars, a different definition and an unresolved licence ticket).
 - **Cross-check:** FRED `PCOPPUSDM` (not independent; lags the IMF).
-- **Rejected:** direct LME for the current implementation (licence-gated and its terms could not be read); futures sources (semantic mismatch).
+- **Rejected for the current implementation:** direct LME (a project-source decision: more access friction, a less convenient historical product structure, unresolved external-distribution and derived-use rights, and authoritative statistical alternatives; not a finding that every LME use needs a licence); futures sources (semantic mismatch).
 - Architecture note: `PGOLD` (the IMF backup for Gold) lives in the same IMF dataflow, so one small IMF PCPS adapter could later serve both series. Gold's status is unchanged: it remains blocked on the World Bank answer.
 
 ## 13. Proposed future provider policy (not implemented)
