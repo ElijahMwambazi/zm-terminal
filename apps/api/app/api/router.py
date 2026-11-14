@@ -10,6 +10,7 @@ from sqlalchemy import text
 from app.db import database_is_ready, get_engine
 from app.schemas.btc import BtcRange, BtcUsdHistory, BtcUsdQuote, BtcZmwHistory, BtcZmwQuote
 from app.schemas.copper import CopperHistory, CopperLatest, CopperRange
+from app.schemas.copper_zm import CopperZmHistory, CopperZmMonth
 from app.schemas.fx import FxHistory, FxQuote
 from app.schemas.agriculture import (
     AGRICULTURE_COMMODITIES, AgricultureCommodity, AgricultureHistory, AgricultureLatest, AgriculturePrice, AgricultureRange,
@@ -41,6 +42,7 @@ from app.services.fuel_store import fetch_fuel_history, fetch_latest_fuel
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, fetch_latest_fx_mid, save_fx_quote
 from app.services.tbill_store import TbillConflictError, fetch_tbill_history, save_tbill_auctions
 from app.services.copper_store import fetch_copper_history, fetch_latest_copper
+from app.services.copper_zm import fetch_copper_zm
 from app.services.oil_store import fetch_latest_oil, fetch_oil_history
 from app.services.oil_zm import fetch_oil_zm
 from app.services.yield_curve import fetch_yield_curve
@@ -399,6 +401,30 @@ async def copper_latest() -> CopperLatest:
         logger.warning("Copper read failed (%s)", type_name(exc))
         raise HTTPException(status_code=503, detail="Stored copper benchmark unavailable") from exc
     return CopperLatest(observation=observation)
+
+
+@router.get("/copper/zm/latest", response_model=CopperZmMonth)
+async def copper_zm_latest() -> CopperZmMonth:
+    """Newest month with both stored IMF Copper and stored BoZ USD/ZMW; derived on request from PostgreSQL, never persisted."""
+    try:
+        months, _ = await asyncio.to_thread(fetch_copper_zm, "ALL", today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("COPPER ZM read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored copper and FX data unavailable") from exc
+    if not months:
+        raise HTTPException(status_code=404, detail="No month has both stored IMF Copper and stored BoZ USD/ZMW data")
+    return months[-1]
+
+
+@router.get("/copper/zm/history", response_model=CopperZmHistory)
+async def copper_zm_history(range: CopperRange = "1Y") -> CopperZmHistory:
+    """Derived months ascending; Copper months without FX are omitted (and counted), never filled. Stored data only."""
+    try:
+        months, omitted = await asyncio.to_thread(fetch_copper_zm, range, today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("COPPER ZM history read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored copper and FX data unavailable") from exc
+    return CopperZmHistory(range=range, count=len(months), copper_months_without_fx=omitted, observations=months)
 
 
 @router.get("/copper/history", response_model=CopperHistory)
