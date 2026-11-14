@@ -614,3 +614,38 @@ export type BtcZmwHistory = {
 };
 export const getBtcZmwHistory = (range: BtcRange) =>
   getBtcJson<BtcZmwHistory>(`/api/v1/btc/zmw/history?range=${range}`, { 503: "Stored BTC/USD or USD/ZMW data is unavailable (database)" });
+
+/** Global Copper benchmark: IMF Primary Commodity Prices, series PCOPP, a MONTHLY average in nominal USD per metric ton.
+ * Read from storage only (the UI never calls the IMF). The IMF is the provider; the definition names LME as the underlying
+ * benchmark source. Not a Zambia copper price, not a live quote, not a futures price. Decimals are plain strings. */
+export const COPPER_RANGES = ["1Y", "3Y", "5Y", "ALL"] as const;
+export type CopperRange = (typeof COPPER_RANGES)[number];
+export type CopperPoint = { benchmark: "COPPER"; period_start: string; period_end: string; value: string; currency: "USD"; unit: "metric_ton"; source: "imf"; price_basis: "monthly_average" };
+export type CopperObservation = CopperPoint & {
+  source_series: "PCOPP";
+  source_definition: string;
+  source_url: string; // the exact IMF request that supplied the stored value
+  source_page_url: string;
+  retrieved_at: string;
+  stale: boolean;
+  /** Backend heuristic (calendar months behind the current Africa/Lusaka month); displayed, never hardcoded in the UI. */
+  stale_after_months: number;
+};
+export type CopperLatest = { observation: CopperObservation | null };
+
+async function getCopperJson<T>(path: string): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`);
+  } catch {
+    throw new ApiError("api", "ZM Terminal API is unreachable");
+  }
+  if (response.status === 503) throw new ApiError("api", "Stored copper benchmark is unavailable (database)");
+  if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
+  return response.json();
+}
+
+export const getCopperLatest = () => getCopperJson<CopperLatest>("/api/v1/copper/latest");
+export async function getCopperHistory(range: CopperRange): Promise<CopperPoint[]> {
+  return (await getCopperJson<{ observations: CopperPoint[] }>(`/api/v1/copper/history?range=${range}`)).observations;
+}

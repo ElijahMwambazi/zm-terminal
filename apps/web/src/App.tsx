@@ -7,6 +7,8 @@ import OilDetail, { perBarrel } from "./OilDetail";
 import { useOil } from "./useOil";
 import OilZmDetail from "./OilZmDetail";
 import { useOilZm } from "./useOilZm";
+import CopperDetail, { perMetricTon } from "./CopperDetail";
+import { useCopper } from "./useCopper";
 import BtcUsdDetail, { usdPrice } from "./BtcUsdDetail";
 import BtcZmwDetail, { formatAge, zmwPrice } from "./BtcZmwDetail";
 import { useBtcUsd } from "./useBtcUsd";
@@ -31,7 +33,6 @@ type MarketCard = {
 
 const markets: MarketCard[] = [
   { label: "LASI", value: "—", context: "LuSE adapter" },
-  { label: "COPPER", value: "—", context: "Commodity adapter" },
 ];
 
 function StatusDot({ ok }: { ok?: boolean }) {
@@ -42,11 +43,12 @@ export default function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [command, setCommand] = useState("");
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | "oil-zm" | "yield-curve" | "btc-usd" | "btc-zmw" | null>(null);
+  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | "oil-zm" | "yield-curve" | "btc-usd" | "btc-zmw" | "copper" | null>(null);
   const [oilFocus, setOilFocus] = useState<OilBenchmark | null>(null);
   const [oilNavigationKey, setOilNavigationKey] = useState(0);
   const { state: oilState, refresh: refreshOil } = useOil();
   const { state: oilZmState, refresh: refreshOilZm } = useOilZm();
+  const { state: copperState, refresh: refreshCopper } = useCopper();
   const { state: btcUsdState, refresh: refreshBtcUsd } = useBtcUsd();
   const { state: btcZmwState, refresh: refreshBtcZmw } = useBtcZmw();
   const { state: curveState, spreadState: curveSpreadState, asOf: curveAsOf, setAsOf: setCurveAsOf, refresh: refreshCurve } = useYieldCurve();
@@ -124,6 +126,11 @@ export default function App() {
     requestAnimationFrame(() => detailRef.current?.focus());
   };
 
+  const openCopper = () => {
+    setDetail("copper");
+    requestAnimationFrame(() => detailRef.current?.focus());
+  };
+
   const openBtcUsd = () => {
     setDetail("btc-usd");
     requestAnimationFrame(() => detailRef.current?.focus());
@@ -146,6 +153,7 @@ export default function App() {
     else if (result.action.type === "open-oil") openOil(result.action.benchmark);
     else if (result.action.type === "open-oil-zm") openOilZm();
     else if (result.action.type === "open-yield-curve") openYieldCurve();
+    else if (result.action.type === "open-copper") openCopper();
     else if (result.action.type === "open-btc-usd") openBtcUsd();
     else if (result.action.type === "open-btc-zmw") openBtcZmw();
     else openAgriculture(result.action.commodity);
@@ -160,6 +168,7 @@ export default function App() {
   const bond10 = bondState.status === "ready" ? bondState.data.tenors.find((t) => t.tenor === "10Y") : undefined;
   const petrol = fuelState.status === "ready" ? fuelState.data.prices.find((p) => p.product === "PETROL") : undefined;
   const maize = agricultureState.status === "ready" ? agricultureState.data.prices.find((p) => p.commodity === "MAIZE") : undefined;
+  const copperObservation = copperState.status === "ready" ? copperState.data.observation : null;
   const brent = oilState.status === "ready" ? oilState.data.observations.find((o) => o.benchmark === "BRENT") : undefined;
   const tbillSkipped = tbillState.status === "ready" ? tbillState.data.skipped_tenders : [];
 
@@ -188,7 +197,7 @@ export default function App() {
         <span><StatusDot ok={status?.api} /> API</span>
         <span><StatusDot ok={status?.database} /> POSTGRES</span>
         <span><StatusDot ok={status?.openbb} /> OPENBB</span>
-        <span className="status-note">v0.1 — USD/ZMW, BoZ fixed income, ERB fuel, Ministry agriculture averages, and global oil monthly benchmarks</span>
+        <span className="status-note">v0.1 — USD/ZMW, BoZ fixed income, ERB fuel, Ministry agriculture averages, and global oil and copper monthly benchmarks</span>
       </section>
 
       <section className="market-grid" aria-label="Market overview">
@@ -277,6 +286,17 @@ export default function App() {
             {brent && <><br /><span className="text-stale">{brent.stale ? "Behind schedule: " : ""}Monthly average, not a live quote</span></>}
           </small>
         </button>
+        <button type="button" className="market-card market-card--live" onClick={openCopper}>
+          <span className="market-label">COPPER</span>
+          {copperObservation ? <strong className="market-value--long">{perMetricTon(copperObservation.value)}</strong> : <strong>{copperState.status === "loading" ? "…" : "—"}</strong>}
+          <small>
+            {copperState.status === "loading" && "Loading the stored IMF copper benchmark…"}
+            {copperState.status === "error" && `${copperState.message}. No price is shown.`}
+            {copperState.status === "ready" && !copperObservation && "No stored IMF Copper price"}
+            {copperObservation && <>IMF PCPS · {formatMonth(copperObservation.period_start)} monthly average</>}
+            {copperObservation && <><br /><span className="text-stale">{copperObservation.stale ? "Behind schedule: " : ""}Monthly average, not a live quote</span></>}
+          </small>
+        </button>
         <button type="button" className="market-card market-card--live" onClick={openBtcUsd}>
           <span className="market-label">BTC/USD</span>
           {btcUsdState.status === "ready" ? <strong className="market-value--long">{usdPrice(btcUsdState.quote.last)}</strong> : <strong>{btcUsdState.status === "loading" ? "…" : "—"}</strong>}
@@ -315,6 +335,8 @@ export default function App() {
           <AgricultureDetail ref={detailRef} state={agricultureState} focus={agricultureFocus} navigationKey={agricultureNavigationKey} onRefresh={refreshAgriculture} />
         ) : detail === "yield-curve" ? (
           <YieldCurveDetail ref={detailRef} state={curveState} spreads={curveSpreadState} asOf={curveAsOf} onAsOf={setCurveAsOf} navigationKey={curveNavigationKey} onRefresh={refreshCurve} />
+        ) : detail === "copper" ? (
+          <CopperDetail ref={detailRef} state={copperState} onRefresh={refreshCopper} />
         ) : detail === "btc-usd" ? (
           <BtcUsdDetail ref={detailRef} state={btcUsdState} onRefresh={refreshBtcUsd} />
         ) : detail === "btc-zmw" ? (
@@ -330,7 +352,7 @@ export default function App() {
         ) : (
           <article className="panel">
             <div className="panel-heading"><span>WORKSPACE</span></div>
-            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, <code>OIL</code> for global Brent and WTI monthly benchmarks, <code>OIL ZM</code> for the derived Brent-in-kwacha view, <code>CURVE ZM</code> for the sovereign auction yield curve, <code>BTC</code> for Bitstamp BTC/USD, or <code>BTC ZMW</code> for the indicative derived BTC/ZMW.</p>
+            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, <code>OIL</code> for global Brent and WTI monthly benchmarks, <code>OIL ZM</code> for the derived Brent-in-kwacha view, <code>CURVE ZM</code> for the sovereign auction yield curve, <code>COPPER</code> for the global IMF Copper monthly benchmark, <code>BTC</code> for Bitstamp BTC/USD, or <code>BTC ZMW</code> for the indicative derived BTC/ZMW.</p>
           </article>
         )}
 
@@ -344,7 +366,7 @@ export default function App() {
               <tr><td>CECZ</td><td>Copperbelt Energy</td><td>—</td></tr>
               <tr><td>ZNCO</td><td>Zanaco</td><td>—</td></tr>
               <tr><td>BTC</td><td>Bitcoin</td><td>{btcUsdState.status === "ready" ? usdPrice(btcUsdState.quote.last) : "—"}</td></tr>
-              <tr><td>COPPER</td><td>Copper</td><td>—</td></tr>
+              <tr><td>COPPER</td><td>Copper</td><td>{copperObservation ? perMetricTon(copperObservation.value) : "—"}</td></tr>
             </tbody>
           </table>
         </article>
