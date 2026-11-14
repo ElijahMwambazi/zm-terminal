@@ -649,3 +649,79 @@ export const getCopperLatest = () => getCopperJson<CopperLatest>("/api/v1/copper
 export async function getCopperHistory(range: CopperRange): Promise<CopperPoint[]> {
   return (await getCopperJson<{ observations: CopperPoint[] }>(`/api/v1/copper/history?range=${range}`)).observations;
 }
+
+/** COPPER ZM: a DERIVED monthly ZM Terminal indicator (IMF Copper USD/mt x BoZ USD/ZMW observed-days mid average), never an
+ * official series and not a Zambia copper price. The API does all arithmetic; the UI only displays and rounds for presentation. */
+export type CopperZmPoint = {
+  classification: "derived";
+  derived: true;
+  period_start: string;
+  period_end: string;
+  currency: "ZMW";
+  unit: "metric_ton";
+  zmw_per_mt: string;
+  copper_usd_per_mt: string;
+  usd_zmw_observed_days_avg: string;
+  fx_day_count: number;
+  fx_observation_count: number;
+  /** partial_source_window: stored BoZ history begins during this month. observed_days: uses whatever stored days exist; asserts no completeness. */
+  fx_coverage: "partial_source_window" | "observed_days";
+};
+export type CopperZmMonth = CopperZmPoint & {
+  methodology_id: string;
+  methodology: string;
+  notice: string;
+  timing_note: string;
+  fx_first_date: string;
+  fx_last_date: string;
+  fx_first_observation: string;
+  fx_last_observation: string;
+  copper_source: "imf";
+  copper_source_series: "PCOPP";
+  copper_source_definition: string;
+  copper_source_url: string;
+  copper_source_page_url: string;
+  copper_retrieved_at: string;
+  fx_source: "boz";
+  fx_pair: "USDZMW";
+  fx_price: "mid";
+  fx_source_url: string;
+  stale: boolean;
+  stale_after_months: number;
+};
+export type CopperZmHistory = {
+  range: CopperRange;
+  count: number;
+  copper_months_without_fx: number;
+  methodology_id: string;
+  methodology: string;
+  notice: string;
+  timing_note: string;
+  observations: CopperZmPoint[];
+};
+
+/** null = no month has both stored IMF Copper and stored BoZ FX (a normal empty state, not an error). */
+export async function getCopperZmLatest(): Promise<CopperZmMonth | null> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/v1/copper/zm/latest`);
+  } catch {
+    throw new ApiError("api", "ZM Terminal API is unreachable");
+  }
+  if (response.status === 404) return null;
+  if (response.status === 503) throw new ApiError("api", "Stored Copper and FX data are unavailable (database)");
+  if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
+  return response.json();
+}
+
+export async function getCopperZmHistory(range: CopperRange): Promise<CopperZmHistory> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/v1/copper/zm/history?range=${range}`);
+  } catch {
+    throw new ApiError("api", "ZM Terminal API is unreachable");
+  }
+  if (response.status === 503) throw new ApiError("api", "Stored Copper and FX data are unavailable (database)");
+  if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
+  return response.json();
+}

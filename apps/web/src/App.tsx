@@ -9,6 +9,8 @@ import OilZmDetail from "./OilZmDetail";
 import { useOilZm } from "./useOilZm";
 import CopperDetail, { perMetricTon } from "./CopperDetail";
 import { useCopper } from "./useCopper";
+import CopperZmDetail, { zmwPerMetricTon } from "./CopperZmDetail";
+import { useCopperZm } from "./useCopperZm";
 import BtcUsdDetail, { usdPrice } from "./BtcUsdDetail";
 import BtcZmwDetail, { formatAge, zmwPrice } from "./BtcZmwDetail";
 import { useBtcUsd } from "./useBtcUsd";
@@ -43,12 +45,13 @@ export default function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [command, setCommand] = useState("");
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | "oil-zm" | "yield-curve" | "btc-usd" | "btc-zmw" | "copper" | null>(null);
+  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | "oil-zm" | "yield-curve" | "btc-usd" | "btc-zmw" | "copper" | "copper-zm" | null>(null);
   const [oilFocus, setOilFocus] = useState<OilBenchmark | null>(null);
   const [oilNavigationKey, setOilNavigationKey] = useState(0);
   const { state: oilState, refresh: refreshOil } = useOil();
   const { state: oilZmState, refresh: refreshOilZm } = useOilZm();
   const { state: copperState, refresh: refreshCopper } = useCopper();
+  const { state: copperZmState, refresh: refreshCopperZm } = useCopperZm();
   const { state: btcUsdState, refresh: refreshBtcUsd } = useBtcUsd();
   const { state: btcZmwState, refresh: refreshBtcZmw } = useBtcZmw();
   const { state: curveState, spreadState: curveSpreadState, asOf: curveAsOf, setAsOf: setCurveAsOf, refresh: refreshCurve } = useYieldCurve();
@@ -131,6 +134,11 @@ export default function App() {
     requestAnimationFrame(() => detailRef.current?.focus());
   };
 
+  const openCopperZm = () => {
+    setDetail("copper-zm");
+    requestAnimationFrame(() => detailRef.current?.focus());
+  };
+
   const openBtcUsd = () => {
     setDetail("btc-usd");
     requestAnimationFrame(() => detailRef.current?.focus());
@@ -154,6 +162,7 @@ export default function App() {
     else if (result.action.type === "open-oil-zm") openOilZm();
     else if (result.action.type === "open-yield-curve") openYieldCurve();
     else if (result.action.type === "open-copper") openCopper();
+    else if (result.action.type === "open-copper-zm") openCopperZm();
     else if (result.action.type === "open-btc-usd") openBtcUsd();
     else if (result.action.type === "open-btc-zmw") openBtcZmw();
     else openAgriculture(result.action.commodity);
@@ -297,6 +306,16 @@ export default function App() {
             {copperObservation && <><br /><span className="text-stale">{copperObservation.stale ? "Behind schedule: " : ""}Monthly average, not a live quote</span></>}
           </small>
         </button>
+        <button type="button" className="market-card market-card--live" onClick={openCopperZm}>
+          <span className="market-label">COPPER ZM · DERIVED</span>
+          {copperZmState.status === "ready" ? <strong className="market-value--long">{zmwPerMetricTon(copperZmState.data.zmw_per_mt)}</strong> : <strong>{copperZmState.status === "loading" ? "…" : "—"}</strong>}
+          <small>
+            {copperZmState.status === "loading" && "Deriving from stored IMF Copper and stored BoZ USD/ZMW…"}
+            {copperZmState.status === "error" && `${copperZmState.message}. No value is shown.`}
+            {copperZmState.status === "unavailable" && "No month has both stored IMF Copper and stored BoZ FX"}
+            {copperZmState.status === "ready" && <>IMF Copper × stored BoZ FX · {formatMonth(copperZmState.data.period_start)}<br /><span className={copperZmState.data.stale ? "text-stale" : undefined}>{copperZmState.data.stale ? "Behind schedule: " : ""}Derived monthly value, not a Zambia copper price</span></>}
+          </small>
+        </button>
         <button type="button" className="market-card market-card--live" onClick={openBtcUsd}>
           <span className="market-label">BTC/USD</span>
           {btcUsdState.status === "ready" ? <strong className="market-value--long">{usdPrice(btcUsdState.quote.last)}</strong> : <strong>{btcUsdState.status === "loading" ? "…" : "—"}</strong>}
@@ -341,6 +360,8 @@ export default function App() {
           <BtcUsdDetail ref={detailRef} state={btcUsdState} onRefresh={refreshBtcUsd} />
         ) : detail === "btc-zmw" ? (
           <BtcZmwDetail ref={detailRef} state={btcZmwState} onRefresh={refreshBtcZmw} />
+        ) : detail === "copper-zm" ? (
+          <CopperZmDetail ref={detailRef} state={copperZmState} onRefresh={refreshCopperZm} />
         ) : detail === "oil-zm" ? (
           <OilZmDetail ref={detailRef} state={oilZmState} onRefresh={refreshOilZm} />
         ) : detail === "oil" ? (
@@ -352,7 +373,7 @@ export default function App() {
         ) : (
           <article className="panel">
             <div className="panel-heading"><span>WORKSPACE</span></div>
-            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, <code>OIL</code> for global Brent and WTI monthly benchmarks, <code>OIL ZM</code> for the derived Brent-in-kwacha view, <code>CURVE ZM</code> for the sovereign auction yield curve, <code>COPPER</code> for the global IMF Copper monthly benchmark, <code>BTC</code> for Bitstamp BTC/USD, or <code>BTC ZMW</code> for the indicative derived BTC/ZMW.</p>
+            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, <code>OIL</code> for global Brent and WTI monthly benchmarks, <code>OIL ZM</code> for the derived Brent-in-kwacha view, <code>CURVE ZM</code> for the sovereign auction yield curve, <code>COPPER</code> for the global IMF Copper monthly benchmark, <code>COPPER ZM</code> for the derived Copper-in-kwacha view, <code>BTC</code> for Bitstamp BTC/USD, or <code>BTC ZMW</code> for the indicative derived BTC/ZMW.</p>
           </article>
         )}
 

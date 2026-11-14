@@ -10,7 +10,8 @@ export type CommandResult =
     | { type: "open-yield-curve" }
     | { type: "open-btc-usd" }
     | { type: "open-btc-zmw" }
-    | { type: "open-copper" } }
+    | { type: "open-copper" }
+    | { type: "open-copper-zm" } }
   | { ok: false; error: string };
 
 /** Normalized command text -> action. Add new commands here. */
@@ -43,6 +44,7 @@ const COMMANDS: Record<string, CommandResult & { ok: true }> = {
   "BTC USD": { ok: true, action: { type: "open-btc-usd" } },
   "BTC ZMW": { ok: true, action: { type: "open-btc-zmw" } },
   COPPER: { ok: true, action: { type: "open-copper" } },
+  "COPPER ZM": { ok: true, action: { type: "open-copper-zm" } },
   "BOND ZM": { ok: true, action: { type: "open-bond", tenor: null } },
   "BOND 2Y": { ok: true, action: { type: "open-bond", tenor: "2Y" } },
   "BOND 3Y": { ok: true, action: { type: "open-bond", tenor: "3Y" } },
