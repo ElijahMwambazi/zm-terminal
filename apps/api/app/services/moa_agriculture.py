@@ -167,7 +167,7 @@ def _period(text: str) -> tuple[date, date]:
     normalized = re.sub(r"\s+", " ", text)
     month_re = "|".join(m.title() for m in MONTHS)
     match = re.search(
-        rf"Bulletin\s+No\s*:\s*[^\n]*?(\d{{1,2}})\D{{0,5}}({month_re})\s+(\d{{4}})\s*[–—-]\s*"
+        rf"Bulletin\s+No\s*:\s*[^\n]*?(\d{{1,2}})\D{{0,5}}({month_re})\s+(\d{{4}})\s*(?:to|[–—-])\s*"
         rf"(\d{{1,2}})\D{{0,5}}({month_re})\s+(\d{{4}})",
         normalized,
         re.IGNORECASE,
