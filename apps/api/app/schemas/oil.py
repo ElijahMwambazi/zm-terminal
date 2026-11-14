@@ -8,9 +8,7 @@ from pydantic import AwareDatetime, BaseModel, Field, field_validator, model_val
 OilBenchmark = Literal["BRENT", "WTI"]
 OIL_BENCHMARKS: tuple[str, ...] = ("BRENT", "WTI")
 OilRange = Literal["1Y", "3Y", "5Y", "ALL"]
-OIL_PROVIDER = "world_bank"
-OIL_SOURCE_NAME = "World Bank Commodity Price Data (The Pink Sheet)"
-OIL_SOURCE_PAGE_URL = "https://www.worldbank.org/en/research/commodity-markets"
+OIL_SOURCE_PAGE_URL = "https://www.worldbank.org/en/research/commodity-markets"  # stable human-facing page
 OIL_SOURCE_UNIT = "($/bbl)"  # the workbook's unit label; any other label is rejected, never converted
 # Application heuristic, not a publisher SLA: the Pink Sheet is updated monthly (about the 2nd business day), so the
 # newest published month is normally the previous calendar month. "Stale" means the newest stored month is more than
@@ -56,7 +54,8 @@ class OilObservation(OilPoint):
     name: str
     description: str
     source_series: str
-    source_url: str
+    source_url: str  # the exact release workbook URL (machine provenance; the hash changes every release)
+    source_page_url: str = OIL_SOURCE_PAGE_URL  # stable page for human navigation
     publication_date: date
     retrieved_at: AwareDatetime
     stale: bool

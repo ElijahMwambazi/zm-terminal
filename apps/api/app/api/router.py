@@ -265,15 +265,11 @@ async def agriculture_commodity(commodity: AgricultureCommodity) -> AgricultureP
     return match[0]
 
 
-def _utc_today() -> date:
-    return datetime.now(timezone.utc).date()
-
-
 @router.get("/oil/latest", response_model=OilLatest)
 async def oil_latest() -> OilLatest:
     """Newest stored World Bank Pink Sheet month per benchmark (monthly averages, USD/bbl); the World Bank is never called here."""
     try:
-        observations = await asyncio.to_thread(fetch_latest_oil, today=_utc_today())
+        observations = await asyncio.to_thread(fetch_latest_oil, today=_lusaka_today())
     except Exception as exc:
         logger.warning("Oil read failed (%s)", type_name(exc))
         raise HTTPException(status_code=503, detail="Stored oil benchmarks unavailable") from exc
@@ -285,7 +281,7 @@ async def oil_latest() -> OilLatest:
 async def oil_history(benchmark: OilBenchmark = "BRENT", range: OilRange = "1Y") -> OilHistory:
     """Stored months only, ascending; the World Bank is never called here."""
     try:
-        points = await asyncio.to_thread(fetch_oil_history, benchmark, range, today=_utc_today())
+        points = await asyncio.to_thread(fetch_oil_history, benchmark, range, today=_lusaka_today())
     except Exception as exc:
         logger.warning("Oil history read failed (%s)", type_name(exc))
         raise HTTPException(status_code=503, detail="Stored oil benchmarks unavailable") from exc
@@ -295,7 +291,7 @@ async def oil_history(benchmark: OilBenchmark = "BRENT", range: OilRange = "1Y")
 @router.get("/oil/{benchmark}", response_model=OilObservation)
 async def oil_benchmark(benchmark: OilBenchmark) -> OilObservation:
     try:
-        observations = await asyncio.to_thread(fetch_latest_oil, today=_utc_today())
+        observations = await asyncio.to_thread(fetch_latest_oil, today=_lusaka_today())
     except Exception as exc:
         logger.warning("Oil read failed (%s)", type_name(exc))
         raise HTTPException(status_code=503, detail="Stored oil benchmarks unavailable") from exc

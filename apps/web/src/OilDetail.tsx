@@ -77,7 +77,7 @@ const OilDetail = forwardRef<HTMLElement, { state: OilState; focus: OilBenchmark
                           <td>{row ? perBarrel(row.value) : "—"}</td>
                           <td>{row ? "USD/bbl" : "—"}</td>
                           <td>{row ? formatMonth(row.period_start) : "No stored month"}</td>
-                          <td>{row ? (row.stale ? <span className="text-stale">Behind schedule</span> : "Latest month") : "—"}</td>
+                          <td>{row ? (row.stale ? <span className="text-stale">Behind schedule</span> : "Latest stored month") : "—"}</td>
                         </tr>
                       );
                     })}
@@ -94,10 +94,11 @@ const OilDetail = forwardRef<HTMLElement, { state: OilState; focus: OilBenchmark
               )}
               {selected && (
                 <ul className="provenance">
-                  <li><span>Source</span><a href={selected.source_url} target="_blank" rel="noreferrer">World Bank Commodity Price Data (The Pink Sheet)</a>, series “{selected.source_series}” · CC BY 4.0</li>
+                  <li><span>Source</span><a href={selected.source_page_url} target="_blank" rel="noreferrer">World Bank Pink Sheet</a>, series “{selected.source_series}”</li>
                   <li><span>Period</span>{formatDate(selected.period_start)} to {formatDate(selected.period_end)} (monthly average)</li>
                   <li><span>Published</span>{formatDate(selected.publication_date)} (workbook release)</li>
                   <li><span>Retrieved</span>{formatLusaka(selected.retrieved_at)}</li>
+                  <li><span>Licence</span>Catalog licence: CC BY 4.0 · workbook applicability under review</li>
                 </ul>
               )}
             </>
@@ -130,7 +131,7 @@ const OilDetail = forwardRef<HTMLElement, { state: OilState; focus: OilBenchmark
                   points={history.points.map((p) => ({ auction_date: p.period_start, yield_rate: p.value }))}
                   label={`${benchmark} crude oil monthly average history, USD per barrel`}
                   precision={2} formatPrice={formatChartPrice} monthly markers={history.points.length <= MARKER_LIMIT} />
-                <p className="notice">{history.points.length} stored months, {formatMonth(history.points[0].period_start)} to {formatMonth(history.points[history.points.length - 1].period_start)}. Each point is one published monthly average, plotted at the start of its month; the line only joins published months and does not imply values for months without one. USD per barrel · Source: World Bank Pink Sheet (CC BY 4.0).</p>
+                <p className="notice">{history.points.length} stored months, {formatMonth(history.points[0].period_start)} to {formatMonth(history.points[history.points.length - 1].period_start)}. Each point is one published monthly average, plotted at the start of its month; the line only joins published months and does not imply values for months without one. USD per barrel · Source: World Bank Pink Sheet.</p>
               </>
             )}
           </section>

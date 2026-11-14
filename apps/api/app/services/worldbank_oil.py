@@ -8,22 +8,30 @@ Verified 2026-11-14 against the official workbook:
   nominal US dollars, 1960 to present", a note, and "Updated on November 03, 2026". Then a header row whose cells are
   series labels ("Crude oil, Brent", "Crude oil, WTI", ...), a unit row ("($/bbl)"), and one row per month keyed
   "YYYYMmm" in column A ("2026M10"), consecutive from 1960M01. Commodities are columns, months are rows.
-- Missing cells (e.g. WTI before 1982) hold the character "…". They are "not published", never zero.
+- Missing cells (e.g. WTI before 1982) hold the marker character "…" (the only form seen in the real file; no Brent or
+  WTI cell is truly blank). Only that marker means "not published"; a blank cell is treated as a malformed workbook.
 - Cells are numbers displayed with one decimal ("0.0"); the PDF edition prints the same monthly averages.
-- Past months can be revised between releases (the workbook's "Mismatch Details" sheet lists release-to-release
-  differences). A revised value surfaces here as a persistence conflict, never as a silent overwrite.
+- The workbook also contains a "Mismatch Details" sheet that compares "Current" and "Uploaded" cells, so observed
+  historical values may differ across versions of the file. ZM Terminal therefore treats a changed stored observation
+  as a conflict pending explicit revision modelling (see oil_store.save_oil_observations); it never overwrites.
 
-The parse fails closed on any layout change: sheet, title, header labels, units, month keys, gaps and unusable cells.
-Nothing is interpolated, forward-filled or repaired, and unrelated commodity columns are never read.
+The parse fails closed on any layout change: sheet, title, header labels, units, month keys, gaps, blank or unusable
+cells, and an implausible "Updated on" date. Nothing is interpolated, forward-filled or repaired, and unrelated
+commodity columns are never read.
+
+Network safety: only the two official World Bank HTTPS hosts are contacted. Redirects are never followed
+automatically; each one is validated (https, allow-listed host, no credentials or odd port) before it is requested,
+with a small bound. Downloads have a size cap, a Content-Type check, ZIP/OOXML magic validation and the structural
+validation above.
 """
 
 import io
 import re
 import zipfile
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, timedelta
 from decimal import Decimal
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -32,21 +40,30 @@ from app.schemas.oil import OIL_BENCHMARKS, OIL_SERIES, OIL_SOURCE_UNIT, OilPoin
 
 WB_PAGE_HOST = "www.worldbank.org"
 WB_FILE_HOST = "thedocs.worldbank.org"
+ALLOWED_HOSTS = frozenset({WB_PAGE_HOST, WB_FILE_HOST})
 WB_USER_AGENT = "ZM-Terminal/0.1 (World Bank Pink Sheet adapter)"
 WB_TIMEOUT_SECONDS = 30.0
+MAX_REDIRECTS = 3
 MAX_PAGE_BYTES = 3_000_000
 MAX_XLSX_BYTES = 15_000_000  # the real file is about 0.6 MB
 MAX_UNCOMPRESSED_BYTES = 100_000_000
+PAGE_CONTENT_TYPES = frozenset({"text/html"})
+XLSX_CONTENT_TYPES = frozenset({"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})
 WORKBOOK_NAME = "CMO-Historical-Data-Monthly.xlsx"
 SHEET_NAME = "Monthly Prices"
 TITLE = "World Bank Commodity Price Data (The Pink Sheet)"
 SUBTITLE_PREFIX = "monthly prices in nominal US dollars"
 MISSING_MARKER = "…"
 HEADER_SEARCH_ROWS = 12
+FUTURE_SLACK = timedelta(days=1)  # time-zone slack when comparing the release date with the retrieval date
+
+MONTH_NUMBERS = {name: number for number, name in enumerate(
+    ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+     "November", "December"], 1)}  # explicit English names: never depend on the host locale
 
 _LINK = re.compile(r'href="(https://thedocs\.worldbank\.org/[^"\s]*/' + re.escape(WORKBOOK_NAME) + r')"')
 _MONTH_KEY = re.compile(r"([0-9]{4})M(0[1-9]|1[0-2])")
-_UPDATED = re.compile(r"Updated on ([A-Z][a-z]+ [0-9]{1,2}, [0-9]{4})")
+_UPDATED = re.compile(r"Updated on ([A-Z][a-z]+) ([0-9]{1,2}), ([0-9]{4})")
 
 
 class WorldBankOilError(ValueError):
@@ -68,9 +85,11 @@ def _month_end(first: date) -> date:
 
 
 def _normalize_cell(value: object) -> Decimal | None:
-    """One price cell -> Decimal at published precision; None if not published; WorldBankOilError if unusable."""
-    if value is None or (isinstance(value, str) and value.strip() in ("", MISSING_MARKER)):
+    """One price cell -> Decimal at published precision; None only for the "…" marker; WorldBankOilError otherwise."""
+    if isinstance(value, str) and value.strip() == MISSING_MARKER:
         return None
+    if value is None or (isinstance(value, str) and not value.strip()):
+        raise WorldBankOilError("Blank price cell where a value or the missing marker was expected")
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise WorldBankOilError("Unexpected price cell type")
     number = float(value)
@@ -82,8 +101,22 @@ def _normalize_cell(value: object) -> Decimal | None:
     return price
 
 
-def parse_workbook(source: bytes) -> OilWorkbook:
-    """Parse the whole workbook; never partially returns on a layout failure."""
+def parse_updated_on(text: str) -> date:
+    """"Updated on November 03, 2026" -> date, using explicit English month names."""
+    match = _UPDATED.search(text)
+    if not match or match.group(1) not in MONTH_NUMBERS:
+        raise WorldBankOilError("Unreadable 'Updated on' date")
+    try:
+        return date(int(match.group(3)), MONTH_NUMBERS[match.group(1)], int(match.group(2)))
+    except ValueError as exc:
+        raise WorldBankOilError("Unreadable 'Updated on' date") from exc
+
+
+def parse_workbook(source: bytes, *, today: date | None = None) -> OilWorkbook:
+    """Parse the whole workbook; never partially returns on a layout failure.
+
+    `today` (the retrieval date) enables the check that the release date is not implausibly in the future.
+    """
     from openpyxl import load_workbook  # lazy: only the import job needs it, not the API runtime
 
     try:
@@ -104,13 +137,10 @@ def parse_workbook(source: bytes) -> OilWorkbook:
     cell = lambda r, c: rows[r][c] if r < len(rows) and c < len(rows[r]) else None
     if str(cell(0, 0) or "").strip() != TITLE or not str(cell(1, 0) or "").startswith(SUBTITLE_PREFIX):
         raise WorldBankOilError("Unexpected workbook title")
-    updated = [m.group(1) for r in range(0, 6) if isinstance(cell(r, 0), str) for m in [_UPDATED.search(cell(r, 0))] if m]
+    updated = [cell(r, 0) for r in range(0, 6) if isinstance(cell(r, 0), str) and _UPDATED.search(cell(r, 0))]
     if len(updated) != 1:
         raise WorldBankOilError("Expected exactly one 'Updated on' date")
-    try:
-        publication_date = datetime.strptime(updated[0], "%B %d, %Y").date()
-    except ValueError as exc:
-        raise WorldBankOilError("Unreadable 'Updated on' date") from exc
+    publication_date = parse_updated_on(updated[0])
 
     # Locate columns by exact label, never by position.
     header_rows = [r for r in range(min(len(rows), HEADER_SEARCH_ROWS))
@@ -135,7 +165,7 @@ def parse_workbook(source: bytes) -> OilWorkbook:
     for r in range(header_row + 2, len(rows)):
         key = cell(r, 0)
         if key is None and all(v is None for v in rows[r]):
-            continue  # trailing blank row
+            continue  # entirely blank trailing row
         match = _MONTH_KEY.fullmatch(key.strip()) if isinstance(key, str) else None
         if not match:
             raise WorldBankOilError("Unexpected row key in the monthly data")
@@ -152,31 +182,60 @@ def parse_workbook(source: bytes) -> OilWorkbook:
                 observations.append(OilPoint(benchmark=benchmark, period_start=month, period_end=_month_end(month), value=value))
     if first_month is None or previous is None:
         raise WorldBankOilError("No monthly rows found")
+    # A release cannot be dated before the end of the newest month it publishes, nor (much) after we retrieved it.
+    if publication_date < _month_end(previous):
+        raise WorldBankOilError("'Updated on' date precedes the end of the newest month")
+    if today is not None and publication_date > today + FUTURE_SLACK:
+        raise WorldBankOilError("'Updated on' date is in the future")
     return OilWorkbook(publication_date, observations, first_month, previous, missing)
 
 
-def _check_url(url: str, host: str) -> None:
+def _check_url(url: str, hosts: frozenset[str]) -> None:
     parts = urlsplit(url)
-    if parts.scheme != "https" or parts.hostname != host:
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise WorldBankOilError("Unexpected World Bank URL") from exc
+    if parts.scheme != "https" or parts.hostname not in hosts or parts.username or parts.password or port not in (None, 443):
         raise WorldBankOilError("Unexpected World Bank URL")
 
 
-async def _get_limited(client: httpx.AsyncClient, url: str, host: str, limit: int) -> bytes:
-    _check_url(url, host)
-    async with client.stream("GET", url) as response:
-        response.raise_for_status()
-        _check_url(str(response.url), host)  # redirects must stay on the official host
-        body = bytearray()
-        async for chunk in response.aiter_bytes():
-            body.extend(chunk)
-            if len(body) > limit:
-                raise WorldBankOilError("World Bank response is too large")
-    return bytes(body)
+def _media_type(response: httpx.Response) -> str | None:
+    header = response.headers.get("content-type")
+    return header.split(";", 1)[0].strip().lower() if header else None
+
+
+async def _get_limited(
+    client: httpx.AsyncClient, url: str, host: str, limit: int, content_types: frozenset[str],
+) -> bytes:
+    """GET with a size cap and a Content-Type check; redirects are validated before they are requested."""
+    _check_url(url, frozenset({host}))
+    for _ in range(MAX_REDIRECTS + 1):
+        async with client.stream("GET", url, follow_redirects=False) as response:
+            if response.is_redirect:
+                location = response.headers.get("location")
+                if not location:
+                    raise WorldBankOilError("Redirect without a location")
+                url = urljoin(url, location)  # protocol-relative and relative forms resolve, then are validated
+                _check_url(url, ALLOWED_HOSTS)
+                continue
+            response.raise_for_status()
+            media = _media_type(response)
+            if media is not None and media not in content_types:  # absent header: magic bytes and structure decide
+                raise WorldBankOilError("Unexpected content type from the World Bank")
+            body = bytearray()
+            async for chunk in response.aiter_bytes():
+                body.extend(chunk)
+                if len(body) > limit:
+                    raise WorldBankOilError("World Bank response is too large")
+            return bytes(body)
+    raise WorldBankOilError("Too many redirects from the World Bank")
 
 
 async def discover_workbook_url(client: httpx.AsyncClient) -> str:
     """The monthly workbook link on the official Commodity Markets page; exactly one distinct link must exist."""
-    page = (await _get_limited(client, get_settings().worldbank_commodity_page_url, WB_PAGE_HOST, MAX_PAGE_BYTES)).decode("utf-8", "replace")
+    page = (await _get_limited(client, get_settings().worldbank_commodity_page_url, WB_PAGE_HOST,
+                               MAX_PAGE_BYTES, PAGE_CONTENT_TYPES)).decode("utf-8", "replace")
     links = sorted(set(_LINK.findall(page)))
     if len(links) != 1:
         raise WorldBankOilError("Expected exactly one monthly workbook link on the World Bank page")
@@ -184,11 +243,12 @@ async def discover_workbook_url(client: httpx.AsyncClient) -> str:
 
 
 async def download_workbook(client: httpx.AsyncClient, url: str) -> bytes:
-    body = await _get_limited(client, url, WB_FILE_HOST, MAX_XLSX_BYTES)
+    body = await _get_limited(client, url, WB_FILE_HOST, MAX_XLSX_BYTES, XLSX_CONTENT_TYPES)
     if not body.startswith(b"PK"):
         raise WorldBankOilError("Download is not an XLSX file")
     return body
 
 
 def new_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(headers={"User-Agent": WB_USER_AGENT}, timeout=WB_TIMEOUT_SECONDS, follow_redirects=True)
+    """Never follows redirects on its own; _get_limited validates and follows them."""
+    return httpx.AsyncClient(headers={"User-Agent": WB_USER_AGENT}, timeout=WB_TIMEOUT_SECONDS, follow_redirects=False)

@@ -307,7 +307,8 @@ export type OilObservation = {
   source: "world_bank";
   price_basis: "monthly_average";
   source_series: string;
-  source_url: string;
+  source_url: string; // the exact release workbook (machine provenance)
+  source_page_url: string; // stable human-facing page
   publication_date: string;
   retrieved_at: string;
   stale: boolean;

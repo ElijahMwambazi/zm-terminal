@@ -17,12 +17,13 @@ from app.main import app
 from app.schemas.oil import OIL_STALE_AFTER_MONTHS, OilObservation, OilPoint
 from app.services import oil_store, worldbank_oil
 from app.services.provider_policy import PROVIDER_POLICIES, WORLD_BANK_OIL_POLICY
-from app.services.worldbank_oil import WorldBankOilError, parse_workbook
+from app.services.worldbank_oil import MONTH_NUMBERS, WorldBankOilError, parse_updated_on, parse_workbook
 
 router_module = importlib.import_module("app.api.router")
 NOW = datetime(2026, 11, 14, 10, tzinfo=timezone.utc)
 TODAY = date(2026, 11, 14)
 WORKBOOK_URL = "https://thedocs.worldbank.org/en/doc/abc123/related/CMO-Historical-Data-Monthly.xlsx"
+XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 PAGE_HTML = f'<html><a href="{WORKBOOK_URL}">Monthly prices</a><br>November 2026 (XLS)</html>'
 
 # Contiguous months 2025M12..2026M10 as (key, average, Brent, Dubai, WTI, coal); unrelated columns carry junk that
@@ -105,6 +106,51 @@ def test_non_finite_values_are_rejected(value):
         worldbank_oil._normalize_cell(value)
 
 
+def test_only_the_explicit_marker_means_not_published_blank_is_an_error():
+    marker_padded = parse_workbook(workbook([("2026M01", 1, 80.0, 1, " … ", "x")]))
+    assert marker_padded.missing_cells == 1 and {p.benchmark for p in marker_padded.observations} == {"BRENT"}
+    for blank in (None, "", "   "):
+        with pytest.raises(WorldBankOilError):
+            parse_workbook(workbook([("2026M01", 1, 80.0, 1, blank, "x")]))
+
+
+@pytest.mark.parametrize("month,number", list(MONTH_NUMBERS.items()))
+def test_updated_on_uses_explicit_english_month_names(month, number):
+    assert parse_updated_on(f"Updated on {month} 09, 2026") == date(2026, number, 9)
+
+
+@pytest.mark.parametrize("bad", ["Updated on Smarch 03, 2026", "Updated on february 03, 2026", "Updated on February 30, 2026",
+                                 "Updated on 03 November 2026", "Updated sometime", "Updated on Nov 03, 2026"])
+def test_updated_on_rejects_unknown_names_and_impossible_dates(bad):
+    with pytest.raises(WorldBankOilError):
+        parse_updated_on(bad)
+
+
+def test_updated_on_works_for_february_and_december_releases():
+    feb = parse_workbook(workbook([("2026M01", 1, 80.0, 1, 75.0, "x")], updated="Updated on February 03, 2026"))
+    assert feb.publication_date == date(2026, 2, 3)
+    dec = parse_workbook(workbook([("2025M11", 1, 80.0, 1, 75.0, "x")], updated="Updated on December 02, 2025"))
+    assert dec.publication_date == date(2025, 12, 2)
+
+
+def test_publication_date_must_not_precede_the_end_of_the_newest_month():
+    with pytest.raises(WorldBankOilError):
+        parse_workbook(workbook(updated="Updated on October 15, 2026"))           # newest month is 2026-10
+    with pytest.raises(WorldBankOilError):
+        parse_workbook(workbook(updated="Updated on October 30, 2026"))
+    assert parse_workbook(workbook(updated="Updated on October 31, 2026")).publication_date == date(2026, 10, 31)
+
+
+def test_publication_date_must_not_be_implausibly_in_the_future():
+    book = workbook()  # updated 2026-11-03
+    assert parse_workbook(book, today=date(2026, 11, 3)).publication_date == date(2026, 11, 3)
+    assert parse_workbook(book, today=date(2026, 11, 2)).publication_date == date(2026, 11, 3)  # one day of slack
+    with pytest.raises(WorldBankOilError):
+        parse_workbook(book, today=date(2026, 11, 1))
+    with pytest.raises(WorldBankOilError):
+        parse_workbook(workbook(updated="Updated on December 25, 2030"), today=TODAY)
+
+
 def test_trailing_blank_rows_are_ignored():
     assert parse_workbook(workbook(ROWS + [(None,) * 6, (None,) * 6])).last_month == date(2026, 10, 1)
 
@@ -136,6 +182,10 @@ def test_layout_changes_fail_closed(kwargs):
     [("Source: World Bank", 1, 80.0, 1, 75.0, "x")],                               # trailing text row
     [("2026M01", 1, "abc", 1, 75.0, "x")],                                         # junk cell
     [("2026M01", 1, 80.0, 1, "..", "x")],                                          # not the verified missing marker
+    [("2026M01", 1, None, 1, 75.0, "x")],                                          # blank Brent cell (not the "…" marker)
+    [("2026M01", 1, 80.0, 1, None, "x")],                                          # blank WTI cell
+    [("2026M01", 1, 80.0, 1, "   ", "x")],                                         # whitespace-only cell
+    [("2026M01", None, None, None, None, None)],                                   # key present but every price blank
     [("2026M01", 1, True, 1, 75.0, "x")],
     [("2026M01", 1, 80.123, 1, 75.0, "x")],                                        # hidden precision
     [("2026M01", 1, 80.0, 1, 1e12, "x")],                                          # absurd magnitude
@@ -169,10 +219,10 @@ def serving(page=PAGE_HTML, book=None, seen=None):
     def handler(request: httpx.Request) -> httpx.Response:
         if seen is not None:
             seen.append(str(request.url))
-        if request.url.host == "www.worldbank.org":
-            return httpx.Response(200, text=page)
+        if request.url.host == "www.worldbank.org":  # content types as the real source sends them
+            return httpx.Response(200, content=page.encode(), headers={"content-type": "text/html;charset=utf-8"})
         if request.url.host == "thedocs.worldbank.org":
-            return httpx.Response(200, content=book)
+            return httpx.Response(200, content=book, headers={"content-type": XLSX_TYPE})
         return httpx.Response(404)
     return handler
 
@@ -207,27 +257,123 @@ def test_same_link_repeated_is_not_ambiguous():
     assert run(go()) == WORKBOOK_URL
 
 
-def test_download_enforces_host_size_type_and_redirects(monkeypatch):
-    async def fetch(url, handler):
-        async with mock_client(handler) as client:
-            return await worldbank_oil.download_workbook(client, url)
-    assert run(fetch(WORKBOOK_URL, serving()))[:2] == b"PK"
+def fetch_xlsx(handler, url=WORKBOOK_URL, client=None):
+    async def go():
+        async with (client or no_follow_client(handler)) as c:
+            return await worldbank_oil.download_workbook(c, url)
+    return run(go())
+
+
+def no_follow_client(handler):
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def test_download_enforces_host_size_and_file_signature(monkeypatch):
+    assert fetch_xlsx(serving())[:2] == b"PK"
+    for url in ("https://evil.example/CMO-Historical-Data-Monthly.xlsx", WORKBOOK_URL.replace("https:", "http:"),
+                "https://user@thedocs.worldbank.org/x.xlsx", "https://thedocs.worldbank.org:8443/x.xlsx"):
+        with pytest.raises(WorldBankOilError):
+            fetch_xlsx(serving(), url)
     with pytest.raises(WorldBankOilError):
-        run(fetch("https://evil.example/CMO-Historical-Data-Monthly.xlsx", serving()))
-    with pytest.raises(WorldBankOilError):
-        run(fetch(WORKBOOK_URL, lambda request: httpx.Response(200, content=b"<html>not xlsx</html>")))
+        fetch_xlsx(lambda request: httpx.Response(200, content=b"<html>not xlsx</html>"))
     monkeypatch.setattr(worldbank_oil, "MAX_XLSX_BYTES", 100)
     with pytest.raises(WorldBankOilError):
-        run(fetch(WORKBOOK_URL, serving()))
+        fetch_xlsx(serving())
     monkeypatch.undo()
-    def redirect(request):
-        if request.url.host == "thedocs.worldbank.org":
-            return httpx.Response(302, headers={"location": "https://evil.example/x.xlsx"})
-        return httpx.Response(200, content=workbook())
-    with pytest.raises(WorldBankOilError):
-        run(fetch(WORKBOOK_URL, redirect))
     with pytest.raises(httpx.HTTPStatusError):
-        run(fetch(WORKBOOK_URL, lambda request: httpx.Response(503)))
+        fetch_xlsx(lambda request: httpx.Response(503))
+
+
+@pytest.mark.parametrize("content_type", [XLSX_TYPE, XLSX_TYPE.upper(), f"{XLSX_TYPE}; charset=binary", None])
+def test_download_accepts_the_excel_content_type_or_none_at_all(content_type):
+    headers = {"content-type": content_type} if content_type else {}
+    assert fetch_xlsx(lambda request: httpx.Response(200, content=workbook(), headers=headers))[:2] == b"PK"
+
+
+@pytest.mark.parametrize("content_type", ["text/html", "text/html; charset=utf-8", "application/json", "text/plain",
+                                          "application/octet-stream", "application/pdf"])
+def test_download_rejects_wrong_content_types_even_with_a_valid_file(content_type):
+    with pytest.raises(WorldBankOilError):
+        fetch_xlsx(lambda request: httpx.Response(200, content=workbook(), headers={"content-type": content_type}))
+
+
+def test_discovery_page_must_be_html_when_a_type_is_given():
+    async def discover(content_type):
+        def handler(request):
+            return httpx.Response(200, text=PAGE_HTML, headers={"content-type": content_type})
+        async with no_follow_client(handler) as c:
+            return await worldbank_oil.discover_workbook_url(c)
+    assert run(discover("text/html;charset=utf-8")) == WORKBOOK_URL
+    with pytest.raises(WorldBankOilError):
+        run(discover("application/json"))
+
+
+def redirecting(location, status=302, book=None):
+    """thedocs host redirects to `location`; records every requested URL."""
+    requested = []
+    book = workbook() if book is None else book
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path.endswith("/redirected.xlsx"):
+            return httpx.Response(200, content=book)
+        return httpx.Response(status, headers={"location": location})
+    return handler, requested
+
+
+@pytest.mark.parametrize("location", [
+    "https://thedocs.worldbank.org/en/doc/def/related/redirected.xlsx",   # official -> official (same host)
+    "/en/doc/def/related/redirected.xlsx",                                  # relative
+    "https://www.worldbank.org/en/doc/def/related/redirected.xlsx",        # official -> the other official host
+])
+def test_official_redirects_are_followed_manually(location):
+    handler, requested = redirecting(location)
+    assert fetch_xlsx(handler)[:2] == b"PK" and len(requested) == 2
+
+
+@pytest.mark.parametrize("location", [
+    "https://evil.example/redirected.xlsx",                 # foreign host
+    "//evil.example/redirected.xlsx",                       # protocol-relative
+    "http://thedocs.worldbank.org/redirected.xlsx",         # https -> http
+    "https://thedocs.worldbank.org:8443/redirected.xlsx",   # odd port
+    "https://user:pw@thedocs.worldbank.org/redirected.xlsx",
+    "https://thedocs.worldbank.org.evil.example/redirected.xlsx",  # look-alike suffix
+    "ftp://thedocs.worldbank.org/redirected.xlsx",
+])
+def test_unsafe_redirects_are_rejected_before_the_target_is_requested(location):
+    handler, requested = redirecting(location)
+    with pytest.raises(WorldBankOilError):
+        fetch_xlsx(handler)
+    assert len(requested) == 1 and "evil" not in requested[0] and requested[0] == WORKBOOK_URL  # target never requested
+
+
+def test_a_client_configured_to_follow_redirects_still_cannot_reach_a_foreign_host():
+    handler, requested = redirecting("https://evil.example/redirected.xlsx")
+    with pytest.raises(WorldBankOilError):
+        fetch_xlsx(handler, client=httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True))
+    assert requested == [WORKBOOK_URL]
+
+
+def test_redirect_loops_and_long_chains_are_bounded():
+    handler, requested = redirecting(WORKBOOK_URL)  # always redirects to itself
+    with pytest.raises(WorldBankOilError):
+        fetch_xlsx(handler)
+    assert len(requested) == worldbank_oil.MAX_REDIRECTS + 1
+    chain = []
+    def long_chain(request):
+        chain.append(str(request.url))
+        return httpx.Response(302, headers={"location": f"https://thedocs.worldbank.org/hop{len(chain)}.xlsx"})
+    with pytest.raises(WorldBankOilError):
+        fetch_xlsx(long_chain)
+    assert len(chain) == 4
+
+
+def test_redirect_without_a_location_is_rejected():
+    with pytest.raises(WorldBankOilError):
+        fetch_xlsx(lambda request: httpx.Response(302))
+
+
+def test_the_production_client_does_not_follow_redirects():
+    assert worldbank_oil.new_client().follow_redirects is False
 
 
 # ---------------- freshness (monthly publication cadence) ----------------
@@ -267,6 +413,7 @@ def test_latest_returns_stored_months_with_period_and_provenance(monkeypatch):
     assert (brent["currency"], brent["unit"], brent["source"], brent["price_basis"]) == ("USD", "barrel", "world_bank", "monthly_average")
     assert (brent["publication_date"], brent["stale"], brent["stale_after_months"]) == ("2026-11-03", False, 2)
     assert brent["retrieved_at"].endswith("Z") and brent["source_url"] == WORKBOOK_URL and "observed_date" not in brent
+    assert brent["source_page_url"] == "https://www.worldbank.org/en/research/commodity-markets"  # stable page; exact release URL above
     assert wti["value"] == "-3.5"
 
 
@@ -313,6 +460,17 @@ def test_database_failure_is_a_safe_503(monkeypatch, path):
     assert response.status_code == 503 and "SECRET" not in response.text and "125.0" not in response.text
 
 
+def test_oil_routes_use_the_lusaka_calendar_like_the_other_domains(monkeypatch):
+    """Month-based logic must share the Zambia-facing helper: 2026-11-30 22:30 UTC is already 2026-12-01 in Lusaka."""
+    monkeypatch.setattr(router_module, "_lusaka_today", lambda: date(2026, 12, 1))
+    seen = []
+    monkeypatch.setattr(router_module, "fetch_latest_oil", lambda today: seen.append(("latest", today)) or [])
+    monkeypatch.setattr(router_module, "fetch_oil_history", lambda b, r, today: seen.append(("history", today)) or [])
+    client.get("/api/v1/oil/latest"); client.get("/api/v1/oil/BRENT"); client.get("/api/v1/oil/history")
+    assert seen == [("latest", date(2026, 12, 1)), ("latest", date(2026, 12, 1)), ("history", date(2026, 12, 1))]
+    assert not hasattr(router_module, "_utc_today")
+
+
 def test_history_route_is_not_swallowed_by_the_benchmark_route(monkeypatch):
     monkeypatch.setattr(router_module, "fetch_oil_history", lambda b, r, today: [])
     monkeypatch.setattr(router_module, "fetch_latest_oil", lambda today: [])
@@ -321,13 +479,19 @@ def test_history_route_is_not_swallowed_by_the_benchmark_route(monkeypatch):
 
 
 # ---------------- policy ----------------
-def test_world_bank_policy_records_licence_provenance_and_stored_only_use():
+def test_world_bank_policy_is_conservative_about_reuse_and_cites_the_catalog_entry():
     p = WORLD_BANK_OIL_POLICY
     assert p.dataset_id in PROVIDER_POLICIES and (p.provider_id, p.authentication) == ("world_bank", "none")
     assert (p.raw_response_storage, p.normalized_storage_allowed, p.attribution_required) == ("disabled", True, True)
+    assert (p.redistribution, p.commercial_use) == ("review_required", "review_required")  # not settled for the workbook
     assert set(p.required_timestamps) == {"period_start", "period_end", "publication_date", "retrieved_at"}
     assert {"source_series", "source_url", "unit", "currency"} <= set(p.required_provenance)
-    assert "CC BY 4.0" in p.request_guidance and "0038238" in p.request_guidance
+    guidance = p.request_guidance
+    assert "https://datacatalog.worldbank.org/search/dataset/0038238/" in guidance
+    assert "classified Public" in guidance and "CC BY 4.0" in guidance and "data@worldbank.org" in guidance
+    assert "should be confirmed before public redistribution or commercial deployment" in guidance
+    assert "no licence" not in guidance.lower().replace("carries no licence text", "")  # never claims the licence is absent
+    assert "applies to the workbook" not in guidance and "is licensed" not in guidance  # never claims it definitely applies
     assert not [k for k in PROVIDER_POLICIES if "fred" in k]
 
 
@@ -374,6 +538,57 @@ def test_import_makes_exactly_two_requests_and_rejects_out_of_range_months(monke
             import_(start, end)
 
 
+def assert_no_negative_counts(result):
+    assert all(isinstance(v, int) and v >= 0 for v in result.values()), result
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_default_end_accepts_start_at_or_before_the_newest_month(monkeypatch, dry_run):
+    saver(monkeypatch)
+    at_newest = import_(date(2026, 10, 1), dry_run=dry_run)                 # start == newest month
+    assert at_newest["months_requested"] == 1 and at_newest["selected"] == 2
+    before = import_(date(2026, 9, 1), dry_run=dry_run)                     # start before newest month
+    assert before["months_requested"] == 2 and before["selected"] == 4
+    for result in (at_newest, before):
+        assert_no_negative_counts(result)
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize("start", [date(2026, 11, 1), date(2026, 12, 1), date(2027, 3, 1)])
+def test_default_end_rejects_start_after_the_newest_month_without_clamping(monkeypatch, dry_run, start):
+    calls = saver(monkeypatch)
+    with pytest.raises(backfill_oil.BackfillError, match=r"--from is after the newest available World Bank month \(2026-10\)"):
+        import_(start, dry_run=dry_run)
+    assert calls == []  # identical validation for dry-run and real import; nothing written
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_explicit_from_after_to_is_rejected(monkeypatch, dry_run):
+    calls = saver(monkeypatch)
+    with pytest.raises(backfill_oil.BackfillError, match="--from must not be after --to"):
+        import_(date(2026, 10, 1), date(2026, 9, 1), dry_run=dry_run)
+    assert calls == []
+
+
+def test_cli_reports_a_start_after_the_newest_month_as_a_clear_error(monkeypatch, capsys):
+    calls = saver(monkeypatch)
+    monkeypatch.setattr(backfill_oil, "new_client", lambda: mock_client(serving()))
+    for extra in ([], ["--dry-run"]):
+        assert backfill_oil.main(["--from", "2026-12", *extra]) == 1
+        captured = capsys.readouterr()
+        assert "--from is after the newest available World Bank month (2026-10)" in captured.err and captured.out == ""
+    assert calls == []
+    assert backfill_oil.main(["--from", "2026-09", "--dry-run"]) == 0
+    assert capsys.readouterr().out.startswith("dry-run months_requested=2 selected=4 not_published=0")
+
+
+def test_cli_help_states_what_dry_run_does_not_check(capsys):
+    with pytest.raises(SystemExit):
+        backfill_oil.main(["--help"])
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "does not touch PostgreSQL" in help_text and "cannot detect conflicts" in help_text
+
+
 def test_import_propagates_layout_failures_without_writing(monkeypatch):
     calls = saver(monkeypatch)
     with pytest.raises(WorldBankOilError):
@@ -401,6 +616,31 @@ def test_cli_prints_counts_only_and_hides_failures(monkeypatch, capsys):
         backfill_oil.main(["--from", "2026-9"])      # monthly inputs must be YYYY-MM
     with pytest.raises(SystemExit):
         backfill_oil.main(["--from", "2026-09-01"])  # not daily dates
+
+
+# ---------------- conflict reporting ----------------
+def test_conflict_message_names_identities_but_never_prices():
+    err = oil_store.OilConflictError(2, ["BRENT 2025-04", "WTI 2025-09"])
+    assert str(err) == "2 stored oil month(s) conflict with the published value: BRENT 2025-04, WTI 2025-09; nothing was written"
+    assert err.count == 2 and err.identities == ["BRENT 2025-04", "WTI 2025-09"]
+
+
+def test_conflict_message_shows_at_most_five_identities_then_a_count():
+    ids = [f"BRENT 2025-{m:02d}" for m in range(1, 9)]
+    message = str(oil_store.OilConflictError(8, ids))
+    assert "BRENT 2025-05" in message and "BRENT 2025-06" not in message
+    assert "BRENT 2025-01, BRENT 2025-02, BRENT 2025-03, BRENT 2025-04, BRENT 2025-05 ... and 3 more" in message
+    assert str(oil_store.OilConflictError(5, ids[:5])).count("BRENT") == 5 and "more" not in str(oil_store.OilConflictError(5, ids[:5]))
+    assert "conflict with the published value; nothing was written" in str(oil_store.OilConflictError(3))  # legacy count-only form
+
+
+def test_cli_prints_conflict_identities_without_prices(monkeypatch, capsys):
+    async def conflict(*a, **k):
+        raise oil_store.OilConflictError(2, ["BRENT 2025-04", "WTI 2025-09"])
+    monkeypatch.setattr(backfill_oil, "run_import", conflict)
+    assert backfill_oil.main(["--from", "2025-01"]) == 1
+    err = capsys.readouterr().err
+    assert "BRENT 2025-04, WTI 2025-09" in err and "nothing was written" in err
 
 
 # ---------------- real PostgreSQL (opt-in) ----------------
@@ -449,10 +689,27 @@ def test_pg_conflict_rolls_back_the_whole_batch_and_never_overwrites(engine):
     save([pt((2026, 9), "116.8")], engine)
     with pytest.raises(oil_store.OilConflictError) as exc:
         save([pt((2026, 10), "125"), pt((2026, 9), "99.9")], engine, pub=date(2026, 12, 3))
-    assert exc.value.count == 1 and "99.9" not in str(exc.value)
+    assert exc.value.count == 1 and "99.9" not in str(exc.value) and "116.8" not in str(exc.value)
+    assert "BRENT 2026-09" in str(exc.value)
     with engine.connect() as c:
         rows = c.execute(text("SELECT period_start, value, publication_date FROM global_oil_prices")).all()
     assert [(r[0], str(r[1]), r[2]) for r in rows] == [(date(2026, 9, 1), "116.8", date(2026, 11, 3))]  # new month rolled back, old kept
+
+
+def test_pg_conflict_report_lists_every_changed_identity_chronologically_capped_at_five(engine):
+    months = [(2025, m) for m in range(1, 8)]
+    stored = [pt(m, "50") for m in months] + [pt(m, "40", "WTI") for m in months[:2]]
+    save(stored, engine)
+    changed = [pt(m, "51") for m in months] + [pt(m, "41", "WTI") for m in months[:2]]  # 9 changes, all different
+    with pytest.raises(oil_store.OilConflictError) as exc:
+        save(changed + [pt((2025, 8), "52")], engine)  # plus one new month that must roll back
+    assert exc.value.count == 9
+    message = str(exc.value)
+    assert "BRENT 2025-01, WTI 2025-01, BRENT 2025-02, WTI 2025-02, BRENT 2025-03 ... and 4 more" in message
+    assert not any(v in message for v in ("50", "51", "40", "41", "52"))
+    with engine.connect() as c:
+        assert c.execute(text("SELECT count(*) FROM global_oil_prices")).scalar() == 9  # nothing written, nothing overwritten
+        assert c.execute(text("SELECT count(*) FROM global_oil_prices WHERE value IN (50, 40)")).scalar() == 9
 
 
 def test_pg_conflicts_are_per_benchmark_identity_so_benchmarks_do_not_collide(engine):

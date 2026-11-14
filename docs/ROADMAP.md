@@ -12,12 +12,13 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - ERB latest-month retail prices + fuel build-ups (monthly PDF discovery, strict text parsing, narrow OCR fallback, stored build-up API/UI)
 - Zambia agriculture source discovery (`docs/research/zambia-agriculture-sources.md`)
 - Ministry maize + soya national-average vertical slice (Layout B, Apr 2025-Jan 2026, stored API/history/UI and `AGRI` commands)
-- Global oil: Brent + WTI monthly averages from the World Bank Pink Sheet (CC BY 4.0), stored API/history/UI and `OIL` commands (FRED/EIA daily spot was evaluated and set aside on licensing/fit grounds)
+- Global oil: Brent + WTI monthly averages from the World Bank Pink Sheet (catalog licence CC BY 4.0; applicability to the workbook still to be confirmed), stored API/history/UI and `OIL` commands (FRED/EIA daily spot was evaluated and set aside as a poor fit for persisted history)
 
 ## Current
 - No active implementation branch after global oil.
 
 ## Next
+- **Before public deployment:** confirm with data@worldbank.org that the World Bank Data Catalog licence (CC BY 4.0, dataset 0038238) applies to the monthly Pink Sheet workbook used for oil. Not a blocker for development or the code PR.
 - **`OIL ZM`** (Brent converted at the BoZ USD/ZMW rate): derived view built on the stored monthly Brent history and BoZ FX. The monthly (not daily) Brent semantics must be shown explicitly, and a monthly average must not be paired with a different day's exchange rate without saying so. Not implemented.
 
 ## Planned

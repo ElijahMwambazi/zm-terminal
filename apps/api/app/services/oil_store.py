@@ -7,7 +7,7 @@ from sqlalchemy.engine import Engine
 
 from app.db import get_engine
 from app.schemas.oil import (
-    OIL_BENCHMARKS, OIL_PROVIDER, OIL_SERIES, OIL_STALE_AFTER_MONTHS, OilObservation, OilPoint,
+    OIL_BENCHMARKS, OIL_SERIES, OIL_STALE_AFTER_MONTHS, OilObservation, OilPoint,
 )
 
 _INSERT = text(
@@ -28,10 +28,20 @@ _SELECT_ONE = text(
 )
 
 
+MAX_CONFLICTS_SHOWN = 5
+
+
 class OilConflictError(Exception):
-    def __init__(self, count: int):
-        super().__init__(f"{count} stored oil month(s) conflict with the published value; nothing was written")
+    """A stored month differs from the published value. Names benchmark and month only, never a price."""
+
+    def __init__(self, count: int, identities: list[str] | None = None):
+        shown = (identities or [])[:MAX_CONFLICTS_SHOWN]
+        detail = (": " + ", ".join(shown)) if shown else ""
+        if identities and len(identities) > len(shown):
+            detail += f" ... and {len(identities) - len(shown)} more"
+        super().__init__(f"{count} stored oil month(s) conflict with the published value{detail}; nothing was written")
         self.count = count
+        self.identities = list(identities or [])
 
 
 def save_oil_observations(
@@ -42,7 +52,8 @@ def save_oil_observations(
 
     Same identity and numerically equal value is a no-op; a different value is a conflict (no silent revision).
     """
-    inserted = identical = conflicts = 0
+    inserted = identical = 0
+    conflicts: list[tuple[date, str]] = []
     with (engine or get_engine()).begin() as connection:
         for point in points:
             params = {"benchmark": point.benchmark, "period_start": point.period_start, "period_end": point.period_end,
@@ -54,9 +65,9 @@ def save_oil_observations(
             elif connection.execute(_SELECT_ONE, params).scalar_one() == point.value:  # numeric compare
                 identical += 1
             else:
-                conflicts += 1
-        if conflicts:
-            raise OilConflictError(conflicts)
+                conflicts.append((point.period_start, point.benchmark))
+        if conflicts:  # raising inside begin() rolls the whole import back
+            raise OilConflictError(len(conflicts), [f"{b} {d:%Y-%m}" for d, b in sorted(conflicts)])
     return inserted, identical
 
 

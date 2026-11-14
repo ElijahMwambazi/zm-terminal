@@ -131,17 +131,21 @@ WORLD_BANK_OIL_POLICY = ProviderPolicy(
     attribution_required=True,
     required_provenance=("source", "source_series", "source_url", "unit", "currency"),
     required_timestamps=("period_start", "period_end", "publication_date", "retrieved_at"),
-    redistribution="permitted",
-    commercial_use="permitted",
+    redistribution="review_required",
+    commercial_use="review_required",
     request_guidance=(
         "Manual import only (python -m app.jobs.backfill_oil): one request for the official Commodity Markets page to "
         "find the single monthly-workbook link, one download of CMO-Historical-Data-Monthly.xlsx (about 0.6 MB, 15 MB "
-        "cap, official HTTPS hosts only), 30 s timeout, no retries, no polling, nothing written to disk, API calls never "
-        "reach the World Bank. Only the Brent and WTI monthly-average columns ($/bbl) are read. Updated monthly (about "
-        "the 2nd business day); past months can be revised, which surfaces as a conflict. Licence: the World Bank Data "
-        "Catalog entry 'Commodity Prices - History and Projections' (dataset 0038238) states Creative Commons "
-        "Attribution 4.0 (CC BY 4.0), checked 2026-11-14; attribution is required. The workbook itself carries no licence "
-        "text and the Pink Sheet PDF footer reads 'Official Use Only'; confirm with data@worldbank.org if that matters."
+        "cap, Content-Type and OOXML checks, official HTTPS hosts only, redirects validated before they are followed), "
+        "30 s timeout, no retries, no polling, nothing written to disk; API calls never reach the World Bank. Only the "
+        "Brent and WTI monthly-average columns ($/bbl) are read. Updated monthly (about the 2nd business day); observed "
+        "historical values may differ across versions of the workbook, so a changed stored month is a conflict, never "
+        "an overwrite. Licence: World Bank Data Catalog dataset 0038238 is classified Public and lists CC BY 4.0 "
+        "(https://datacatalog.worldbank.org/search/dataset/0038238/commodity-prices-history-and-projections, checked "
+        "2026-11-14). The Commodity Markets page links the monthly Pink Sheet workbook, but applicability of that catalog "
+        "licence to the workbook should be confirmed before public redistribution or commercial deployment: the catalog "
+        "metadata also lists an annual periodicity, the workbook carries no licence text and the Pink Sheet PDF footer "
+        "reads 'Official Use Only'. Contact: data@worldbank.org. Attribution is required either way."
     ),
 )
 
