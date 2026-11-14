@@ -38,6 +38,7 @@ export default function App() {
   const [fuelFocus, setFuelFocus] = useState<FuelProduct | null>(null);
   const { state: fuelState, refresh: refreshFuel } = useFuel();
   const [agricultureFocus, setAgricultureFocus] = useState<AgricultureCommodity | null>(null);
+  const [agricultureNavigationKey, setAgricultureNavigationKey] = useState(0);
   const { state: agricultureState, refresh: refreshAgriculture } = useAgriculture();
   const [bondFocus, setBondFocus] = useState<BondTenor | null>(null);
   const { state: bondState, refresh: refreshBonds } = useGovernmentBonds();
@@ -84,6 +85,7 @@ export default function App() {
 
   const openAgriculture = (commodity: AgricultureCommodity | null) => {
     setAgricultureFocus(commodity);
+    setAgricultureNavigationKey((value) => value + 1);
     setDetail("agriculture");
     requestAnimationFrame(() => detailRef.current?.focus());
   };
@@ -229,7 +231,7 @@ export default function App() {
         ) : detail === "fuel" ? (
           <FuelDetail ref={detailRef} state={fuelState} focus={fuelFocus} onRefresh={refreshFuel} />
         ) : detail === "agriculture" ? (
-          <AgricultureDetail ref={detailRef} state={agricultureState} focus={agricultureFocus} onRefresh={refreshAgriculture} />
+          <AgricultureDetail ref={detailRef} state={agricultureState} focus={agricultureFocus} navigationKey={agricultureNavigationKey} onRefresh={refreshAgriculture} />
         ) : detail === "bond" ? (
           <BondDetail ref={detailRef} state={bondState} focus={bondFocus} onRefresh={refreshBonds} />
         ) : detail === "tbill" ? (
