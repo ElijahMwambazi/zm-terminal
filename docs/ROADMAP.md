@@ -12,21 +12,22 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - ERB latest-month retail prices + fuel build-ups (monthly PDF discovery, strict text parsing, narrow OCR fallback, stored build-up API/UI)
 - Zambia agriculture source discovery (`docs/research/zambia-agriculture-sources.md`)
 - Ministry maize + soya national-average vertical slice (Layout B, Apr 2025-Jan 2026, stored API/history/UI and `AGRI` commands)
-- Global oil: Brent + WTI monthly averages from the World Bank Pink Sheet (catalog licence CC BY 4.0; applicability to the workbook still to be confirmed), stored API/history/UI and `OIL` commands (FRED/EIA daily spot was evaluated and set aside as a poor fit for persisted history)
+- Global oil: Brent + WTI monthly averages from the World Bank Pink Sheet (catalog licence CC BY 4.0; applicability to the workbook still to be confirmed), stored API/history/UI and `OIL` commands (FRED/EIA daily spot was evaluated and set aside because it did not provide a sufficiently clear fit for ZM Terminal's persisted-history design)
+- `OIL ZM`: derived monthly Brent-in-ZMW indicator (stored World Bank Brent monthly average x the mean of stored daily BoZ USD/ZMW mid-rate averages over the observed days; sparse BoZ months stay derivable and carry their day/observation counts; January 2026 is marked partial because the stored source begins on 22 January), stored-only API, UI and `OIL ZM` command; derived on request and never persisted; available only where both stored histories overlap (from January 2026)
 
 ## Current
 - No active implementation branch after global oil.
 
 ## Next
-- **Before public deployment:** confirm with data@worldbank.org that the World Bank Data Catalog licence (CC BY 4.0, dataset 0038238) applies to the monthly Pink Sheet workbook used for oil. Not a blocker for development or the code PR.
-- **`OIL ZM`** (Brent converted at the BoZ USD/ZMW rate): derived view built on the stored monthly Brent history and BoZ FX. The monthly (not daily) Brent semantics must be shown explicitly, and a monthly average must not be paired with a different day's exchange rate without saying so. Not implemented.
+- **Zambia sovereign yield curve** (needs the stored T-bill and bond history)
+- **Before public deployment:** confirm with data@worldbank.org that the World Bank Data Catalog licence (CC BY 4.0, dataset 0038238) applies to the monthly Pink Sheet workbook used for oil; `OIL ZM` inherits Brent as an input, so it must not be described as freely redistributable until then. Not a blocker for development or the code PR.
 
 ## Planned
-- Zambia sovereign yield curve (needs the stored T-bill and bond history)
 - Gold provider discovery (licensing first)
 - `GOLD` / `GOLD ZM` once a gold source is approved
 - BTC/USD + BTC/ZMW
 - Copper
+- `OIL ZM` versus ERB petrol/diesel comparisons (lagged comparisons or spreads); `OIL ZM` is not a pump price and is not combined with ERB fuel anywhere today
 - Cross-market `COMPARE` / `CHART` / `CORR` (after the underlying histories are stable)
 
 ## Long-term expansion

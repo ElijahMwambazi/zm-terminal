@@ -208,3 +208,15 @@ th { text-align: left; color: #8c8c8c; font-weight: normal; padding: 6px 4px; }
 .table-scroll td, .table-scroll th { white-space: nowrap; padding-right: 12px; }
 .market-card { overflow-wrap: anywhere; }
 .history-section { margin-top: 14px; border-top: 1px solid #292929; }
+
+.derived-value { padding: 14px 16px 0; font-size: 2.2rem; font-weight: 500; color: #f2f2f2; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.derived-unit { font-size: 1rem; color: #8c8c8c; }
+.badge-derived { font-size: 0.65rem; letter-spacing: 0.12em; color: #0a0a0a; background: #ffb000; padding: 2px 7px; align-self: center; }
+.derived-calc { margin: 0; padding: 4px 16px 10px; color: #bdbdbd; font-size: 0.85rem; overflow-wrap: anywhere; }
+.notice--derived { border-left: 2px solid #ffb000; }
+.provenance.components span { min-width: 250px; }
+@media (max-width: 640px) {
+  .provenance.components span { display: block; min-width: 0; }
+  .market-card strong.market-value--long { font-size: 1.15rem; white-space: normal; overflow-wrap: anywhere; }
+}
+.derived-support { padding-top: 0; color: #f0b429; font-size: 0.82rem; }

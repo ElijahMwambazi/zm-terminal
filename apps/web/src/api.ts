@@ -336,3 +336,59 @@ export const getOilLatest = () => getOilJson<OilLatest>("/api/v1/oil/latest");
 export async function getOilHistory(benchmark: OilBenchmark, range: OilRange): Promise<OilPoint[]> {
   return (await getOilJson<{ observations: OilPoint[] }>(`/api/v1/oil/history?benchmark=${benchmark}&range=${range}`)).observations;
 }
+
+export const OIL_ZM_RANGES = OIL_RANGES;
+
+/** OIL ZM: a DERIVED monthly ZM Terminal indicator (Brent USD/bbl x BoZ USD/ZMW monthly mid average), never an official
+ * series and not a Zambia pump price. The API does all arithmetic; the UI only displays and rounds for presentation. */
+export type OilZmPoint = {
+  classification: "derived";
+  derived: true;
+  period_start: string;
+  period_end: string;
+  currency: "ZMW";
+  unit: "barrel";
+  zmw_per_bbl: string;
+  brent_usd_per_bbl: string;
+  usd_zmw_observed_days_avg: string;
+  fx_day_count: number;
+  fx_observation_count: number;
+  /** partial_source_window: stored BoZ history begins during this month. observed_days: uses whatever stored days exist; asserts no completeness. */
+  fx_coverage: "partial_source_window" | "observed_days";
+};
+export type OilZmMonth = OilZmPoint & {
+  methodology_id: string;
+  methodology: string;
+  notice: string;
+  fx_first_date: string;
+  fx_last_date: string;
+  fx_first_observation: string;
+  fx_last_observation: string;
+  brent_source: "world_bank";
+  brent_source_url: string;
+  brent_source_page_url: string;
+  brent_publication_date: string;
+  fx_source: "boz";
+  fx_pair: "USDZMW";
+  fx_price: "mid";
+  fx_source_url: string;
+  stale: boolean;
+  stale_after_months: number;
+};
+export type OilZmHistory = { range: OilRange; count: number; brent_months_without_fx: number; observations: OilZmPoint[] };
+
+/** null = no month has both stored Brent and stored BoZ FX (a normal empty state, not an error). */
+export async function getOilZmLatest(): Promise<OilZmMonth | null> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/v1/oil/zm/latest`);
+  } catch {
+    throw new ApiError("api", "ZM Terminal API is unreachable");
+  }
+  if (response.status === 404) return null;
+  if (response.status === 503) throw new ApiError("api", "Stored oil and FX data are unavailable (database)");
+  if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
+  return response.json();
+}
+
+export const getOilZmHistory = (range: OilRange) => getOilJson<OilZmHistory>(`/api/v1/oil/zm/history?range=${range}`);

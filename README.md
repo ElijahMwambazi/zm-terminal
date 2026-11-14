@@ -2,7 +2,7 @@
 
 A personal, Zambia-first market intelligence terminal built with React, FastAPI, PostgreSQL, OpenBB and Docker.
 
-> Status: **active Zambia-first market terminal with multiple implemented vertical slices**: Bank of Zambia USD/ZMW, Treasury bills, Government bonds, stored fixed-income history, ERB fuel prices/build-ups, Ministry of Agriculture maize/soya national-average prices, and global Brent/WTI monthly oil benchmarks (World Bank Pink Sheet). The application deliberately does not display fabricated market prices. LuSE, BTC, copper, `OIL ZM`, broader macro and other planned domains remain pending.
+> Status: **active Zambia-first market terminal with multiple implemented vertical slices**: Bank of Zambia USD/ZMW, Treasury bills, Government bonds, stored fixed-income history, ERB fuel prices/build-ups, Ministry of Agriculture maize/soya national-average prices, global Brent/WTI monthly oil benchmarks (World Bank Pink Sheet), and the derived `OIL ZM` monthly Brent-in-kwacha indicator. The application deliberately does not display fabricated market prices. LuSE, BTC, copper, broader macro and other planned domains remain pending.
 
 ## Goals
 
@@ -189,9 +189,10 @@ SOYA AVG
 OIL
 OIL BRENT
 OIL WTI
+OIL ZM
 ```
 
-`OIL ZM` is planned but not implemented. Future command ideas such as BTC, copper, macro, yield-curve and cross-market research commands are tracked in `docs/ROADMAP.md`.
+`OIL ZM` is a derived monthly indicator (World Bank Brent monthly average x the mean of stored daily BoZ USD/ZMW mid-rate averages over the stored observation days, not a full-month FX average), computed from stored data only and labelled DERIVED; it is not an official series or a pump price. Future command ideas such as BTC, copper, macro, yield-curve and cross-market research commands are tracked in `docs/ROADMAP.md`.
 
 ## Data-provider strategy
 
@@ -228,7 +229,7 @@ zm-terminal/
 
 The canonical sequencing lives in [`docs/ROADMAP.md`](docs/ROADMAP.md), while [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) records implemented behavior and known limitations.
 
-Current implemented domains are USD/ZMW, BoZ Treasury bills and Government bonds with stored history, ERB fuel prices/build-ups, Ministry maize/soya national-average prices, and global Brent/WTI monthly oil benchmarks (World Bank Pink Sheet, USD/bbl, stored and imported manually with `python -m app.jobs.backfill_oil --from 2025-01`; see `docs/CURRENT_STATE.md`). The next planned item is the derived `OIL ZM` view.
+Current implemented domains are USD/ZMW, BoZ Treasury bills and Government bonds with stored history, ERB fuel prices/build-ups, Ministry maize/soya national-average prices, and global Brent/WTI monthly oil benchmarks (World Bank Pink Sheet, USD/bbl, stored and imported manually with `python -m app.jobs.backfill_oil --from 2025-01`; see `docs/CURRENT_STATE.md`). The derived `OIL ZM` view (stored-only; available from January 2026, where BoZ history begins) is implemented. The next planned item is the Zambia sovereign yield curve.
 
 ## Development principles
 

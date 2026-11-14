@@ -13,6 +13,7 @@ from app.schemas.agriculture import (
     AGRICULTURE_COMMODITIES, AgricultureCommodity, AgricultureHistory, AgricultureLatest, AgriculturePrice, AgricultureRange,
 )
 from app.schemas.oil import OIL_BENCHMARKS, OilBenchmark, OilHistory, OilLatest, OilObservation, OilRange
+from app.schemas.oil_zm import OilZmHistory, OilZmMonth
 from app.schemas.fuel_buildup import BuildUpType, FuelBuildUp
 from app.schemas.fuel import FUEL_PRODUCTS, FuelHistory, FuelLatest, FuelPrice, FuelProduct, FuelRange, PriceType
 from app.schemas.bonds import (
@@ -32,6 +33,7 @@ from app.services.fuel_store import fetch_fuel_history, fetch_latest_fuel
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, save_fx_quote
 from app.services.tbill_store import TbillConflictError, fetch_tbill_history, save_tbill_auctions
 from app.services.oil_store import fetch_latest_oil, fetch_oil_history
+from app.services.oil_zm import fetch_oil_zm
 from app.services.provider_policy import PROVIDER_POLICIES, ProviderPolicy
 from app.services.openbb import get_openbb_coverage, openbb_is_ready
 
@@ -286,6 +288,30 @@ async def oil_history(benchmark: OilBenchmark = "BRENT", range: OilRange = "1Y")
         logger.warning("Oil history read failed (%s)", type_name(exc))
         raise HTTPException(status_code=503, detail="Stored oil benchmarks unavailable") from exc
     return OilHistory(benchmark=benchmark, range=range, count=len(points), observations=points)
+
+
+@router.get("/oil/zm/latest", response_model=OilZmMonth)
+async def oil_zm_latest() -> OilZmMonth:
+    """Newest month with both a stored World Bank Brent average and stored BoZ USD/ZMW; derived on request, never persisted."""
+    try:
+        months, _ = await asyncio.to_thread(fetch_oil_zm, "ALL", today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("OIL ZM read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored oil and FX data unavailable") from exc
+    if not months:
+        raise HTTPException(status_code=404, detail="No month has both stored World Bank Brent and stored BoZ USD/ZMW data")
+    return months[-1]
+
+
+@router.get("/oil/zm/history", response_model=OilZmHistory)
+async def oil_zm_history(range: OilRange = "1Y") -> OilZmHistory:
+    """Derived months ascending; months without FX are omitted (and counted), never filled. Stored data only."""
+    try:
+        months, omitted = await asyncio.to_thread(fetch_oil_zm, range, today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("OIL ZM history read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored oil and FX data unavailable") from exc
+    return OilZmHistory(range=range, count=len(months), brent_months_without_fx=omitted, observations=months)
 
 
 @router.get("/oil/{benchmark}", response_model=OilObservation)
