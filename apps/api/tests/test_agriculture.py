@@ -24,7 +24,7 @@ LAYOUT_B = """
 MINISTRY OF AGRICULTURE
 DEPARTMENT OF AGRIBUSINESS AND MARKETING
 April 2025-January 2026 Market Information Bulletin
-Bulletin No: 020430– 30th April 2025 – 31st January 2026
+Bulletin No: 020430 - 30th April 2025 to 31st January 2026
 
 Table 1: National Average Commodity Prices
 COMMODITY DECEMBER JANUARY % CHANGE
