@@ -7,8 +7,8 @@
 - usd_zmw_daily_mid_avg: the arithmetic mean of all complete stored BoZ USD/ZMW `mid` observations (buy, mid and sell present,
   source boz) assigned to the Africa/Lusaka calendar date equal to the candle's UTC date. Every observation has equal weight.
   Date association is explicit: a BoZ observation belongs to `observed_at` converted to Africa/Lusaka (UTC+2, no DST); a candle
-  belongs to the UTC date of its open. The two inputs are NOT simultaneous: the candle covers the whole UTC day and closes at
-  24:00 UTC, while the BoZ observations occur earlier in the Zambia business day.
+  belongs to the UTC date of its open. The two inputs are NOT simultaneous: the BTC daily close and the BoZ FX observations
+  represent different observation times within the matched calendar date (no ordering between them is assumed).
 - A candle whose date has no eligible BoZ observation is omitted and counted (`btc_days_without_fx`): no forward-fill,
   backward-fill, interpolation, nearest-observation substitution, zero or null point. The first derived date therefore comes
   from the overlap of the stored histories (BoZ machine-readable history begins 2026-01-22), never from another FX source.

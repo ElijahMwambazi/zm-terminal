@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useState } from "react";
 import { ApiError, BTC_RANGES, getBtcZmwHistory, type BtcRange, type BtcZmwHistory } from "./api";
 import AuctionChart from "./AuctionChart";
+import { extendsBeforeFxHistory } from "./btcRange";
 import { formatDate, formatFixed, formatLusaka } from "./format";
 import type { BtcZmwState } from "./useBtcZmw";
 
@@ -27,7 +28,7 @@ const TABLE_ROWS = 10;
 type History =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; data: BtcZmwHistory };
+  | { status: "ready"; data: BtcZmwHistory; requestedAt: number };
 
 const BtcZmwDetail = forwardRef<HTMLElement, { state: BtcZmwState; onRefresh: () => void }>(
   function BtcZmwDetail({ state, onRefresh }, ref) {
@@ -38,8 +39,9 @@ const BtcZmwDetail = forwardRef<HTMLElement, { state: BtcZmwState; onRefresh: ()
     useEffect(() => {
       let cancelled = false;
       setHistory({ status: "loading" });
+      const requestedAt = Date.now(); // the request time anchors the rolling-day window, as on the server
       getBtcZmwHistory(range)
-        .then((data) => !cancelled && setHistory({ status: "ready", data }))
+        .then((data) => !cancelled && setHistory({ status: "ready", data, requestedAt }))
         .catch((error: unknown) =>
           !cancelled && setHistory({ status: "error", message: error instanceof ApiError ? error.message : "History unavailable" }));
       return () => { cancelled = true; };
@@ -130,7 +132,7 @@ const BtcZmwDetail = forwardRef<HTMLElement, { state: BtcZmwState; onRefresh: ()
                     <p className="notice">
                       {history.data.count} derived {history.data.count === 1 ? "day" : "days"}, {formatDate(points[0].date)} to {formatDate(points[points.length - 1].date)}.
                       {" "}{history.data.btc_days_without_fx} stored BTC/USD {history.data.btc_days_without_fx === 1 ? "day" : "days"} in this range had no BoZ observation and {history.data.btc_days_without_fx === 1 ? "is" : "are"} omitted
-                      (normally weekends, holidays and any dates before the stored BoZ history; there is no weekday exclusion rule, so a date with a stored BoZ observation is derived). The chart joins real points with a line; it does not imply daily observations.{history.data.fx_stored_from && points[0].date <= history.data.fx_stored_from ? ` BTC/USD history extends further back, but derived BTC/ZMW is available only from the stored Bank of Zambia source window (it begins ${formatDate(history.data.fx_stored_from)}); this is a source boundary, not missing Bitcoin data.` : ""} This is not the live quote above: that uses the current Bitstamp last trade.
+                      (normally weekends, holidays and any dates before the stored BoZ history; there is no weekday exclusion rule, so a date with a stored BoZ observation is derived). The chart joins real points with a line; it does not imply daily observations. This is not the live quote above: that uses the current Bitstamp last trade.
                     </p>
                     <div className="table-scroll">
                       <table aria-label="Recent derived days">
@@ -147,6 +149,12 @@ const BtcZmwDetail = forwardRef<HTMLElement, { state: BtcZmwState; onRefresh: ()
                       </table>
                     </div>
                   </>
+                )}
+                {/* A source boundary, decided from the requested window and the global fx_stored_from, never from the derived points. */}
+                {history.data.fx_stored_from && extendsBeforeFxHistory(history.data.range, history.data.fx_stored_from, history.requestedAt) && (
+                  <p className="notice">
+                    BTC/USD history extends further back, but derived BTC/ZMW is available only from the stored Bank of Zambia source window (it begins {formatDate(history.data.fx_stored_from)}); this is a source boundary, not missing Bitcoin data.
+                  </p>
                 )}
               </>
             )}
