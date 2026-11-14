@@ -769,3 +769,39 @@ export async function getCopperKwachaCorrelation(range: CopperRange, window: Cor
   if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
   return response.json();
 }
+
+/** Copper-Kwacha historical sensitivity (beta): a DESCRIPTIVE full-sample statistic calculated by the API on the same eligible
+ * monthly changes as the correlation. Dependent: USD/ZMW change; explanatory: Copper USD change. Not causal, not a forecast. */
+export type CopperKwachaSensitivity = {
+  range: CopperRange;
+  methodology_id: string;
+  methodology: string;
+  notice: string;
+  units: string;
+  sign_note: string;
+  matched_months: number;
+  candidate_changes: number;
+  changes_used: number;
+  changes_excluded_gap: number;
+  changes_excluded_partial: number;
+  changes_excluded_nonpositive: number;
+  first_change_month: string | null;
+  last_change_month: string | null;
+  sample_size: number;
+  status: "available" | "insufficient_sample" | "zero_copper_variance";
+  beta: string | null;
+  small_sample: boolean;
+  reason: string | null;
+};
+
+export async function getCopperKwachaSensitivity(range: CopperRange): Promise<CopperKwachaSensitivity> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/v1/copper/kwacha/sensitivity?range=${range}`);
+  } catch {
+    throw new ApiError("api", "ZM Terminal API is unreachable");
+  }
+  if (response.status === 503) throw new ApiError("api", "Stored Copper and FX data are unavailable (database)");
+  if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
+  return response.json();
+}

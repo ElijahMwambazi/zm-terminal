@@ -10,7 +10,7 @@ from sqlalchemy import text
 from app.db import database_is_ready, get_engine
 from app.schemas.btc import BtcRange, BtcUsdHistory, BtcUsdQuote, BtcZmwHistory, BtcZmwQuote
 from app.schemas.copper import CopperHistory, CopperLatest, CopperRange
-from app.schemas.copper_kwacha import CopperKwachaCorrelation, CorrelationWindow
+from app.schemas.copper_kwacha import CopperKwachaCorrelation, CopperKwachaSensitivity, CorrelationWindow
 from app.schemas.copper_zm import CopperZmHistory, CopperZmMonth
 from app.schemas.fx import FxHistory, FxQuote
 from app.schemas.agriculture import (
@@ -43,7 +43,7 @@ from app.services.fuel_store import fetch_fuel_history, fetch_latest_fuel
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, fetch_latest_fx_mid, save_fx_quote
 from app.services.tbill_store import TbillConflictError, fetch_tbill_history, save_tbill_auctions
 from app.services.copper_store import fetch_copper_history, fetch_latest_copper
-from app.services.copper_kwacha import fetch_copper_kwacha_correlation
+from app.services.copper_kwacha import fetch_copper_kwacha_correlation, fetch_copper_kwacha_sensitivity
 from app.services.copper_zm import fetch_copper_zm
 from app.services.oil_store import fetch_latest_oil, fetch_oil_history
 from app.services.oil_zm import fetch_oil_zm
@@ -436,6 +436,16 @@ async def copper_kwacha_correlation(range: CopperRange = "ALL", window: Correlat
         return await asyncio.to_thread(fetch_copper_kwacha_correlation, range, window, today=_lusaka_today())
     except Exception as exc:
         logger.warning("Copper-Kwacha correlation failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored copper and FX data unavailable") from exc
+
+
+@router.get("/copper/kwacha/sensitivity", response_model=CopperKwachaSensitivity)
+async def copper_kwacha_sensitivity(range: CopperRange = "ALL") -> CopperKwachaSensitivity:
+    """Descriptive full-sample historical sensitivity (beta) on the same eligible changes as the correlation; stored data only."""
+    try:
+        return await asyncio.to_thread(fetch_copper_kwacha_sensitivity, range, today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("Copper-Kwacha sensitivity failed (%s)", type_name(exc))
         raise HTTPException(status_code=503, detail="Stored copper and FX data unavailable") from exc
 
 

@@ -58,3 +58,43 @@ class CopperKwachaCorrelation(BaseModel):
     full_sample: FullSample
     rolling: list[RollingPoint]
     rolling_reason: str | None = None
+
+
+SENS_METHODOLOGY_ID = "copper_kwacha_beta_v1"
+SENS_METHODOLOGY = (
+    "Historical sample sensitivity: the covariance of consecutive month-over-month fractional changes in the stored BoZ USD/ZMW "
+    "observed-days average with those of the IMF PCPS Copper USD benchmark, divided by the variance of the Copper changes "
+    "(beta = Sxy / Sxx). Computed on exactly the eligible monthly-change sample used by the correlation: pairs crossing missing "
+    "months, the partial FX source-start month or nonpositive analytical inputs are excluded.")
+SENS_NOTICE = ("Descriptive analytical statistic for the stored sample, not a causal estimate, forecast, hedge ratio or trading signal. "
+               "The sample reflects only the overlap of stored IMF Copper and stored BoZ FX history.")
+SENS_UNITS = "Fractional USD/ZMW change per unit fractional Copper USD change (dependent: USD/ZMW; explanatory: Copper USD)."
+SENS_SIGN_NOTE = ("USD/ZMW is quoted as kwacha per US dollar. A positive USD/ZMW change means the kwacha depreciated against "
+                  "the dollar; a negative change means it appreciated.")
+SENS_SMALL_SAMPLE_WARNING = "Small sample: this sensitivity estimate is based on fewer than 12 monthly changes and may be unstable."
+
+SensitivityStatus = Literal["available", "insufficient_sample", "zero_copper_variance"]
+
+
+class CopperKwachaSensitivity(BaseModel):
+    range: CopperRange
+    methodology_id: str = SENS_METHODOLOGY_ID
+    methodology: str = SENS_METHODOLOGY
+    notice: str = SENS_NOTICE
+    units: str = SENS_UNITS
+    sign_note: str = SENS_SIGN_NOTE
+    dependent: str = "usd_zmw_observed_days_avg"
+    explanatory: str = "copper_usd_per_mt"
+    matched_months: int
+    candidate_changes: int
+    changes_used: int
+    changes_excluded_gap: int
+    changes_excluded_partial: int
+    changes_excluded_nonpositive: int
+    first_change_month: date | None
+    last_change_month: date | None
+    sample_size: int
+    status: SensitivityStatus
+    beta: PlainDecimal | None = Field(default=None, allow_inf_nan=False)
+    small_sample: bool  # sample_size < 12 (descriptive caution, not a significance statement)
+    reason: str | None = None
