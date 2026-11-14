@@ -153,8 +153,12 @@ async def fetch_daily_candles(
     Forward pagination with start + limit only (never `end`), `exclude_current_candle=true`, the next page starting at the
     day after the newest candle returned. A page can hold fewer than `limit` candles while more history exists (observed:
     999 for limit=1000), so a short page does not end the run: it ends when the newest completed UTC day has been reached.
-    An empty page before that point, a non-advancing or overlapping page, or more than MAX_PAGES pages, fails closed
-    (nothing is assumed, filled or truncated silently).
+    Enforced here: ascending, non-duplicate timestamps within a page; every page starts at or after the requested start and
+    does not overlap the previous page (so each non-empty page advances at least one day); at most MAX_PAGES pages; and an
+    empty page before the newest completed day fails closed (nothing is assumed, filled or truncated silently). Not
+    enforced: that every interior day exists (the importer does not prove daily continuity; a gap shorter than a page is
+    accepted as published). Edge: shortly after UTC midnight Bitstamp may not yet expose yesterday's completed candle; the
+    importer then fails rather than declaring history complete, and a later run succeeds.
     """
     now = now or datetime.now(timezone.utc)
     today = now.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)

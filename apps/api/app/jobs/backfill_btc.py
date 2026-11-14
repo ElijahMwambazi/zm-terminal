@@ -11,6 +11,10 @@ candle value or file is written or logged.
 about when the market began; whatever the API publishes is what is stored. An already-stored candle with different values
 is a conflict: the whole import stops and nothing is written. --dry-run validates and counts without touching PostgreSQL,
 so it cannot detect conflicts with stored values.
+
+The importer does not prove that every interior day exists (it enforces ascending, non-overlapping pages and fails closed on an
+empty page before the newest completed UTC day). Shortly after UTC midnight Bitstamp may not yet expose yesterday's candle; the
+run then fails (nothing is written) and can simply be repeated later.
 """
 
 import argparse

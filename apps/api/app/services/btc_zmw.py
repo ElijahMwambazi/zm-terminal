@@ -20,14 +20,25 @@ from app.services.fx_store import LatestFxMid
 MATH_PRECISION = 40
 
 
+class InvalidStoredFxError(ValueError):
+    """The stored USD/ZMW observation cannot be used (non-positive or non-finite mid, or an observation in the future)."""
+
+
 def _age_seconds(observed_at: datetime, now: datetime) -> int:
     return max(0, int((now - observed_at).total_seconds()))  # a skew within tolerance is reported as age 0
 
 
 def derive_btc_zmw(btc: BtcUsdQuote, fx: LatestFxMid, *, now: datetime | None = None) -> BtcZmwQuote:
-    """Raises ValueError (from the unchanged BoZ freshness helper) if the stored FX observation is in the future."""
+    """Raises InvalidStoredFxError when the stored FX is unusable: a non-finite or non-positive mid (it is checked here
+    even though BoZ ingestion validates it, so a bad stored row can never yield BTC/ZMW = 0) or an observation in the
+    future (detected by the unchanged BoZ freshness helper). No other failure is relabelled as an FX problem."""
+    if not fx.mid.is_finite() or fx.mid <= 0:
+        raise InvalidStoredFxError("Stored USD/ZMW mid is not a positive finite number")
     derived_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    fx_stale = fx_is_stale(fx.observed_at, derived_at)  # BoZ semantics reused unchanged
+    try:
+        fx_stale = fx_is_stale(fx.observed_at, derived_at)  # BoZ semantics reused unchanged
+    except ValueError as exc:
+        raise InvalidStoredFxError("Stored USD/ZMW observation is not usable for freshness") from exc
     with localcontext() as context:
         context.prec = MATH_PRECISION
         value = btc.last * fx.mid

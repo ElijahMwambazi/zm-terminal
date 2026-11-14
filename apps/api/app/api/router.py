@@ -29,7 +29,7 @@ from app.schemas.tbills import (
 from app.services.boz import get_boz_fx_quote
 from app.services.bitstamp_btc import get_bitstamp_btc_quote
 from app.services.btc_store import fetch_btc_history
-from app.services.btc_zmw import derive_btc_zmw
+from app.services.btc_zmw import InvalidStoredFxError, derive_btc_zmw
 from app.services.agriculture_store import fetch_agriculture_history, fetch_latest_agriculture
 from app.services.bond_store import BondConflictError, fetch_bond_history, save_bond_auctions
 from app.services.boz_bonds import get_boz_bonds, latest_per_tenor as latest_bonds, unverified_tenors
@@ -321,9 +321,12 @@ async def btc_zmw_latest() -> BtcZmwQuote:
     btc = await _live_btc_quote()
     try:
         return derive_btc_zmw(btc, fx)
-    except ValueError as exc:
+    except InvalidStoredFxError as exc:
         logger.warning("BTC/ZMW derivation rejected the stored USD/ZMW observation (%s)", type_name(exc))
         raise HTTPException(status_code=503, detail="Stored USD/ZMW observation is invalid") from exc
+    except ValueError as exc:  # anything else (for example a model validation error) is not an FX problem
+        logger.error("BTC/ZMW derivation failed unexpectedly (%s)", type_name(exc))
+        raise HTTPException(status_code=500, detail="BTC/ZMW derivation failed") from exc
 
 
 @router.get("/agriculture/latest", response_model=AgricultureLatest)

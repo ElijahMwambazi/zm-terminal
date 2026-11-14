@@ -18,8 +18,8 @@ from app.services.bitstamp_btc import (
     BitstampError, DailyCandle, fetch_daily_candles, get_bitstamp_btc_quote, is_btc_stale, parse_candle, parse_ohlc, parse_ticker,
 )
 from app.services.btc_store import BtcConflictError, fetch_btc_history, range_start, save_daily_candles
-from app.services.btc_zmw import derive_btc_zmw
-from app.services.fx_store import LatestFxMid
+from app.services.btc_zmw import InvalidStoredFxError, derive_btc_zmw
+from app.services.fx_store import LatestFxMid, fetch_latest_fx_mid
 from app.services.provider_policy import BITSTAMP_BTC_POLICY, PROVIDER_POLICIES
 
 router_module = importlib.import_module("app.api.router")
@@ -381,6 +381,19 @@ def test_future_stored_fx_observation_is_rejected_by_the_boz_freshness_helper():
         derive_btc_zmw(quote(), fx(observed=NOW + timedelta(hours=1)), now=NOW)
 
 
+@pytest.mark.parametrize("mid", ["0", "0.0000", "-1", "-20.4451", "NaN", "Infinity", "-Infinity"])
+def test_a_zero_negative_or_non_finite_stored_mid_never_yields_a_derived_quote(mid):
+    with pytest.raises(InvalidStoredFxError):
+        derive_btc_zmw(quote(), fx(mid), now=NOW)
+
+
+def test_a_valid_positive_mid_still_derives_and_the_error_is_a_value_error():
+    assert derive_btc_zmw(quote("100"), fx("0.0001"), now=NOW).btc_zmw == Decimal("0.0100")
+    assert issubclass(InvalidStoredFxError, ValueError)
+    with pytest.raises(InvalidStoredFxError):  # a future observation is reported through the same dedicated error
+        derive_btc_zmw(quote(), fx(observed=NOW + timedelta(hours=1)), now=NOW)
+
+
 def test_boz_stale_policy_is_unchanged_and_reused():
     from app.services import boz
     assert boz.FX_STALE_AFTER == timedelta(hours=96)
@@ -457,14 +470,30 @@ def test_btc_zmw_error_mapping_is_distinct(api):
     assert client.get("/api/v1/btc/zmw/latest").status_code == 503
 
 
-def test_btc_zmw_does_not_call_bitstamp_when_no_fx_is_stored(api):
+def test_invalid_stored_fx_is_a_stored_data_error_but_other_derivation_failures_are_not_labelled_as_fx(api, monkeypatch):
+    api["fx"] = fx("0")
+    r = client.get("/api/v1/btc/zmw/latest")
+    assert r.status_code == 503 and r.json()["detail"] == "Stored USD/ZMW observation is invalid"
+    api["fx"] = fx("-3")
+    assert client.get("/api/v1/btc/zmw/latest").status_code == 503
+    api["fx"] = fx()
+
+    def unexpected(btc, stored):
+        raise ValueError("1 validation error for BtcZmwQuote btc_zmw SECRET-INTERNAL-DETAIL")
+    monkeypatch.setattr(router_module, "derive_btc_zmw", unexpected)
+    r = client.get("/api/v1/btc/zmw/latest")
+    assert r.status_code == 500 and r.json()["detail"] == "BTC/ZMW derivation failed"
+    assert "USD/ZMW" not in r.json()["detail"] and "SECRET" not in r.text and "validation error" not in r.text
+
+
+def test_btc_zmw_does_not_call_bitstamp_when_no_fx_is_stored(api, monkeypatch):
     api["fx"] = None
     calls = []
 
     async def counting():
         calls.append(1)
         return fresh_quote()
-    router_module.get_bitstamp_btc_quote = counting
+    monkeypatch.setattr(router_module, "get_bitstamp_btc_quote", counting)
     assert client.get("/api/v1/btc/zmw/latest").status_code == 404 and calls == []
 
 
@@ -593,3 +622,105 @@ def test_pg_import_end_to_end_with_mocked_provider_stores_no_raw_payload(engine)
         assert not [x for x in cols if "raw" in x or "payload" in x or "json" in x]
         assert c.execute(text("SELECT count(*) FROM btc_usd_daily WHERE volume_btc = 0")).scalar() == 1
         assert c.execute(text("SELECT count(*) FROM btc_usd_daily WHERE candle_open_at = :t"), {"t": day(2)}).scalar() == 0  # no fill
+
+
+# ---------------- latest stored BoZ FX helper against real PostgreSQL ----------------
+@pytest.fixture
+def fx_engine():
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_DATABASE_URL not set")
+    if not url.rsplit("/", 1)[-1].endswith("_test"):
+        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test")
+    init = Path(__file__).parents[3] / "db/init"
+    eng = create_engine(url)
+    with eng.begin() as c:
+        c.execute(text("DROP TABLE IF EXISTS fx_rates"))
+        c.execute(text((init / "001_schema.sql").read_text()))
+        c.execute(text((init / "002_fx_rates_provenance.sql").read_text()))
+        c.execute(text("DELETE FROM fx_rates"))
+    yield eng
+    eng.dispose()
+
+
+def put_fx(engine, *, observed, retrieved, mid, base="USD", quote_="ZMW", source="boz", buy="x", sell="x", url="https://example.test/rates"):
+    buy = mid if buy == "x" else buy
+    sell = mid if sell == "x" else sell
+    with engine.begin() as c:
+        c.execute(text("INSERT INTO fx_rates (base_currency, quote_currency, observed_at, buy, mid, sell, source, retrieved_at, source_url) "
+                       "VALUES (:b, :q, :o, :buy, :mid, :sell, :s, :r, :u)"),
+                  {"b": base, "q": quote_, "o": observed, "buy": buy, "mid": mid, "sell": sell, "s": source, "r": retrieved, "u": url})
+
+
+def test_pg_latest_fx_mid_is_none_when_nothing_matches(fx_engine):
+    assert fetch_latest_fx_mid(engine=fx_engine) is None  # empty table
+    put_fx(fx_engine, observed=NOW, retrieved=NOW, mid="1.1", base="EUR", quote_="USD")          # wrong pair
+    put_fx(fx_engine, observed=NOW, retrieved=NOW, mid="20.1", source="other")                    # wrong source
+    put_fx(fx_engine, observed=NOW, retrieved=NOW, mid="20.2", sell=None)                         # incomplete row
+    put_fx(fx_engine, observed=NOW + timedelta(minutes=2), retrieved=NOW, mid="20.3", buy=None)
+    with fx_engine.begin() as c:
+        c.execute(text("INSERT INTO fx_rates (base_currency, quote_currency, observed_at, buy, mid, sell, source, retrieved_at, source_url) "
+                       "VALUES ('USD','ZMW', :o, 1, NULL, 1, 'boz', :o, 'u')"), {"o": NOW + timedelta(minutes=1)})
+    assert fetch_latest_fx_mid(engine=fx_engine) is None
+
+
+def test_pg_latest_fx_mid_ignores_other_pairs_sources_and_partial_rows_even_when_newer(fx_engine):
+    good = NOW - timedelta(days=1)
+    put_fx(fx_engine, observed=good, retrieved=good, mid="20.4451", url="https://www.boz.zm/markets-securities/boz-exchange-rates")
+    newer = NOW
+    put_fx(fx_engine, observed=newer, retrieved=newer, mid="1.1", base="EUR", quote_="USD")       # newer, other pair
+    put_fx(fx_engine, observed=newer, retrieved=newer, mid="99", source="other")                   # newer, other source
+    put_fx(fx_engine, observed=newer + timedelta(hours=1), retrieved=newer, mid="98", sell=None)   # newer, partial
+    put_fx(fx_engine, observed=newer + timedelta(hours=2), retrieved=newer, mid="97", buy=None)
+    got = fetch_latest_fx_mid(engine=fx_engine)
+    assert got is not None and got.mid == Decimal("20.4451") and got.observed_at == good
+    assert got.source == "boz" and got.source_url == "https://www.boz.zm/markets-securities/boz-exchange-rates" and got.retrieved_at == good
+
+
+def test_pg_latest_fx_mid_orders_by_observed_at_not_retrieved_at(fx_engine):
+    older_observed = NOW - timedelta(days=3)
+    newer_observed = NOW - timedelta(days=1)
+    put_fx(fx_engine, observed=older_observed, retrieved=NOW, mid="20.0000")             # older observation, retrieved most recently
+    put_fx(fx_engine, observed=newer_observed, retrieved=NOW - timedelta(days=30), mid="20.5000")  # newer observation, retrieved long ago
+    put_fx(fx_engine, observed=NOW - timedelta(days=2), retrieved=NOW - timedelta(hours=1), mid="20.2500")
+    got = fetch_latest_fx_mid(engine=fx_engine)
+    assert got.mid == Decimal("20.5000") and got.observed_at == newer_observed
+    assert got.retrieved_at == NOW - timedelta(days=30)
+    assert isinstance(got.mid, Decimal) and got.observed_at.utcoffset() is not None
+
+
+def test_pg_latest_fx_mid_is_read_only(fx_engine):
+    put_fx(fx_engine, observed=NOW, retrieved=NOW, mid="20.4451")
+    with fx_engine.connect() as c:
+        before = c.execute(text("SELECT count(*), max(retrieved_at) FROM fx_rates")).one()
+    fetch_latest_fx_mid(engine=fx_engine)
+    fetch_latest_fx_mid(engine=fx_engine)
+    with fx_engine.connect() as c:
+        assert c.execute(text("SELECT count(*), max(retrieved_at) FROM fx_rates")).one() == before
+
+
+# ---------------- importer: empty trailing page ----------------
+def test_the_importer_fails_safely_when_yesterdays_candle_is_not_yet_published():
+    """Shortly after UTC midnight Bitstamp may not yet expose the newest completed day: the run fails instead of claiming completeness."""
+    from app.jobs import backfill_btc
+    rows = [candle_row(0), candle_row(1)]  # the newest completed day is day 2 (now is on day 3)
+    seen = []
+    with pytest.raises(BitstampError):
+        run(backfill_btc.run_import(date(2026, 1, 1), None, dry_run=True, client=client_for(paged_handler([rows, []], seen)), now=at_day(3), delay=0))
+    assert len(seen) == 2  # the empty trailing page was requested and refused
+
+
+def test_pg_a_failed_trailing_page_import_writes_nothing_and_leaves_stored_rows_intact(engine):
+    from app.jobs import backfill_btc
+    save_daily_candles([dc(0), dc(1)], retrieved_at=NOW, engine=engine)
+    with engine.connect() as c:
+        before = c.execute(text("SELECT count(*), max(retrieved_at), sum(close) FROM btc_usd_daily")).one()
+    rows = [candle_row(0), candle_row(1)]
+    with pytest.raises(BitstampError):
+        run(backfill_btc.run_import(date(2026, 1, 1), None, client=client_for(paged_handler([rows, []], [])), engine=engine, now=at_day(3), delay=0))
+    with engine.connect() as c:
+        assert c.execute(text("SELECT count(*), max(retrieved_at), sum(close) FROM btc_usd_daily")).one() == before
+    # a later run, once the day exists, succeeds and only adds the new day
+    full = [candle_row(0), candle_row(1), candle_row(2)]
+    result = run(backfill_btc.run_import(date(2026, 1, 1), None, client=client_for(paged_handler([full], [])), engine=engine, now=at_day(3), delay=0))
+    assert (result["inserted"], result["already_present"]) == (1, 2)

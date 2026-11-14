@@ -9,6 +9,8 @@ from app.db import get_engine
 from app.schemas.btc import BITSTAMP_OHLC_URL, BtcDailyCandle
 from app.services.bitstamp_btc import DailyCandle
 
+# Rolling-day windows counted back from the request time (not calendar months or years): 1M = 30 days, 3M = 91, 6M = 182,
+# 1Y = 365, 3Y = 1095, 5Y = 1825, ALL = unbounded. The cut-off is the UTC midnight of the first day inside the window.
 RANGE_WINDOWS: dict[str, timedelta | None] = {
     "1M": timedelta(days=30), "3M": timedelta(days=91), "6M": timedelta(days=182),
     "1Y": timedelta(days=365), "3Y": timedelta(days=3 * 365), "5Y": timedelta(days=5 * 365), "ALL": None,
