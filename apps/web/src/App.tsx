@@ -7,6 +7,10 @@ import OilDetail, { perBarrel } from "./OilDetail";
 import { useOil } from "./useOil";
 import OilZmDetail from "./OilZmDetail";
 import { useOilZm } from "./useOilZm";
+import BtcUsdDetail, { usdPrice } from "./BtcUsdDetail";
+import BtcZmwDetail, { formatAge, zmwPrice } from "./BtcZmwDetail";
+import { useBtcUsd } from "./useBtcUsd";
+import { useBtcZmw } from "./useBtcZmw";
 import YieldCurveDetail from "./YieldCurveDetail";
 import { useYieldCurve } from "./useYieldCurve";
 import { formatDate, formatLusaka, formatMonth } from "./format";
@@ -27,8 +31,6 @@ type MarketCard = {
 
 const markets: MarketCard[] = [
   { label: "LASI", value: "—", context: "LuSE adapter" },
-  { label: "BTC/USD", value: "—", context: "OpenBB / crypto adapter" },
-  { label: "BTC/ZMW", value: "—", context: "Derived rate" },
   { label: "COPPER", value: "—", context: "Commodity adapter" },
 ];
 
@@ -40,11 +42,13 @@ export default function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [command, setCommand] = useState("");
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | "oil-zm" | "yield-curve" | null>(null);
+  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | "oil-zm" | "yield-curve" | "btc-usd" | "btc-zmw" | null>(null);
   const [oilFocus, setOilFocus] = useState<OilBenchmark | null>(null);
   const [oilNavigationKey, setOilNavigationKey] = useState(0);
   const { state: oilState, refresh: refreshOil } = useOil();
   const { state: oilZmState, refresh: refreshOilZm } = useOilZm();
+  const { state: btcUsdState, refresh: refreshBtcUsd } = useBtcUsd();
+  const { state: btcZmwState, refresh: refreshBtcZmw } = useBtcZmw();
   const { state: curveState, spreadState: curveSpreadState, asOf: curveAsOf, setAsOf: setCurveAsOf, refresh: refreshCurve } = useYieldCurve();
   const [curveNavigationKey, setCurveNavigationKey] = useState(0);
   const [fuelFocus, setFuelFocus] = useState<FuelProduct | null>(null);
@@ -120,6 +124,16 @@ export default function App() {
     requestAnimationFrame(() => detailRef.current?.focus());
   };
 
+  const openBtcUsd = () => {
+    setDetail("btc-usd");
+    requestAnimationFrame(() => detailRef.current?.focus());
+  };
+
+  const openBtcZmw = () => {
+    setDetail("btc-zmw");
+    requestAnimationFrame(() => detailRef.current?.focus());
+  };
+
   const runCommand = () => {
     const result = parseCommand(command);
     if (!result.ok) return setCommandError(result.error);
@@ -132,6 +146,8 @@ export default function App() {
     else if (result.action.type === "open-oil") openOil(result.action.benchmark);
     else if (result.action.type === "open-oil-zm") openOilZm();
     else if (result.action.type === "open-yield-curve") openYieldCurve();
+    else if (result.action.type === "open-btc-usd") openBtcUsd();
+    else if (result.action.type === "open-btc-zmw") openBtcZmw();
     else openAgriculture(result.action.commodity);
   };
 
@@ -261,6 +277,26 @@ export default function App() {
             {brent && <><br /><span className="text-stale">{brent.stale ? "Behind schedule: " : ""}Monthly average, not a live quote</span></>}
           </small>
         </button>
+        <button type="button" className="market-card market-card--live" onClick={openBtcUsd}>
+          <span className="market-label">BTC/USD</span>
+          {btcUsdState.status === "ready" ? <strong className="market-value--long">{usdPrice(btcUsdState.quote.last)}</strong> : <strong>{btcUsdState.status === "loading" ? "…" : "—"}</strong>}
+          <small>
+            {btcUsdState.status === "loading" && "Requesting Bitstamp…"}
+            {btcUsdState.status === "error" && `${btcUsdState.message}. No price is shown.`}
+            {btcUsdState.status === "ready" && <>BITSTAMP SPOT · {formatLusaka(btcUsdState.quote.observed_at)}</>}
+            {btcUsdState.status === "ready" && <><br /><span className={btcUsdState.quote.stale ? "text-stale" : undefined}>{btcUsdState.quote.stale ? "Stale: " : ""}Last trade on one exchange</span></>}
+          </small>
+        </button>
+        <button type="button" className="market-card market-card--live" onClick={openBtcZmw}>
+          <span className="market-label">BTC/ZMW <span className="badge-derived">DERIVED</span></span>
+          {btcZmwState.status === "ready" ? <strong className="market-value--long">{zmwPrice(btcZmwState.quote.btc_zmw)}</strong> : <strong>{btcZmwState.status === "loading" ? "…" : "—"}</strong>}
+          <small>
+            {btcZmwState.status === "loading" && "Deriving from Bitstamp and stored BoZ USD/ZMW…"}
+            {btcZmwState.status === "error" && `${btcZmwState.message}. No value is shown.`}
+            {btcZmwState.status === "ready" && <>Indicative, not an executable quote</>}
+            {btcZmwState.status === "ready" && <><br /><span className={btcZmwState.quote.derived_stale ? "text-stale" : undefined}>BTC {formatAge(btcZmwState.quote.btc_age_seconds)} old · BoZ FX {formatAge(btcZmwState.quote.fx_age_seconds)} old{btcZmwState.quote.derived_stale ? " (stale)" : ""}</span></>}
+          </small>
+        </button>
         {markets.map((market) => (
           <article className="market-card" key={market.label}>
             <span className="market-label">{market.label}</span>
@@ -279,6 +315,10 @@ export default function App() {
           <AgricultureDetail ref={detailRef} state={agricultureState} focus={agricultureFocus} navigationKey={agricultureNavigationKey} onRefresh={refreshAgriculture} />
         ) : detail === "yield-curve" ? (
           <YieldCurveDetail ref={detailRef} state={curveState} spreads={curveSpreadState} asOf={curveAsOf} onAsOf={setCurveAsOf} navigationKey={curveNavigationKey} onRefresh={refreshCurve} />
+        ) : detail === "btc-usd" ? (
+          <BtcUsdDetail ref={detailRef} state={btcUsdState} onRefresh={refreshBtcUsd} />
+        ) : detail === "btc-zmw" ? (
+          <BtcZmwDetail ref={detailRef} state={btcZmwState} onRefresh={refreshBtcZmw} />
         ) : detail === "oil-zm" ? (
           <OilZmDetail ref={detailRef} state={oilZmState} onRefresh={refreshOilZm} />
         ) : detail === "oil" ? (
@@ -290,7 +330,7 @@ export default function App() {
         ) : (
           <article className="panel">
             <div className="panel-heading"><span>WORKSPACE</span></div>
-            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, <code>OIL</code> for global Brent and WTI monthly benchmarks, <code>OIL ZM</code> for the derived Brent-in-kwacha view, or <code>CURVE ZM</code> for the sovereign auction yield curve.</p>
+            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, <code>OIL</code> for global Brent and WTI monthly benchmarks, <code>OIL ZM</code> for the derived Brent-in-kwacha view, <code>CURVE ZM</code> for the sovereign auction yield curve, <code>BTC</code> for Bitstamp BTC/USD, or <code>BTC ZMW</code> for the indicative derived BTC/ZMW.</p>
           </article>
         )}
 
@@ -303,7 +343,7 @@ export default function App() {
             <tbody>
               <tr><td>CECZ</td><td>Copperbelt Energy</td><td>—</td></tr>
               <tr><td>ZNCO</td><td>Zanaco</td><td>—</td></tr>
-              <tr><td>BTC</td><td>Bitcoin</td><td>—</td></tr>
+              <tr><td>BTC</td><td>Bitcoin</td><td>{btcUsdState.status === "ready" ? usdPrice(btcUsdState.quote.last) : "—"}</td></tr>
               <tr><td>COPPER</td><td>Copper</td><td>—</td></tr>
             </tbody>
           </table>

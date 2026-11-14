@@ -344,5 +344,5 @@ def test_pg_curve_is_read_only_and_persists_nothing(engine):
     with engine.connect() as c:
         assert before == (c.execute(text("SELECT count(*) FROM treasury_bill_auctions")).scalar(), c.execute(text("SELECT count(*) FROM government_bond_auctions")).scalar())
         assert {r[0] for r in c.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public'"))} == tables
-    assert not [t for t in tables if "curve" in t] and not list(Path(__file__).parents[3].glob("db/init/010*"))
+    assert not [t for t in tables if "curve" in t] and not [f for f in Path(__file__).parents[3].glob("db/init/*") if "curve" in f.name or "spread" in f.name]  # the curve has no migration of its own
     assert yield_curve.__doc__ and "no HTTP" in yield_curve.__doc__

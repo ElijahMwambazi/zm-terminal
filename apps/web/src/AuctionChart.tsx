@@ -29,7 +29,8 @@ export default function AuctionChart({ points, label, precision = 4, formatPrice
       layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#8c8c8c", attributionLogo: true },
       grid: { vertLines: { color: "#1c1c1c" }, horzLines: { color: "#1c1c1c" } },
       rightPriceScale: { borderColor: "#292929" },
-      timeScale: { borderColor: "#292929", timeVisible: false },
+      // minBarSpacing is lowered so a long series (thousands of daily points) fits a narrow screen instead of showing only its tail.
+      timeScale: { borderColor: "#292929", timeVisible: false, minBarSpacing: 0.01 },
       localization: {
         ...(formatPrice ? { priceFormatter: formatPrice } : {}),
         ...(monthly ? { timeFormatter: (t: Time) => (typeof t === "object" && "month" in t ? `${MONTH_NAMES[t.month - 1]} ${t.year}` : String(t)) } : {}),

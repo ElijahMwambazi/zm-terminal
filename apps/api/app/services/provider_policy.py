@@ -149,7 +149,35 @@ WORLD_BANK_OIL_POLICY = ProviderPolicy(
     ),
 )
 
+BITSTAMP_BTC_POLICY = ProviderPolicy(
+    provider_id="bitstamp",
+    dataset_id="bitstamp_btcusd_spot",
+    name="Bitstamp BTC/USD Spot",
+    source_url="https://www.bitstamp.net/api/",
+    classification="public_market_data",
+    personal_data_expected=False,
+    authentication="none",
+    normalized_storage_allowed=True,
+    raw_response_storage="disabled",
+    attribution_required=False,
+    required_provenance=("source", "market", "source_url"),
+    required_timestamps=("observed_at", "candle_open_at", "retrieved_at"),
+    redistribution="review_required",
+    commercial_use="review_required",
+    request_guidance=(
+        "Local/internal implementation only. Live ticker (GET /api/v2/ticker/btcusd/): one request per user action, "
+        "10 s timeout, no retry, no polling, no tick storage; HTTP 200 is not enough (an unknown market path can return "
+        "the all-markets array), so the body must be a single object with last, timestamp and market_type SPOT. "
+        "History: manual import only (python -m app.jobs.backfill_btc); GET /api/v2/ohlc/btcusd/ with step=86400, "
+        "limit<=1000, exclude_current_candle=true and forward pagination by start + limit (never start with end: end "
+        "wins), about 1 s between pages; nothing written to disk. Bitstamp's API page says commercial users should "
+        "obtain a Data License Agreement (partners@bitstamp.net); its Terms of Use could not be read during research, "
+        "so public display, API redistribution, commercial use and public derived BTC/ZMW stay review_required "
+        "(docs/research/btc-provider-discovery.md)."
+    ),
+)
+
 # Keyed by dataset: one provider may publish several datasets.
 PROVIDER_POLICIES: dict[str, ProviderPolicy] = {
-    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY, ERB_FUEL_POLICY, MOA_AGRICULTURE_POLICY, WORLD_BANK_OIL_POLICY)
+    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY, ERB_FUEL_POLICY, MOA_AGRICULTURE_POLICY, WORLD_BANK_OIL_POLICY, BITSTAMP_BTC_POLICY)
 }

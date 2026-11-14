@@ -1,5 +1,6 @@
 """PostgreSQL persistence for normalized USD/ZMW observations (no raw payloads)."""
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Literal
@@ -108,3 +109,29 @@ def save_fx_quote(quote: FxQuote, *, engine: Engine | None = None) -> bool:
         retrieved_at=quote.retrieved_at, source=quote.source, source_url=quote.source_url, engine=engine,
     )
     return inserted == 1
+
+
+@dataclass(frozen=True)
+class LatestFxMid:
+    mid: Decimal
+    observed_at: datetime
+    retrieved_at: datetime
+    source: str
+    source_url: str
+
+
+_LATEST_MID = text(
+    """
+    SELECT mid, observed_at, retrieved_at, source, source_url FROM fx_rates
+    WHERE base_currency = 'USD' AND quote_currency = 'ZMW' AND source = 'boz'
+      AND buy IS NOT NULL AND mid IS NOT NULL AND sell IS NOT NULL
+    ORDER BY observed_at DESC LIMIT 1
+    """
+)
+
+
+def fetch_latest_fx_mid(*, engine: Engine | None = None) -> LatestFxMid | None:
+    """Newest complete stored BoZ USD/ZMW observation (read-only; never contacts BoZ). None when nothing is stored."""
+    with (engine or get_engine()).connect() as connection:
+        row = connection.execute(_LATEST_MID).mappings().first()
+    return None if row is None else LatestFxMid(**row)

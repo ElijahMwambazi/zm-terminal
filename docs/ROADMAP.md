@@ -16,7 +16,8 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - `OIL ZM`: derived monthly Brent-in-ZMW indicator (stored World Bank Brent monthly average x the mean of stored daily BoZ USD/ZMW mid-rate averages over the observed days; sparse BoZ months stay derivable and carry their day/observation counts; January 2026 is marked partial because the stored source begins on 22 January), stored-only API, UI and `OIL ZM` command; derived on request and never persisted; available only where both stored histories overlap (from January 2026)
 - Yield-curve spreads: four fixed derived published-tenor spreads (10Y-364D, 15Y-364D, 10Y-2Y, 15Y-91D; long yield minus short yield in basis points, with both endpoint auction dates and a mixed-vintage flag), stored-only API and `CURVE ZM` section. Only these four are done; no general curve analytics, interpretation or history exists
 - Zambia sovereign yield curve, modelled as the **derived published-auction-yield tenor curve**: the latest stored accepted BoZ T-bill (91D/182D/273D/364D) and Government-bond (2Y/3Y/5Y/7Y/10Y/15Y) auction yield per published tenor bucket at or before an as-of date, stored-only API, `CURVE ZM` / `YIELD CURVE ZM` view with an AS OF control; mixed auction vintages are shown, nothing is interpolated, fitted or bootstrapped, no maturity dates exist, and nothing is persisted
-- BTC provider discovery (`docs/research/btc-provider-discovery.md`): **Bitstamp BTC/USD spot preferred; approved for local implementation only after the unread Bitstamp Terms of Use are checked, public rights pending** (a Bitstamp Data License Agreement is stated for commercial use and unclear for public use). BTC/ZMW would be derived from Bitstamp BTC/USD and stored BoZ USD/ZMW; no direct BTC/ZMW source identified. Research only: no BTC code, table, route or UI exists
+- BTC provider discovery (`docs/research/btc-provider-discovery.md`): **Bitstamp BTC/USD spot preferred; approved for local implementation, public rights pending** (the owner chose to implement locally while the Bitstamp Terms of Use remain unread; see the research document's implementation decision update) (a Bitstamp Data License Agreement is stated for commercial use and unclear for public use). BTC/ZMW would be derived from Bitstamp BTC/USD and stored BoZ USD/ZMW; no direct BTC/ZMW source identified. Research only: no BTC code, table, route or UI exists
+- BTC/USD + live derived BTC/ZMW, **local/internal implementation**: Bitstamp BTC/USD SPOT (live last trade, stored completed daily OHLCV with a manual `backfill_btc` import and a conflict-detecting append-only table), indicative BTC/ZMW derived from Bitstamp BTC/USD and the latest stored BoZ USD/ZMW mid, `BTC` / `BTC USD` / `BTC ZMW` commands and market cards. Public display, API redistribution and commercial use remain `review_required` pending Bitstamp's written clarification or readable terms; historical BTC/ZMW is not implemented
 - Gold provider discovery (`docs/research/gold-provider-discovery.md`): **World Bank preferred; licence clarification pending.** World Bank Pink Sheet monthly `Gold` ($/troy oz) is the preferred source and IMF PCPS `PGOLD` the backup; LBMA/IBA and FRED rejected. Research only: no gold code, table, route or UI exists.
 
 
@@ -26,11 +27,12 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 ## Next
 - **1. Gold licence confirmation (blocker):** obtain World Bank written clarification for dataset 0038238 covering the monthly workbook, Gold, Brent and WTI (drafted, unsent: `docs/research/gold-provider-discovery.md` section 8); the Gold series also changed definition in June 2025
 - **2. `GOLD` vertical slice, only if that clarification permits it:** not approved and not started; no gold code until then
+- **Before any public deployment of Bitcoin data:** obtain Bitstamp's written clarification (or a Data License Agreement) for public display, API redistribution and commercial use; the Bitstamp email is drafted and unsent (`docs/research/btc-provider-discovery.md` section 7)
 - **Before public deployment:** confirm with data@worldbank.org that the World Bank Data Catalog licence (CC BY 4.0, dataset 0038238) applies to the monthly Pink Sheet workbook used for oil; `OIL ZM` inherits Brent as an input, so it must not be described as freely redistributable until then. Not a blocker for development or the code PR.
 
 ## Planned
 - `GOLD` / `GOLD ZM` once the World Bank (preferred) or IMF (backup) gold source is approved in writing; not started
-- BTC/USD + BTC/ZMW: local implementation may start once the Bitstamp Terms of Use have been read; public deployment waits for Bitstamp's written answer or a Data License Agreement; not started
+- Historical BTC/ZMW: a derived daily series on dates with actual stored BoZ observations (completed BTC/USD close x that date's mean stored BoZ mid; not before 2026-01-22; no weekend fill or interpolation; inputs not simultaneous), after the live slice has been reviewed
 - Copper
 - Further yield-curve analytics: historical spread charts, inversion interpretation, steepening/flattening, curvature, PCA, real-yield curves, term premium
 - `OIL ZM` versus ERB petrol/diesel comparisons (lagged comparisons or spreads); `OIL ZM` is not a pump price and is not combined with ERB fuel anywhere today
@@ -370,7 +372,7 @@ Any extracted observation must still pass source-specific validation before beco
 These phases do not override the existing `Next` or `Planned` sections.
 
 #### Phase A - current market-terminal roadmap
-Complete the remaining planned items: gold (source discovery done, licence confirmation pending), BTC, copper and `COMPARE` / `CHART` / `CORR` (agriculture, global oil, `OIL ZM` and the sovereign yield curve are done).
+Complete the remaining planned items: gold (source discovery done, licence confirmation pending), copper and `COMPARE` / `CHART` / `CORR` (agriculture, global oil, `OIL ZM` and the sovereign yield curve are done).
 
 #### Phase B - Zambia economic core
 Prioritise:
