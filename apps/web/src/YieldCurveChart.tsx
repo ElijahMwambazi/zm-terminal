@@ -1,5 +1,6 @@
 import { CURVE_TENORS, type CurvePoint, type CurveTenor } from "./api";
 import { formatDate, formatFixed } from "./format";
+import { curveScale } from "./yieldCurveScale";
 
 const W = 460, H = 270, LEFT = 40, RIGHT = 10, TOP = 30, BOTTOM = 32; // narrow viewBox keeps text legible when scaled to a phone
 const BILL = "#ffb000", BOND = "#7cc4ff";
@@ -12,11 +13,7 @@ const slotX = (index: number) => LEFT + ((index + 0.5) * (W - LEFT - RIGHT)) / C
  */
 export default function YieldCurveChart({ points, missing }: { points: CurvePoint[]; missing: CurveTenor[] }) {
   const numbers = points.map((p) => Number(p.yield_rate)); // drawing coordinates only; displayed values stay API strings
-  const low = Math.floor(Math.min(...numbers) - 0.5), high = Math.ceil(Math.max(...numbers) + 0.5);
-  const step = high - low <= 6 ? 1 : 2;
-  const ticks: number[] = [];
-  for (let t = low; t <= high; t += step) ticks.push(t);
-  const top = ticks[ticks.length - 1];
+  const { low, top, ticks } = curveScale(numbers);
   const y = (value: number) => TOP + ((top - value) * (H - TOP - BOTTOM)) / (top - low);
   const bySlot = new Map(points.map((p) => [CURVE_TENORS.indexOf(p.tenor), p]));
   const missingSet = new Set(missing);
