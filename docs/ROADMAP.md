@@ -41,7 +41,7 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 ## Planned
 - `GOLD` / `GOLD ZM` once the World Bank (preferred) or IMF (backup) gold source is approved in writing; not started
 - Rolling Copper-versus-kwacha sensitivity and regression only if justified, lead/lag research only if later approved, Zambian copper production/export research, and a generic cross-market `CORR` framework
-- Deeper BoZ USD/ZMW history: Copper analytics are constrained by stored BoZ history beginning in January 2026; before heavier statistical methods, investigate whether a defensible official BoZ historical FX source can extend the matched monthly history (not started)
+- Deeper BoZ USD/ZMW history: Copper analytics are constrained by stored BoZ history beginning in January 2026; before heavier statistical methods, investigate whether a defensible official BoZ historical FX source can extend the matched monthly history (research in progress: see docs/research/boz-deeper-fx-history.md; nothing implemented)
 - Further yield-curve analytics: historical spread charts, inversion interpretation, steepening/flattening, curvature, PCA, real-yield curves, term premium
 - `OIL ZM` versus ERB petrol/diesel comparisons (lagged comparisons or spreads); `OIL ZM` is not a pump price and is not combined with ERB fuel anywhere today
 - Cross-market `COMPARE` / `CHART` / `CORR` (after the underlying histories are stable)
