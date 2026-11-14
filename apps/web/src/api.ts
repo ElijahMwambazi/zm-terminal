@@ -350,11 +350,11 @@ export type OilZmPoint = {
   unit: "barrel";
   zmw_per_bbl: string;
   brent_usd_per_bbl: string;
-  usd_zmw_monthly_avg: string;
+  usd_zmw_observed_days_avg: string;
   fx_day_count: number;
   fx_observation_count: number;
-  /** partial_source_window: stored BoZ history begins after the first day of this month. observed_month does not mean complete. */
-  fx_coverage: "partial_source_window" | "observed_month";
+  /** partial_source_window: stored BoZ history begins during this month. observed_days: uses whatever stored days exist; asserts no completeness. */
+  fx_coverage: "partial_source_window" | "observed_days";
 };
 export type OilZmMonth = OilZmPoint & {
   methodology_id: string;

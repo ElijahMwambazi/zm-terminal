@@ -13,7 +13,7 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - Zambia agriculture source discovery (`docs/research/zambia-agriculture-sources.md`)
 - Ministry maize + soya national-average vertical slice (Layout B, Apr 2025-Jan 2026, stored API/history/UI and `AGRI` commands)
 - Global oil: Brent + WTI monthly averages from the World Bank Pink Sheet (catalog licence CC BY 4.0; applicability to the workbook still to be confirmed), stored API/history/UI and `OIL` commands (FRED/EIA daily spot was evaluated and set aside because it did not provide a sufficiently clear fit for ZM Terminal's persisted-history design)
-- `OIL ZM`: derived monthly Brent-in-ZMW indicator (stored World Bank Brent monthly average x monthly mean of daily BoZ USD/ZMW mid averages), stored-only API, UI and `OIL ZM` command; derived on request and never persisted; available only where both stored histories overlap (from January 2026)
+- `OIL ZM`: derived monthly Brent-in-ZMW indicator (stored World Bank Brent monthly average x the mean of stored daily BoZ USD/ZMW mid-rate averages over the observed days; sparse BoZ months stay derivable and carry their day/observation counts; January 2026 is marked partial because the stored source begins on 22 January), stored-only API, UI and `OIL ZM` command; derived on request and never persisted; available only where both stored histories overlap (from January 2026)
 
 ## Current
 - No active implementation branch after global oil.

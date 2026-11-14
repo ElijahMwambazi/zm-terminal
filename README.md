@@ -192,7 +192,7 @@ OIL WTI
 OIL ZM
 ```
 
-`OIL ZM` is a derived monthly indicator (World Bank Brent monthly average x monthly mean of daily BoZ USD/ZMW mid averages), computed from stored data only and labelled DERIVED; it is not an official series or a pump price. Future command ideas such as BTC, copper, macro, yield-curve and cross-market research commands are tracked in `docs/ROADMAP.md`.
+`OIL ZM` is a derived monthly indicator (World Bank Brent monthly average x the mean of stored daily BoZ USD/ZMW mid-rate averages over the stored observation days, not a full-month FX average), computed from stored data only and labelled DERIVED; it is not an official series or a pump price. Future command ideas such as BTC, copper, macro, yield-curve and cross-market research commands are tracked in `docs/ROADMAP.md`.
 
 ## Data-provider strategy
 

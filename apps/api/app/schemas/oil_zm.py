@@ -8,11 +8,15 @@ from app.schemas.fx import BOZ_SOURCE_URL
 from app.schemas.oil import OIL_SOURCE_PAGE_URL, OIL_STALE_AFTER_MONTHS, OilRange
 
 OIL_ZM_METHODOLOGY_ID = "oil_zm_v1"
-OIL_ZM_METHODOLOGY = "World Bank Brent monthly average × arithmetic mean of daily BoZ USD/ZMW mid averages"
+OIL_ZM_METHODOLOGY = ("World Bank Brent monthly average × arithmetic mean of daily BoZ USD/ZMW mid averages "
+                      "for stored observation days (each stored day weighted equally)")
 OIL_ZM_NOTICE = "Derived analytical value. Not a Zambia retail fuel price or an official published series."
-# partial_source_window: the stored BoZ history begins after the first calendar day of this month, so the month's FX
-# average covers only part of it. observed_month: every other month; this does NOT claim that every business day is present.
-FxCoverage = Literal["partial_source_window", "observed_month"]
+# partial_source_window: the stored BoZ machine-readable history begins during this calendar month (after its first day),
+#   so the observed-days average covers only the part of the month from that start.
+# observed_days: the calculation uses whatever stored BoZ observation days exist for the month. This does NOT assert full
+#   calendar or business-day coverage, and says nothing about how many days there are: read fx_day_count and
+#   fx_observation_count. Ordinary sparsity (few stored days) is deliberately not the same thing as partial_source_window.
+FxCoverage = Literal["partial_source_window", "observed_days"]
 
 
 class OilZmPoint(BaseModel):
@@ -26,7 +30,7 @@ class OilZmPoint(BaseModel):
     unit: Literal["barrel"] = "barrel"
     zmw_per_bbl: Decimal = Field(allow_inf_nan=False)  # unrounded product of the two components below
     brent_usd_per_bbl: Decimal = Field(allow_inf_nan=False)
-    usd_zmw_monthly_avg: Decimal = Field(allow_inf_nan=False)  # mean of per-day means of BoZ mid, ZMW per USD
+    usd_zmw_observed_days_avg: Decimal = Field(allow_inf_nan=False)  # mean of the per-day means of stored BoZ mid over the observed days, ZMW per USD (not a full-month average)
     fx_day_count: int
     fx_observation_count: int
     fx_coverage: FxCoverage

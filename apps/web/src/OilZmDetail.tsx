@@ -6,6 +6,7 @@ import type { OilZmState } from "./useOilZm";
 
 const zmw = (value: string) => `K${formatFixed(value, 2, true)}`;
 const usd = (value: string) => `$${formatFixed(value, 2, true)}`;
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const chartZmw = (value: number) => `K${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 /** Charts do not draw a marker per month beyond this many points (the line and all data are unchanged). */
 const MARKER_LIMIT = 250;
@@ -23,8 +24,11 @@ function Calculation({ m }: { m: OilZmMonth }) {
         <span className="badge-derived" title="ZM Terminal derived indicator, not an official series">DERIVED</span>
       </div>
       <p className="derived-calc">
-        {usd(m.brent_usd_per_bbl)} Brent × {formatFixed(m.usd_zmw_monthly_avg, 4)} ZMW/USD = {zmw(m.zmw_per_bbl)}/bbl
+        {usd(m.brent_usd_per_bbl)} Brent × {formatFixed(m.usd_zmw_observed_days_avg, 4)} ZMW/USD observed-days average = {zmw(m.zmw_per_bbl)}/bbl
         <small className="muted"> · shown rounded; computed from unrounded values</small>
+      </p>
+      <p className="derived-calc derived-support" aria-label="FX data support">
+        Based on {plural(m.fx_day_count, "stored BoZ day")} · {plural(m.fx_observation_count, "observation")}
       </p>
     </>
   );
@@ -72,16 +76,17 @@ const OilZmDetail = forwardRef<HTMLElement, { state: OilZmState; onRefresh: () =
               {m.stale && <p className="notice text-stale">Behind schedule: the newest derived month is more than {m.stale_after_months} calendar months before the current month (heuristic).</p>}
               {m.fx_coverage === "partial_source_window" && (
                 <p className="notice text-stale">
-                  Partial FX coverage: stored BoZ history begins on {formatDate(m.fx_first_date)}, after the first day of {formatMonth(m.period_start)}, so the FX average covers only part of the month.
+                  Partial source window: stored BoZ history begins on {formatDate(m.fx_first_date)}, after the first day of {formatMonth(m.period_start)}, so the observed-days average covers only the part of the month from that date.
                 </p>
               )}
               <ul className="provenance components" aria-label="Calculation components">
                 <li><span>Source month</span>{formatMonth(m.period_start)} ({formatDate(m.period_start)} to {formatDate(m.period_end)})</li>
                 <li><span>Brent</span>{usd(m.brent_usd_per_bbl)}/bbl · World Bank monthly average</li>
-                <li><span>USD/ZMW</span>{formatFixed(m.usd_zmw_monthly_avg, 4)} · BoZ mid, mean of daily averages</li>
-                <li><span>FX days used</span>{m.fx_day_count}</li>
-                <li><span>FX observations used</span>{m.fx_observation_count}</li>
-                <li><span>FX dates used</span>{formatDate(m.fx_first_date)} to {formatDate(m.fx_last_date)} (days without a stored BoZ observation are not filled)</li>
+                <li><span>BoZ USD/ZMW observed-days average</span>{formatFixed(m.usd_zmw_observed_days_avg, 4)} ZMW/USD</li>
+                <li><small className="muted">Mean of daily mid-rate averages across stored BoZ observation days, each day weighted equally. Days without a stored observation are not filled, and no coverage of the calendar month is asserted.</small></li>
+                <li><span>Stored BoZ days</span>{m.fx_day_count}</li>
+                <li><span>Observations</span>{m.fx_observation_count}</li>
+                <li><span>First / last observation</span>{formatDate(m.fx_first_date)} to {formatDate(m.fx_last_date)}</li>
               </ul>
               <ul className="provenance">
                 <li><span>Method</span>{m.methodology} ({m.methodology_id})</li>
@@ -117,12 +122,12 @@ const OilZmDetail = forwardRef<HTMLElement, { state: OilZmState; onRefresh: () =
               <>
                 <div className="table-scroll">
                   <table>
-                    <thead><tr><th>MONTH</th><th>BRENT $/bbl</th><th>USD/ZMW</th><th>ZMW/bbl</th><th>FX DAYS</th><th>FX OBS</th></tr></thead>
+                    <thead><tr><th>MONTH</th><th>BRENT $/bbl</th><th>USD/ZMW OBS-DAYS AVG</th><th>ZMW/bbl</th><th>BOZ DAYS</th><th>OBSERVATIONS</th></tr></thead>
                     <tbody>
                       {points.map((p) => (
                         <tr key={p.period_start}>
                           <td>{formatMonth(p.period_start)}{p.fx_coverage === "partial_source_window" && <span className="text-stale"> · partial</span>}</td>
-                          <td>{formatFixed(p.brent_usd_per_bbl, 2)}</td><td>{formatFixed(p.usd_zmw_monthly_avg, 4)}</td>
+                          <td>{formatFixed(p.brent_usd_per_bbl, 2)}</td><td>{formatFixed(p.usd_zmw_observed_days_avg, 4)}</td>
                           <td>{formatFixed(p.zmw_per_bbl, 2, true)}</td><td>{p.fx_day_count}</td><td>{p.fx_observation_count}</td>
                         </tr>
                       ))}
@@ -132,8 +137,8 @@ const OilZmDetail = forwardRef<HTMLElement, { state: OilZmState; onRefresh: () =
                 <p className="notice">
                   {points.length} derived months, {formatMonth(points[0].period_start)} to {formatMonth(points[points.length - 1].period_start)}. One point per month, plotted at the start of the month; the line only joins derived months and does not imply values for months without both inputs.
                   {history.status === "ready" && history.data.brent_months_without_fx > 0 && <> {history.data.brent_months_without_fx} stored Brent month(s) in this range have no stored BoZ USD/ZMW and are omitted (BoZ machine-readable history begins on 22 Jan 2026).</>}
-                  {partialMonths.length > 0 && <> Months marked partial use only the part of the month stored from BoZ.</>}
-                  {" "}A month with few FX days rests on few observations: see the FX DAYS column.
+                  {partialMonths.length > 0 && <> Months marked partial begin where the stored BoZ history begins.</>}
+                  {" "}Sparse months stay derivable: the BOZ DAYS and OBSERVATIONS columns show how much stored BoZ data supports each value, and no business-day completeness is claimed.
                 </p>
               </>
             )}

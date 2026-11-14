@@ -1,9 +1,9 @@
 """OIL ZM: a derived monthly indicator computed on request from stored data (nothing derived is persisted).
 
-    zmw_per_bbl = brent_usd_per_bbl * usd_zmw_monthly_avg
+    zmw_per_bbl = brent_usd_per_bbl * usd_zmw_observed_days_avg
 
 - brent_usd_per_bbl: the stored World Bank Pink Sheet Brent monthly average for the calendar month.
-- usd_zmw_monthly_avg: from the stored BoZ USD/ZMW `mid` observations (the same stored population the USD/ZMW history
+- usd_zmw_observed_days_avg (an observed-days average, never claimed to be a full-month average): from the stored BoZ USD/ZMW `mid` observations (the same stored population the USD/ZMW history
   shows). Observations are assigned to Africa/Lusaka calendar dates, each day's observations are averaged, and the
   month's value is the arithmetic mean of those daily means. Days are weighted equally, so a day with more intraday
   observations does not count more than one with fewer. Weekends, holidays and any day without a stored observation
@@ -84,9 +84,9 @@ def derive_oil_zm(brent: list[BrentMonth], fx: list[FxMid], *, today: date) -> t
                 month.period_start.year, month.period_start.month) and window_first.day > 1)
             months.append(OilZmMonth(
                 period_start=month.period_start, period_end=month.period_end,
-                zmw_per_bbl=_plain(month.value * monthly_fx), brent_usd_per_bbl=month.value, usd_zmw_monthly_avg=_plain(monthly_fx),
+                zmw_per_bbl=_plain(month.value * monthly_fx), brent_usd_per_bbl=month.value, usd_zmw_observed_days_avg=_plain(monthly_fx),
                 fx_day_count=len(days), fx_observation_count=len(observations),
-                fx_coverage="partial_source_window" if starts_inside_month else "observed_month",
+                fx_coverage="partial_source_window" if starts_inside_month else "observed_days",
                 fx_first_date=min(days), fx_last_date=max(days),
                 fx_first_observation=first.observed_at, fx_last_observation=last.observed_at,
                 brent_source_url=month.source_url, brent_publication_date=month.publication_date,
