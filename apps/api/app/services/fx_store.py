@@ -135,3 +135,34 @@ def fetch_latest_fx_mid(*, engine: Engine | None = None) -> LatestFxMid | None:
     with (engine or get_engine()).connect() as connection:
         row = connection.execute(_LATEST_MID).mappings().first()
     return None if row is None else LatestFxMid(**row)
+
+
+_BOZ_MIDS = text(
+    """
+    SELECT observed_at, mid FROM fx_rates
+    WHERE base_currency = 'USD' AND quote_currency = 'ZMW' AND source = 'boz'
+      AND buy IS NOT NULL AND mid IS NOT NULL AND sell IS NOT NULL
+      AND observed_at >= :since AND observed_at < :until
+    ORDER BY observed_at ASC
+    """
+)
+_BOZ_FIRST = text(
+    """
+    SELECT min(observed_at) FROM fx_rates
+    WHERE base_currency = 'USD' AND quote_currency = 'ZMW' AND source = 'boz'
+      AND buy IS NOT NULL AND mid IS NOT NULL AND sell IS NOT NULL
+    """
+)
+
+
+def fetch_boz_mid_observations(since: datetime, until: datetime, *, engine: Engine | None = None) -> list[tuple[datetime, Decimal]]:
+    """Complete stored BoZ USD/ZMW (observed_at, mid) rows with since <= observed_at < until, ascending. Read-only."""
+    with (engine or get_engine()).connect() as connection:
+        rows = connection.execute(_BOZ_MIDS, {"since": since, "until": until}).all()
+    return [(observed_at, mid) for observed_at, mid in rows]
+
+
+def fetch_first_boz_observation(*, engine: Engine | None = None) -> datetime | None:
+    """The earliest complete stored BoZ USD/ZMW observation, or None when there is none."""
+    with (engine or get_engine()).connect() as connection:
+        return connection.execute(_BOZ_FIRST).scalar()

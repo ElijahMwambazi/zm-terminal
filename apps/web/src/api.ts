@@ -577,3 +577,40 @@ export const getBtcZmwLatest = () => getBtcJson<BtcZmwQuote>("/api/v1/btc/zmw/la
   404: "No stored Bank of Zambia USD/ZMW observation to convert with",
   503: "Stored USD/ZMW observations are unavailable (database)",
 });
+
+/** One derived day (DERIVED historical BTC/ZMW): the completed Bitstamp UTC-day close x the mean of that Zambia date's stored
+ * BoZ mids. `date` is a calendar association, not a timestamp; the inputs are not simultaneous. The API does all arithmetic. */
+export type BtcZmwDailyPoint = {
+  classification: "derived";
+  derived: true;
+  date: string;
+  btc_zmw: string;
+  currency: "ZMW";
+  unit: "bitcoin";
+  btc_usd_close: string;
+  btc_source: "bitstamp";
+  btc_market: "BTC/USD";
+  btc_price_type: "daily_close";
+  btc_candle_open_at: string;
+  usd_zmw_daily_mid_avg: string;
+  fx_source: "boz";
+  fx_pair: "USDZMW";
+  fx_price: "daily_mid_average";
+  fx_observation_count: number;
+  fx_first_observation: string;
+  fx_last_observation: string;
+};
+export type BtcZmwHistory = {
+  classification: "derived";
+  derived: true;
+  range: BtcRange;
+  count: number;
+  btc_days_without_fx: number;
+  fx_stored_from: string | null; // first Africa/Lusaka date with stored BoZ USD/ZMW: the availability boundary
+  methodology_id: "btc_zmw_daily_v1";
+  methodology: string;
+  notice: string;
+  observations: BtcZmwDailyPoint[];
+};
+export const getBtcZmwHistory = (range: BtcRange) =>
+  getBtcJson<BtcZmwHistory>(`/api/v1/btc/zmw/history?range=${range}`, { 503: "Stored BTC/USD or USD/ZMW data is unavailable (database)" });
