@@ -1,3 +1,4 @@
+from datetime import date as date_type
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Annotated, Literal
@@ -112,3 +113,54 @@ class BtcZmwQuote(BaseModel):
     derived_stale: bool  # btc_stale or fx_stale; the individual states are always reported too
 
     _normalize = field_validator("btc_observed_at", "fx_observed_at", "derived_at")(_utc)
+
+
+BTC_ZMW_DAILY_METHODOLOGY_ID = "btc_zmw_daily_v1"
+BTC_ZMW_DAILY_METHODOLOGY = (
+    "btc_zmw = Bitstamp BTC/USD daily close (the completed UTC-day candle) x the arithmetic mean of all complete stored Bank of Zambia "
+    "USD/ZMW mid observations on the same Africa/Lusaka calendar date (Decimal, no rounding). Dates with no stored BoZ observation are "
+    "omitted: no forward-fill, interpolation or substitution."
+)
+BTC_ZMW_DAILY_NOTICE = (
+    "Derived daily analytical value using the completed Bitstamp BTC/USD UTC-day close and the arithmetic mean of stored Bank of Zambia "
+    "USD/ZMW mid observations on the corresponding Zambia calendar date. The two inputs are not simultaneous and this is not an "
+    "executable BTC/ZMW market price."
+)
+
+
+class BtcZmwDailyPoint(BaseModel):
+    """One derived day, reproducible from stored inputs. `date` is a calendar association, not a source timestamp."""
+
+    classification: Literal["derived"] = "derived"
+    derived: Literal[True] = True
+    date: date_type
+    btc_zmw: PlainDecimal = Field(allow_inf_nan=False)
+    currency: Literal["ZMW"] = "ZMW"
+    unit: Literal["bitcoin"] = "bitcoin"
+    btc_usd_close: PlainDecimal = Field(allow_inf_nan=False)  # the completed UTC-day close: not an average, VWAP or live price
+    btc_source: Literal["bitstamp"] = "bitstamp"
+    btc_market: Literal["BTC/USD"] = "BTC/USD"
+    btc_price_type: Literal["daily_close"] = "daily_close"
+    btc_candle_open_at: AwareDatetime
+    usd_zmw_daily_mid_avg: PlainDecimal = Field(allow_inf_nan=False)  # equal-weight mean of the day's stored BoZ mids
+    fx_source: Literal["boz"] = "boz"
+    fx_pair: Literal["USDZMW"] = "USDZMW"
+    fx_price: Literal["daily_mid_average"] = "daily_mid_average"
+    fx_observation_count: int
+    fx_first_observation: AwareDatetime
+    fx_last_observation: AwareDatetime
+
+    _normalize = field_validator("btc_candle_open_at", "fx_first_observation", "fx_last_observation")(_utc)
+
+
+class BtcZmwHistory(BaseModel):
+    classification: Literal["derived"] = "derived"
+    derived: Literal[True] = True
+    range: BtcRange
+    count: int
+    btc_days_without_fx: int  # stored BTC candles in the range dropped because no complete BoZ observation exists for that date
+    fx_stored_from: date_type | None  # first Africa/Lusaka date with a stored complete BoZ observation: the availability boundary
+    methodology_id: Literal["btc_zmw_daily_v1"] = BTC_ZMW_DAILY_METHODOLOGY_ID
+    methodology: str = BTC_ZMW_DAILY_METHODOLOGY
+    notice: str = BTC_ZMW_DAILY_NOTICE
+    observations: list[BtcZmwDailyPoint]

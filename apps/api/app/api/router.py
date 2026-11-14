@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import text
 
 from app.db import database_is_ready, get_engine
-from app.schemas.btc import BtcRange, BtcUsdHistory, BtcUsdQuote, BtcZmwQuote
+from app.schemas.btc import BtcRange, BtcUsdHistory, BtcUsdQuote, BtcZmwHistory, BtcZmwQuote
 from app.schemas.fx import FxHistory, FxQuote
 from app.schemas.agriculture import (
     AGRICULTURE_COMMODITIES, AgricultureCommodity, AgricultureHistory, AgricultureLatest, AgriculturePrice, AgricultureRange,
@@ -30,6 +30,7 @@ from app.services.boz import get_boz_fx_quote
 from app.services.bitstamp_btc import get_bitstamp_btc_quote
 from app.services.btc_store import fetch_btc_history
 from app.services.btc_zmw import InvalidStoredFxError, derive_btc_zmw
+from app.services.btc_zmw_history import InvalidHistoryInputError, fetch_btc_zmw_history
 from app.services.agriculture_store import fetch_agriculture_history, fetch_latest_agriculture
 from app.services.bond_store import BondConflictError, fetch_bond_history, save_bond_auctions
 from app.services.boz_bonds import get_boz_bonds, latest_per_tenor as latest_bonds, unverified_tenors
@@ -327,6 +328,19 @@ async def btc_zmw_latest() -> BtcZmwQuote:
     except ValueError as exc:  # anything else (for example a model validation error) is not an FX problem
         logger.error("BTC/ZMW derivation failed unexpectedly (%s)", type_name(exc))
         raise HTTPException(status_code=500, detail="BTC/ZMW derivation failed") from exc
+
+
+@router.get("/btc/zmw/history", response_model=BtcZmwHistory)
+async def btc_zmw_history(range: BtcRange = "1Y") -> BtcZmwHistory:
+    """Derived daily BTC/ZMW from STORED Bitstamp daily closes and STORED BoZ USD/ZMW only (no upstream request, nothing persisted)."""
+    try:
+        return await asyncio.to_thread(fetch_btc_zmw_history, range, now=datetime.now(timezone.utc))
+    except InvalidHistoryInputError as exc:
+        logger.warning("BTC/ZMW history rejected a stored input (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="A stored BTC/USD or USD/ZMW value is invalid") from exc
+    except Exception as exc:
+        logger.warning("BTC/ZMW history read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored BTC/ZMW history inputs unavailable") from exc
 
 
 @router.get("/agriculture/latest", response_model=AgricultureLatest)
