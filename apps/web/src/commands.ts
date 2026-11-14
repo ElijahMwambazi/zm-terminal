@@ -6,7 +6,8 @@ export type CommandResult =
     | { type: "open-fuel"; product: FuelProduct | null }
     | { type: "open-agriculture"; commodity: AgricultureCommodity | null }
     | { type: "open-oil"; benchmark: OilBenchmark | null }
-    | { type: "open-oil-zm" } }
+    | { type: "open-oil-zm" }
+    | { type: "open-yield-curve" } }
   | { ok: false; error: string };
 
 /** Normalized command text -> action. Add new commands here. */
@@ -33,6 +34,8 @@ const COMMANDS: Record<string, CommandResult & { ok: true }> = {
   "OIL BRENT": { ok: true, action: { type: "open-oil", benchmark: "BRENT" } },
   "OIL WTI": { ok: true, action: { type: "open-oil", benchmark: "WTI" } },
   "OIL ZM": { ok: true, action: { type: "open-oil-zm" } },
+  "CURVE ZM": { ok: true, action: { type: "open-yield-curve" } },
+  "YIELD CURVE ZM": { ok: true, action: { type: "open-yield-curve" } },
   "BOND ZM": { ok: true, action: { type: "open-bond", tenor: null } },
   "BOND 2Y": { ok: true, action: { type: "open-bond", tenor: "2Y" } },
   "BOND 3Y": { ok: true, action: { type: "open-bond", tenor: "3Y" } },

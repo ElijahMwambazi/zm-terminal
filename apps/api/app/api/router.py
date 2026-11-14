@@ -14,6 +14,7 @@ from app.schemas.agriculture import (
 )
 from app.schemas.oil import OIL_BENCHMARKS, OilBenchmark, OilHistory, OilLatest, OilObservation, OilRange
 from app.schemas.oil_zm import OilZmHistory, OilZmMonth
+from app.schemas.yield_curve import YieldCurve
 from app.schemas.fuel_buildup import BuildUpType, FuelBuildUp
 from app.schemas.fuel import FUEL_PRODUCTS, FuelHistory, FuelLatest, FuelPrice, FuelProduct, FuelRange, PriceType
 from app.schemas.bonds import (
@@ -34,6 +35,7 @@ from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_histor
 from app.services.tbill_store import TbillConflictError, fetch_tbill_history, save_tbill_auctions
 from app.services.oil_store import fetch_latest_oil, fetch_oil_history
 from app.services.oil_zm import fetch_oil_zm
+from app.services.yield_curve import fetch_yield_curve
 from app.services.provider_policy import PROVIDER_POLICIES, ProviderPolicy
 from app.services.openbb import get_openbb_coverage, openbb_is_ready
 
@@ -222,6 +224,37 @@ async def fuel_product(product: FuelProduct) -> FuelPrice:
     if not match:
         raise HTTPException(status_code=404, detail=f"No stored retail price for {product}")
     return match[0]
+
+
+async def _load_yield_curve(as_of: date) -> YieldCurve:
+    try:
+        curve = await asyncio.to_thread(fetch_yield_curve, as_of)
+    except Exception as exc:
+        logger.warning("Yield curve read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored auction data unavailable") from exc
+    if curve is None:
+        raise HTTPException(status_code=404, detail=f"No stored accepted BoZ auction observation on or before {as_of.isoformat()}")
+    return curve
+
+
+@router.get("/yield-curve/latest", response_model=YieldCurve)
+async def yield_curve_latest() -> YieldCurve:
+    """Derived snapshot as of Africa/Lusaka today: latest stored accepted observation per tenor (mixed auction vintages)."""
+    return await _load_yield_curve(_lusaka_today())
+
+
+@router.get("/yield-curve/as-of", response_model=YieldCurve)
+async def yield_curve_as_of(
+    date_: Annotated[str, Query(alias="date", pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")],
+) -> YieldCurve:
+    """Historical stored snapshot: each tenor's latest stored accepted observation on or before the (past or present) date."""
+    try:
+        as_of = date.fromisoformat(date_)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="date must be a valid calendar date (YYYY-MM-DD)") from exc
+    if as_of > _lusaka_today():
+        raise HTTPException(status_code=422, detail="date must not be in the future")
+    return await _load_yield_curve(as_of)
 
 
 @router.get("/agriculture/latest", response_model=AgricultureLatest)

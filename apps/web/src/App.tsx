@@ -7,6 +7,8 @@ import OilDetail, { perBarrel } from "./OilDetail";
 import { useOil } from "./useOil";
 import OilZmDetail from "./OilZmDetail";
 import { useOilZm } from "./useOilZm";
+import YieldCurveDetail from "./YieldCurveDetail";
+import { useYieldCurve } from "./useYieldCurve";
 import { formatDate, formatLusaka, formatMonth } from "./format";
 import { useFuel } from "./useFuel";
 import { useAgriculture } from "./useAgriculture";
@@ -38,11 +40,13 @@ export default function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [command, setCommand] = useState("");
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | "oil-zm" | null>(null);
+  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | "oil-zm" | "yield-curve" | null>(null);
   const [oilFocus, setOilFocus] = useState<OilBenchmark | null>(null);
   const [oilNavigationKey, setOilNavigationKey] = useState(0);
   const { state: oilState, refresh: refreshOil } = useOil();
   const { state: oilZmState, refresh: refreshOilZm } = useOilZm();
+  const { state: curveState, asOf: curveAsOf, setAsOf: setCurveAsOf, refresh: refreshCurve } = useYieldCurve();
+  const [curveNavigationKey, setCurveNavigationKey] = useState(0);
   const [fuelFocus, setFuelFocus] = useState<FuelProduct | null>(null);
   const { state: fuelState, refresh: refreshFuel } = useFuel();
   const [agricultureFocus, setAgricultureFocus] = useState<AgricultureCommodity | null>(null);
@@ -110,6 +114,12 @@ export default function App() {
     requestAnimationFrame(() => detailRef.current?.focus());
   };
 
+  const openYieldCurve = () => {
+    setCurveNavigationKey((value) => value + 1);
+    setDetail("yield-curve");
+    requestAnimationFrame(() => detailRef.current?.focus());
+  };
+
   const runCommand = () => {
     const result = parseCommand(command);
     if (!result.ok) return setCommandError(result.error);
@@ -121,6 +131,7 @@ export default function App() {
     else if (result.action.type === "open-fuel") openFuel(result.action.product);
     else if (result.action.type === "open-oil") openOil(result.action.benchmark);
     else if (result.action.type === "open-oil-zm") openOilZm();
+    else if (result.action.type === "open-yield-curve") openYieldCurve();
     else openAgriculture(result.action.commodity);
   };
 
@@ -266,6 +277,8 @@ export default function App() {
           <FuelDetail ref={detailRef} state={fuelState} focus={fuelFocus} onRefresh={refreshFuel} />
         ) : detail === "agriculture" ? (
           <AgricultureDetail ref={detailRef} state={agricultureState} focus={agricultureFocus} navigationKey={agricultureNavigationKey} onRefresh={refreshAgriculture} />
+        ) : detail === "yield-curve" ? (
+          <YieldCurveDetail ref={detailRef} state={curveState} asOf={curveAsOf} onAsOf={setCurveAsOf} navigationKey={curveNavigationKey} onRefresh={refreshCurve} />
         ) : detail === "oil-zm" ? (
           <OilZmDetail ref={detailRef} state={oilZmState} onRefresh={refreshOilZm} />
         ) : detail === "oil" ? (
@@ -277,7 +290,7 @@ export default function App() {
         ) : (
           <article className="panel">
             <div className="panel-heading"><span>WORKSPACE</span></div>
-            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, <code>OIL</code> for global Brent and WTI monthly benchmarks, or <code>OIL ZM</code> for the derived Brent-in-kwacha view.</p>
+            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, <code>OIL</code> for global Brent and WTI monthly benchmarks, <code>OIL ZM</code> for the derived Brent-in-kwacha view, or <code>CURVE ZM</code> for the sovereign auction yield curve.</p>
           </article>
         )}
 

@@ -2,7 +2,7 @@
 
 A personal, Zambia-first market intelligence terminal built with React, FastAPI, PostgreSQL, OpenBB and Docker.
 
-> Status: **active Zambia-first market terminal with multiple implemented vertical slices**: Bank of Zambia USD/ZMW, Treasury bills, Government bonds, stored fixed-income history, ERB fuel prices/build-ups, Ministry of Agriculture maize/soya national-average prices, global Brent/WTI monthly oil benchmarks (World Bank Pink Sheet), and the derived `OIL ZM` monthly Brent-in-kwacha indicator. The application deliberately does not display fabricated market prices. LuSE, BTC, copper, broader macro and other planned domains remain pending.
+> Status: **active Zambia-first market terminal with multiple implemented vertical slices**: Bank of Zambia USD/ZMW, Treasury bills, Government bonds, stored fixed-income history, ERB fuel prices/build-ups, Ministry of Agriculture maize/soya national-average prices, global Brent/WTI monthly oil benchmarks (World Bank Pink Sheet), the derived `OIL ZM` monthly Brent-in-kwacha indicator, and the derived Zambia sovereign auction-yield tenor curve. The application deliberately does not display fabricated market prices. LuSE, BTC, copper, broader macro and other planned domains remain pending.
 
 ## Goals
 
@@ -190,9 +190,11 @@ OIL
 OIL BRENT
 OIL WTI
 OIL ZM
+CURVE ZM
+YIELD CURVE ZM
 ```
 
-`OIL ZM` is a derived monthly indicator (World Bank Brent monthly average x the mean of stored daily BoZ USD/ZMW mid-rate averages over the stored observation days, not a full-month FX average), computed from stored data only and labelled DERIVED; it is not an official series or a pump price. Future command ideas such as BTC, copper, macro, yield-curve and cross-market research commands are tracked in `docs/ROADMAP.md`.
+`OIL ZM` is a derived monthly indicator (World Bank Brent monthly average x the mean of stored daily BoZ USD/ZMW mid-rate averages over the stored observation days, not a full-month FX average), computed from stored data only and labelled DERIVED; it is not an official series or a pump price. `CURVE ZM` / `YIELD CURVE ZM` open a derived Zambia sovereign auction-yield tenor curve: the latest stored accepted BoZ auction yield for each published T-bill and bond tenor at or before an as-of date, with mixed auction vintages shown; it is not an official BoZ curve and not a bootstrapped or fitted curve, and bond tenors are published buckets, not remaining maturities. Future command ideas such as BTC, copper, macro and cross-market research commands are tracked in `docs/ROADMAP.md`.
 
 ## Data-provider strategy
 
@@ -229,7 +231,7 @@ zm-terminal/
 
 The canonical sequencing lives in [`docs/ROADMAP.md`](docs/ROADMAP.md), while [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) records implemented behavior and known limitations.
 
-Current implemented domains are USD/ZMW, BoZ Treasury bills and Government bonds with stored history, ERB fuel prices/build-ups, Ministry maize/soya national-average prices, and global Brent/WTI monthly oil benchmarks (World Bank Pink Sheet, USD/bbl, stored and imported manually with `python -m app.jobs.backfill_oil --from 2025-01`; see `docs/CURRENT_STATE.md`). The derived `OIL ZM` view (stored-only; available from January 2026, where BoZ history begins) is implemented. The next planned item is the Zambia sovereign yield curve.
+Current implemented domains are USD/ZMW, BoZ Treasury bills and Government bonds with stored history, ERB fuel prices/build-ups, Ministry maize/soya national-average prices, and global Brent/WTI monthly oil benchmarks (World Bank Pink Sheet, USD/bbl, stored and imported manually with `python -m app.jobs.backfill_oil --from 2025-01`; see `docs/CURRENT_STATE.md`). The derived `OIL ZM` view (stored-only; available from January 2026, where BoZ history begins) is implemented. The derived Zambia sovereign auction-yield tenor curve is also implemented. The next planned item is gold provider discovery (licensing first).
 
 ## Development principles
 

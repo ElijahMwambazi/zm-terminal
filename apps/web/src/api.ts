@@ -392,3 +392,57 @@ export async function getOilZmLatest(): Promise<OilZmMonth | null> {
 }
 
 export const getOilZmHistory = (range: OilRange) => getOilJson<OilZmHistory>(`/api/v1/oil/zm/history?range=${range}`);
+
+export const CURVE_TENORS = ["91D", "182D", "273D", "364D", "2Y", "3Y", "5Y", "7Y", "10Y", "15Y"] as const;
+export type CurveTenor = (typeof CURVE_TENORS)[number];
+
+type CurvePointBase = {
+  tenor: CurveTenor; // the published BoZ tenor bucket exactly as stored; NOT a remaining maturity
+  tenor_order: number; // position in the fixed display sequence (categorical)
+  yield_rate: string; // percent per annum as published
+  yield_unit: "percent_per_annum_as_published";
+  auction_date: string;
+  tender_number: string;
+  isin: string;
+  source: "boz";
+  source_url: string;
+  age_days: number; // as_of minus auction_date
+};
+export type TreasuryBillCurvePoint = CurvePointBase & { instrument_type: "treasury_bill"; discount_rate: string };
+export type GovernmentBondCurvePoint = CurvePointBase & { instrument_type: "government_bond"; coupon_rate: string };
+export type CurvePoint = TreasuryBillCurvePoint | GovernmentBondCurvePoint;
+
+/** DERIVED snapshot: each tenor's latest stored accepted BoZ auction observation on or before as_of. The backend owns
+ * selection, age and vintage metadata; the UI only renders. Not an official BoZ curve, not fitted or interpolated. */
+export type YieldCurve = {
+  classification: "derived";
+  derived: true;
+  curve_type: "published_auction_yield_tenor_curve";
+  methodology: string;
+  notice: string;
+  as_of: string;
+  yield_unit: "percent_per_annum_as_published";
+  point_count: number;
+  missing_tenors: CurveTenor[];
+  oldest_point_date: string;
+  newest_point_date: string;
+  mixed_vintage: boolean;
+  vintage_span_days: number;
+  points: CurvePoint[];
+};
+
+/** asOf null = latest (Africa/Lusaka today). null result = no stored accepted observation on or before the date. */
+export async function getYieldCurve(asOf: string | null): Promise<YieldCurve | null> {
+  const path = asOf ? `/api/v1/yield-curve/as-of?date=${encodeURIComponent(asOf)}` : "/api/v1/yield-curve/latest";
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`);
+  } catch {
+    throw new ApiError("api", "ZM Terminal API is unreachable");
+  }
+  if (response.status === 404) return null;
+  if (response.status === 422) throw new ApiError("api", "That as-of date is not accepted (it must be a past or present date)");
+  if (response.status === 503) throw new ApiError("api", "Stored auction data is unavailable (database)");
+  if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
+  return response.json();
+}
