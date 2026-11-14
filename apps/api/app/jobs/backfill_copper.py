@@ -38,7 +38,10 @@ def parse_month(text: str) -> date:
     match = _MONTH.fullmatch(text)
     if not match:
         raise argparse.ArgumentTypeError("expected YYYY-MM")
-    return date(int(match.group(1)), int(match.group(2)), 1)
+    try:
+        return date(int(match.group(1)), int(match.group(2)), 1)
+    except ValueError as exc:  # year 0000 or month 00/13: a calendar error, not a traceback
+        raise argparse.ArgumentTypeError("expected a valid calendar month YYYY-MM") from exc
 
 
 async def run_import(

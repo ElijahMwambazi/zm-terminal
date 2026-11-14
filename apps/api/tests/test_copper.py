@@ -32,13 +32,13 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def make_payload(series=None, *, indicator="PCOPP", transformation="USD", frequency="M", country="G001", derivation=None, dataflow="IMF.RES:PCPS(9.0.0)"):
+def make_payload(series=None, *, indicator="PCOPP", transformation="USD", frequency="M", country="G001", derivation=None, dataflow="IMF.RES:PCPS(9.0.0)", scale_values=({"id": "0"},), scale_index=0):
     """The real IMF SDMX 3.0 shape: dimension values are lists of ids, observations are indexed into the TIME_PERIOD values."""
     series = series if series is not None else {"1992-M01": "2150.57962901611", "1992-M02": "2208.89225860596", "1992-M03": "2231.79"}
     periods = list(series)
     rows = {str(i): [series[p], None, 0 if derivation is None else derivation] for i, p in enumerate(periods)}
     return {"meta": {}, "data": {
-        "dataSets": [{"structure": 0, "action": "Replace", "series": {"0:0:0:0": {"attributes": [0, None, None], "observations": rows}}}],
+        "dataSets": [{"structure": 0, "action": "Replace", "series": {"0:0:0:0": {"attributes": [scale_index, None, None], "observations": rows}}}],
         "structures": [{
             "dataSets": [0],
             "links": [{"urn": f"urn:sdmx:org.sdmx.infomodel.datastructure.Dataflow={dataflow}", "title": "Dataflow"}],
@@ -49,7 +49,8 @@ def make_payload(series=None, *, indicator="PCOPP", transformation="USD", freque
                     {"id": "DATA_TRANSFORMATION", "keyPosition": 2, "values": [{"id": transformation}]},
                     {"id": "FREQUENCY", "keyPosition": 3, "values": [{"id": frequency}]}],
                 "observation": [{"id": "TIME_PERIOD", "keyPosition": 4, "values": [{"value": p} for p in periods]}]},
-            "attributes": {"observation": [{"id": "PRECISION", "values": []}, {"id": "DERIVATION_TYPE", "values": [{"id": "R"}, {"id": "SE"}]}]},
+            "attributes": {"series": [{"id": "SCALE", "values": list(scale_values)}, {"id": "DECIMAL_DISPLAYED", "values": []}, {"id": "OVERLAP", "values": []}],
+                           "observation": [{"id": "PRECISION", "values": []}, {"id": "DERIVATION_TYPE", "values": [{"id": "R"}, {"id": "SE"}]}]},
         }]}}
 
 
@@ -90,12 +91,92 @@ def test_malformed_periods_are_rejected(period):
         parse_copper_series(payload)
 
 
-@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "-5", "0", "0.00", "1e5", "1,000", "", " 12", "abc", "12.", ".5", None, 12.5, 12, True])
-def test_malformed_nonfinite_or_non_positive_values_are_rejected(value):
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "+Infinity", "1e5", "--5", "-", "-.5", "1,000", "", " 12", "abc", "12.", ".5", None, 12.5, 12, True])
+def test_malformed_or_nonfinite_values_are_rejected(value):
     payload = make_payload({"1992-M01": "100"})
     payload["data"]["dataSets"][0]["series"]["0:0:0:0"]["observations"]["0"][0] = value
     with pytest.raises(ImfCopperError):
         parse_copper_series(payload)
+
+
+@pytest.mark.parametrize("raw", ["14507.97", "0", "0.00", "-5", "-0.125", "100"])
+def test_any_finite_value_is_preserved_exactly_including_zero_and_negative(raw):
+    (month,) = parse_copper_series(make_payload({"1992-M01": raw}))
+    assert month.value == Decimal(raw) and str(month.value) == raw  # no quantization, no positivity assumption
+
+
+def struct(payload):
+    return payload["data"]["structures"][0]
+
+
+def series_of(payload):
+    return payload["data"]["dataSets"][0]["series"]["0:0:0:0"]
+
+
+def test_scale_zero_is_accepted_and_resolved_by_id_through_the_value_list():
+    assert len(parse_copper_series(make_payload())) == 3
+    # the attribute's value list is indexed: index 1 pointing at "0" is also scale zero
+    assert len(parse_copper_series(make_payload(scale_values=({"id": "3"}, {"id": "0"}), scale_index=1))) == 3
+
+
+@pytest.mark.parametrize("values,index", [
+    (({"id": "3"},), 0), (({"id": "-1"},), 0), (({"id": "abc"},), 0), (({"id": ""},), 0), (({"id": None},), 0), (({"id": "00"},), 0),
+    (({"id": 0},), 0), (({},), 0), ((None,), 0), (({"id": "0"},), 1), (({"id": "0"},), -1), (({"id": "0"},), True), (({"id": "0"},), None),
+    (({"id": "0"},), "0"), (({"id": "3"}, {"id": "0"}), 0)])
+def test_nonzero_missing_null_or_malformed_scale_is_rejected(values, index):
+    with pytest.raises(ImfCopperError, match="SCALE; expected 0"):
+        parse_copper_series(make_payload(scale_values=values, scale_index=index))
+
+
+def test_missing_scale_attribute_slot_or_definition_is_rejected():
+    payload = make_payload()
+    struct(payload)["attributes"]["series"] = [a for a in struct(payload)["attributes"]["series"] if a["id"] != "SCALE"]
+    with pytest.raises(ImfCopperError, match="SCALE"):
+        parse_copper_series(payload)
+    payload = make_payload()
+    series_of(payload)["attributes"] = []  # truncated series attribute list
+    with pytest.raises(ImfCopperError, match="SCALE"):
+        parse_copper_series(payload)
+    payload = make_payload()
+    del series_of(payload)["attributes"]
+    with pytest.raises(ImfCopperError, match="SCALE"):
+        parse_copper_series(payload)
+    payload = make_payload()
+    del struct(payload)["attributes"]["series"]
+    with pytest.raises(ImfCopperError):
+        parse_copper_series(payload)
+
+
+def test_scale_attribute_reordering_does_not_bypass_the_check():
+    payload = make_payload()
+    attrs = struct(payload)["attributes"]["series"]
+    attrs.reverse()  # SCALE is now position 2
+    series_of(payload)["attributes"] = [None, None, 0]
+    assert len(parse_copper_series(payload)) == 3
+    bad = make_payload(scale_values=({"id": "3"},))
+    struct(bad)["attributes"]["series"].reverse()
+    series_of(bad)["attributes"] = [None, None, 0]
+    with pytest.raises(ImfCopperError, match="SCALE"):
+        parse_copper_series(bad)
+    # a stale pointer at the old position must not be read as SCALE
+    stale = make_payload()
+    struct(stale)["attributes"]["series"].reverse()
+    series_of(stale)["attributes"] = [0, None, None]
+    with pytest.raises(ImfCopperError, match="SCALE"):
+        parse_copper_series(stale)
+
+
+def test_observation_level_scale_is_not_the_verified_contract():
+    payload = make_payload()
+    struct(payload)["attributes"]["observation"].append({"id": "SCALE", "values": [{"id": "0"}]})
+    with pytest.raises(ImfCopperError, match="SCALE"):
+        parse_copper_series(payload)
+
+
+def test_error_text_does_not_echo_the_payload():
+    with pytest.raises(ImfCopperError) as info:
+        parse_copper_series(make_payload({"1992-M01": "123456.789"}, scale_values=({"id": "3"},)))
+    assert "123456" not in str(info.value) and "PCOPP" not in str(info.value)
 
 
 def test_duplicate_months_are_rejected_not_resolved():
@@ -148,6 +229,63 @@ def test_observations_flagged_as_estimates_or_derived_values_are_refused():
     with pytest.raises(ImfCopperError):
         parse_copper_series(make_payload(derivation=1))  # DERIVATION_TYPE code index 1 = "SE" (staff estimate)
     assert len(parse_copper_series(make_payload(derivation=0))) == 3  # "R" raw data is accepted
+
+
+def raw_rows(payload):
+    return series_of(payload)["observations"]
+
+
+@pytest.mark.parametrize("slot", [None, 2, -1, 99, True, "0", 0.0, "R"])
+def test_missing_null_unknown_or_malformed_derivation_slot_is_rejected(slot):
+    payload = make_payload()
+    raw_rows(payload)["1"][2] = slot
+    with pytest.raises(ImfCopperError, match="DERIVATION_TYPE R"):
+        parse_copper_series(payload)  # a single bad observation fails the whole parse, never skipped
+
+
+def test_truncated_observation_rows_are_rejected():
+    for row in (["100"], ["100", None], []):
+        payload = make_payload({"1992-M01": "100"})
+        raw_rows(payload)["0"] = row
+        with pytest.raises(ImfCopperError):
+            parse_copper_series(payload)
+
+
+def test_missing_derivation_attribute_definition_is_rejected():
+    payload = make_payload()
+    struct(payload)["attributes"]["observation"] = [a for a in struct(payload)["attributes"]["observation"] if a["id"] != "DERIVATION_TYPE"]
+    with pytest.raises(ImfCopperError, match="DERIVATION_TYPE"):
+        parse_copper_series(payload)
+    payload = make_payload()
+    del struct(payload)["attributes"]["observation"]
+    with pytest.raises(ImfCopperError):
+        parse_copper_series(payload)
+
+
+def test_unknown_derivation_code_is_rejected_and_reordered_attributes_resolve_by_id():
+    payload = make_payload()
+    struct(payload)["attributes"]["observation"][1]["values"] = [{"id": "ZZ"}, {"id": "R"}]  # index 0 is now an unknown code
+    with pytest.raises(ImfCopperError):
+        parse_copper_series(payload)
+    payload = make_payload()
+    obs = struct(payload)["attributes"]["observation"]
+    obs.reverse()  # DERIVATION_TYPE first: its slot in a row is now 1, PRECISION's is 2
+    for row in raw_rows(payload).values():
+        row[1], row[2] = row[2], row[1]
+    assert len(parse_copper_series(payload)) == 3
+    payload2 = make_payload(derivation=1)
+    struct(payload2)["attributes"]["observation"].reverse()
+    for row in raw_rows(payload2).values():
+        row[1], row[2] = row[2], row[1]
+    with pytest.raises(ImfCopperError):
+        parse_copper_series(payload2)
+
+
+def test_one_non_raw_observation_among_many_fails_everything():
+    payload = make_payload()
+    raw_rows(payload)["2"][2] = 1
+    with pytest.raises(ImfCopperError):
+        parse_copper_series(payload)
 
 
 # ---------------- network adapter ----------------
@@ -365,9 +503,16 @@ def test_explicit_range_defaults_and_rejections():
 
 def test_cli_parsing_and_safe_errors(monkeypatch, capsys):
     from app.jobs import backfill_copper
-    for bad in ("2026-1", "202601", "2026-13", "2026-00", "x", "2026-01-01"):
-        with pytest.raises(Exception):
+    import argparse
+    for bad in ("2026-1", "202601", "2026-13", "2026-00", "x", "2026-01-01", "0000-01", "0000-12", " 1992-01", "1992-1-01"):
+        with pytest.raises(argparse.ArgumentTypeError):  # never a bare ValueError
             backfill_copper.parse_month(bad)
+    for bad in ("0000-01", "0000-12", "2026-13"):
+        with pytest.raises(SystemExit) as exit_info:
+            backfill_copper.main(["--from", bad])
+        assert exit_info.value.code == 2
+        err = capsys.readouterr().err
+        assert "usage:" in err and "Traceback" not in err and "ValueError" not in err
     assert backfill_copper.parse_month("1992-01") == date(1992, 1, 1)
 
     async def boom(*a, **k):
@@ -431,6 +576,14 @@ def test_pg_exact_decimal_persistence_provenance_and_idempotency(engine):
     assert row["source_definition"] == COPPER_SOURCE_DEFINITION and row["source_url"] == IMF_COPPER_URL and row["period_end"] == date(2026, 10, 31)
     assert row["retrieved_at"] == NOW
     assert not [x for x in cols if "raw" in x or "json" in x or "payload" in x or "publication" in x]  # no raw storage, no invented publication date
+
+
+def test_pg_zero_and_negative_parser_values_reach_the_store_exactly(engine):
+    parsed = parse_copper_series(make_payload({"2026-M01": "0", "2026-M02": "-12.5", "2026-M03": "0.000"}))
+    assert save_copper_months(parsed, source_url=IMF_COPPER_URL, retrieved_at=NOW, engine=engine) == (3, 0)
+    with engine.connect() as c:
+        rows = c.execute(text("SELECT period_start, value FROM global_copper_prices ORDER BY period_start")).all()
+    assert [r.value for r in rows] == [Decimal("0"), Decimal("-12.5"), Decimal("0")]
 
 
 def test_pg_conflict_rolls_back_the_whole_import_and_names_only_the_month(engine):

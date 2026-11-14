@@ -8,8 +8,15 @@ response is parsed in memory and never stored or logged.
 
 The parser is strict. It resolves dimensions and time periods by id/metadata (never by fragile numeric positions alone),
 requires exactly the verified series identity, and fails the whole import on anything unexpected: other dimension values,
-other indicators/transformations/frequencies, malformed periods or values, duplicate months, observations flagged as
-anything other than raw data. Values are exact Decimals from the published strings (never float, never quantized). A month
+other indicators/transformations/frequencies, a SCALE attribute that is not exactly 0 (no generic scaling is implemented),
+malformed periods or values, duplicate months, and any observation that does not explicitly carry DERIVATION_TYPE R.
+
+Raw-only governance: ZM Terminal currently ingests only IMF PCPS Copper observations explicitly marked "Raw data (no
+derivation)". Missing, null, truncated, unknown or non-R status fails the whole import. If the IMF later publishes a
+legitimate Copper observation under another status (for example an estimate or preliminary value) the importer
+intentionally fails and requires a source-policy review before ingestion; nothing here claims the IMF will do so.
+Values are any finite decimal the IMF publishes (positivity is not assumed as a source invariant; zero and negative values
+are preserved exactly). Values are exact Decimals from the published strings (never float, never quantized). A month
 the source does not publish is simply absent: nothing is interpolated, filled or invented. The source history is treated
 as potentially revisable by the storage layer (a changed stored month is a conflict).
 """
@@ -31,7 +38,7 @@ MAX_RESPONSE_BYTES = 2_000_000  # the real response is about 25 KB
 EXPECTED_DIMENSIONS = {"COUNTRY": "G001", "INDICATOR": "PCOPP", "DATA_TRANSFORMATION": "USD", "FREQUENCY": "M"}
 RAW_DERIVATION = "R"  # "Raw data (no derivation)"; any other code (estimate, projection, staff calculation) is refused
 _PERIOD = re.compile(r"([0-9]{4})-M(0[1-9]|1[0-2])")
-_DECIMAL = re.compile(r"[0-9]+(?:\.[0-9]+)?")
+_DECIMAL = re.compile(r"-?[0-9]+(?:\.[0-9]+)?")
 
 
 class ImfCopperError(ValueError):
@@ -92,6 +99,27 @@ def _list(value: object, what: str) -> list:
     return value
 
 
+def _require_scale_zero(attributes: dict, series: object) -> None:
+    """SCALE is a series attribute: resolve it by id through the attribute's value list; anything but exactly 0 fails."""
+    error = ImfCopperError("Unexpected Copper SCALE; expected 0")
+    if any(isinstance(a, dict) and a.get("id") == "SCALE" for a in _list(attributes.get("observation", []), "observation attributes")):
+        raise error  # an observation-level SCALE is not the verified contract
+    series_attrs = _list(attributes.get("series"), "series attributes")
+    positions = [i for i, a in enumerate(series_attrs) if isinstance(a, dict) and a.get("id") == "SCALE"]
+    if len(positions) != 1:
+        raise error
+    values = series_attrs[positions[0]].get("values")
+    chosen = _dict(series, "series").get("attributes")
+    if not isinstance(values, list) or not isinstance(chosen, list) or positions[0] >= len(chosen):
+        raise error
+    index = chosen[positions[0]]
+    if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(values):
+        raise error
+    value = values[index]
+    if not isinstance(value, dict) or value.get("id") != "0":
+        raise error
+
+
 def parse_copper_series(payload: object) -> list[CopperMonth]:
     """Validate the whole series and return it ascending by month; never partially returns."""
     data = _dict(_dict(payload, "root").get("data"), "data")
@@ -134,10 +162,13 @@ def parse_copper_series(payload: object) -> list[CopperMonth]:
     if not observations:
         raise ImfCopperError("The series has no observations")
 
-    obs_attrs = _list(_dict(structure.get("attributes"), "attributes").get("observation", []), "observation attributes")
+    attributes = _dict(structure.get("attributes"), "attributes")
+    _require_scale_zero(attributes, series)
+    obs_attrs = _list(attributes.get("observation"), "observation attributes")
     derivation_position = next((i for i, a in enumerate(obs_attrs) if isinstance(a, dict) and a.get("id") == "DERIVATION_TYPE"), None)
-    derivation_values = ([_dict(v, "attribute value").get("id") for v in _list(obs_attrs[derivation_position].get("values", []), "values")]
-                         if derivation_position is not None else [])
+    if derivation_position is None:
+        raise ImfCopperError("Missing DERIVATION_TYPE attribute; only raw (R) observations are ingested")
+    derivation_values = [_dict(v, "attribute value").get("id") for v in _list(obs_attrs[derivation_position].get("values"), "values")]
 
     months: dict[date, Decimal] = {}
     for key, row in observations.items():
@@ -151,15 +182,13 @@ def parse_copper_series(payload: object) -> list[CopperMonth]:
         if not row or not isinstance(row[0], str) or not _DECIMAL.fullmatch(row[0]):
             raise ImfCopperError("Invalid published decimal value")
         value = Decimal(row[0])
-        if not value.is_finite() or value <= 0:
-            raise ImfCopperError("Copper value must be a finite positive number")
-        if derivation_position is not None:
-            slot = derivation_position + 1  # position 0 of an observation row is the value itself
-            if slot < len(row) and row[slot] is not None:
-                index = row[slot]
-                code = derivation_values[index] if isinstance(index, int) and 0 <= index < len(derivation_values) else None
-                if code != RAW_DERIVATION:
-                    raise ImfCopperError("Observation is not raw data (estimate, projection or derived value)")
+        if not value.is_finite():
+            raise ImfCopperError("Copper value must be a finite number")
+        slot = derivation_position + 1  # position 0 of an observation row is the value itself
+        index = row[slot] if slot < len(row) else None
+        valid = isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(derivation_values)
+        if not valid or derivation_values[index] != RAW_DERIVATION:
+            raise ImfCopperError("Observation is not explicitly raw data (DERIVATION_TYPE R)")
         month = date(int(match.group(1)), int(match.group(2)), 1)
         if month in months:
             raise ImfCopperError("Duplicate month in the series")
