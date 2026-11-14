@@ -199,6 +199,28 @@ def test_a_break_resets_the_rolling_window(reason):
     assert len(rolling_correlation(eligible(6) + [reason] + eligible(6), 6)) == 2
 
 
+def test_rolling_window_with_zero_variance_stays_defined_with_a_null_coefficient():
+    # 12 consecutive eligible changes: Copper varies, FX is constant (every FX change is exactly 0)
+    levels = [(str(D(100) * D("1.01") ** i * (1 + D(i % 3) / 100)), "20") for i in range(13)]
+    r = analyse(series((2026, 2), levels), "ALL", "6M")
+    assert r.changes_used == 12 and r.full_sample.status == "zero_variance" and r.rolling_reason is None
+    assert len(r.rolling) == 7 and all(p.correlation is None and p.sample_size == 6 for p in r.rolling)
+    assert [p.window_end_month for p in r.rolling][0] == date(2026, 8, 1) and r.rolling[-1].window_end_month == date(2027, 2, 1)
+    dumped = r.model_dump(mode="json")["rolling"][0]
+    assert dumped == {"window_end_month": "2026-08-01", "correlation": None, "sample_size": 6}  # present, not dropped
+
+
+def test_mixed_defined_and_undefined_rolling_windows_are_all_returned():
+    steps = [D(0)] * 6 + [D("0.03"), D("-0.01"), D("0.02"), D("0.015")]  # FX flat for 6 changes, then moving
+    copper, fx, levels = D(100), D(20), [("100", "20")]
+    for i, st in enumerate(steps):
+        copper, fx = copper * (1 + D(i + 1) / 100 * (-1) ** i), fx * (1 + st)
+        levels.append((str(copper), str(fx)))
+    r = analyse(series((2026, 2), levels), "ALL", "6M")
+    assert len(r.rolling) == 5 and r.rolling[0].correlation is None and r.rolling[-1].correlation is not None
+    assert [p.correlation is None for p in r.rolling][0] and any(p.correlation is not None for p in r.rolling)
+
+
 def test_twelve_month_window_needs_twelve_changes_and_current_style_data_gives_none():
     assert rolling_correlation(eligible(11), 12) == []
     assert len(rolling_correlation(eligible(13), 12)) == 2

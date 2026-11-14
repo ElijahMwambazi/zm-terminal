@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ApiError, CORRELATION_WINDOWS, getCopperKwachaCorrelation, type CopperKwachaCorrelation, type CopperRange, type CorrelationWindow } from "./api";
 import AuctionChart from "./AuctionChart";
 import { formatMonth } from "./format";
+import { classifyRolling } from "./rollingView";
 
 type State =
   | { status: "loading" }
@@ -27,7 +28,7 @@ export default function CopperKwachaCorrelationSection({ range, reloadKey }: { r
 
   const d = state.status === "ready" ? state.data : null;
   const full = d?.full_sample;
-  const rolling = (d?.rolling ?? []).filter((p) => p.correlation !== null);
+  const view = classifyRolling(d?.rolling ?? []);  // every window stays; only numeric coefficients are plottable
 
   return (
     <section className="history-section" aria-label="Copper–Kwacha correlation">
@@ -57,25 +58,38 @@ export default function CopperKwachaCorrelationSection({ range, reloadKey }: { r
           </div>
           <p className="notice">Window = number of consecutive monthly change observations ({d.window_changes} changes need {d.window_changes + 1} consecutive monthly levels). A window never crosses a missing month, the partial FX month or an excluded change.</p>
           <div className="panel-heading"><span>ROLLING CORRELATION ({window})</span></div>
-          {rolling.length === 0 && <p className="notice">{d.rolling_reason ?? "No rolling windows are available for this range."}</p>}
-          {rolling.length === 1 && <p className="notice">Only one rolling window is available, so no line is drawn; see the table.</p>}
-          {rolling.length > 1 && (
+          {view.kind === "none" && <p className="notice">{d.rolling_reason ?? "Not enough consecutive eligible monthly changes yet."}</p>}
+          {view.kind === "all_undefined" && (
+            <p className="notice">Rolling windows exist for this range, but no coefficient can be plotted because Pearson r is undefined where one series has zero variance.</p>
+          )}
+          {view.kind === "mixed" && (
+            <p className="notice">{view.undefinedCount} window{view.undefinedCount === 1 ? "" : "s"} with an undefined coefficient (zero variance in one series) {view.undefinedCount === 1 ? "is" : "are"} omitted from the chart, not from the analysis; {view.undefinedCount === 1 ? "it is" : "they are"} listed in the table.</p>
+          )}
+          {view.numeric.length === 1 && <p className="notice">Only one numeric rolling coefficient is available, so no line is drawn; see the table.</p>}
+          {view.numeric.length > 1 && (
             <AuctionChart
-              points={rolling.map((p) => ({ auction_date: p.window_end_month, yield_rate: p.correlation as string }))}
+              points={view.numeric.map((p) => ({ auction_date: p.window_end_month, yield_rate: p.correlation as string }))}
               label={`Rolling ${window} Pearson correlation of monthly changes in Copper USD and USD/ZMW, between -1 and +1`}
               precision={3} formatPrice={(v) => v.toFixed(2)} monthly markers />
           )}
-          {rolling.length > 0 && (
-            <div className="table-scroll">
-              <table>
-                <thead><tr><th>END MONTH</th><th>PEARSON r</th><th>N</th></tr></thead>
-                <tbody>
-                  {rolling.map((p) => (
-                    <tr key={p.window_end_month}><td>{formatMonth(p.window_end_month)}</td><td>{r3(p.correlation as string)}</td><td>{p.sample_size}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {view.rows.length > 0 && (
+            <>
+              <div className="table-scroll">
+                <table>
+                  <thead><tr><th>END MONTH</th><th>PEARSON r</th><th>N</th></tr></thead>
+                  <tbody>
+                    {view.rows.map((p) => (
+                      <tr key={p.window_end_month}>
+                        <td>{formatMonth(p.window_end_month)}</td>
+                        <td>{p.correlation !== null ? r3(p.correlation) : <span className="text-stale">UNDEFINED</span>}</td>
+                        <td>{p.sample_size}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {view.undefinedCount > 0 && <p className="notice">UNDEFINED: Pearson r is undefined because one series has zero variance in this rolling window. It is not zero and does not mean there is no relationship.</p>}
+            </>
           )}
           <p className="notice">No significance test, strength label, regression or sensitivity is calculated. {d.methodology}</p>
         </>
