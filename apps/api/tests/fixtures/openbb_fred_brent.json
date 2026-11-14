@@ -1,8 +1,0 @@
-{
-  "results": [
-    {"date": "2026-10-29", "symbol": "DCOILBRENTEU", "commodity": "Crude Oil Prices: Brent - Europe", "price": 82.35, "unit": "Dollars per Barrel"},
-    {"date": "2026-10-30", "symbol": "DCOILBRENTEU", "commodity": "Crude Oil Prices: Brent - Europe", "price": 80.0, "unit": "Dollars per Barrel"},
-    {"date": "2026-11-02", "symbol": "DCOILBRENTEU", "commodity": "Crude Oil Prices: Brent - Europe", "price": 79.1, "unit": "Dollars per Barrel"}
-  ],
-  "provider": "fred"
-}

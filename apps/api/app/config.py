@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     erb_media_url: str = "https://www.erb.org.zm/wp-json/wp/v2/media"
     moa_media_url: str = "https://www.agriculture.gov.zm/wp-json/wp/v2/media"
     moa_ca_bundle: str = ""
+    worldbank_commodity_page_url: str = "https://www.worldbank.org/en/research/commodity-markets"
     cors_origins: str = "http://localhost:5173"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

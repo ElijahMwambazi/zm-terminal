@@ -6,7 +6,7 @@ export type OilState =
   | { status: "ready"; data: OilLatest }
   | { status: "error"; message: string };
 
-/** One live OpenBB/FRED read per load or explicit refresh; never polled. */
+/** Reads stored World Bank monthly prices (the API never calls the World Bank); `refresh` is an explicit re-read. */
 export function useOil() {
   const [state, setState] = useState<OilState>({ status: "loading" });
   const load = useCallback(() => {

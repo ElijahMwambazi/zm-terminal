@@ -152,7 +152,7 @@ export default function App() {
         <span><StatusDot ok={status?.api} /> API</span>
         <span><StatusDot ok={status?.database} /> POSTGRES</span>
         <span><StatusDot ok={status?.openbb} /> OPENBB</span>
-        <span className="status-note">v0.1 — USD/ZMW, BoZ fixed income, ERB fuel, Ministry agriculture averages, and global oil benchmarks</span>
+        <span className="status-note">v0.1 — USD/ZMW, BoZ fixed income, ERB fuel, Ministry agriculture averages, and global oil monthly benchmarks</span>
       </section>
 
       <section className="market-grid" aria-label="Market overview">
@@ -232,13 +232,13 @@ export default function App() {
         </button>
         <button type="button" className="market-card market-card--live" onClick={() => openOil("BRENT")}>
           <span className="market-label">BRENT</span>
-          {brent ? <strong>{perBarrel(brent.value)}</strong> : <strong>{oilState.status === "loading" ? "…" : "—"}</strong>}
+          {brent ? <strong className="market-value--long">{perBarrel(brent.value)}</strong> : <strong>{oilState.status === "loading" ? "…" : "—"}</strong>}
           <small>
-            {oilState.status === "loading" && "Loading Brent benchmark…"}
+            {oilState.status === "loading" && "Loading stored World Bank prices…"}
             {oilState.status === "error" && `${oilState.message}. No price is shown.`}
-            {oilState.status === "ready" && !brent && "No recent Brent observation"}
-            {brent && <>Global benchmark · FRED · {formatDate(brent.observed_date)}</>}
-            {brent && <><br /><span className="text-stale">{brent.stale ? "Stale: " : ""}Daily value, not a live quote</span></>}
+            {oilState.status === "ready" && !brent && "No stored World Bank Brent price"}
+            {brent && <>World Bank · {formatMonth(brent.period_start)} monthly</>}
+            {brent && <><br /><span className="text-stale">{brent.stale ? "Behind schedule: " : ""}Monthly average, not a live quote</span></>}
           </small>
         </button>
         {markets.map((market) => (
@@ -266,7 +266,7 @@ export default function App() {
         ) : (
           <article className="panel">
             <div className="panel-heading"><span>WORKSPACE</span></div>
-            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, or <code>OIL</code> for global Brent and WTI benchmarks.</p>
+            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, or <code>OIL</code> for global Brent and WTI monthly benchmarks.</p>
           </article>
         )}
 

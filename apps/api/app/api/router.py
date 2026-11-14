@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from typing import Annotated
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -12,9 +12,7 @@ from app.schemas.fx import FxHistory, FxQuote
 from app.schemas.agriculture import (
     AGRICULTURE_COMMODITIES, AgricultureCommodity, AgricultureHistory, AgricultureLatest, AgriculturePrice, AgricultureRange,
 )
-from app.schemas.oil import (
-    OIL_BENCHMARKS, OIL_SERIES, OilBenchmark, OilHistory, OilLatest, OilObservation, OilRange,
-)
+from app.schemas.oil import OIL_BENCHMARKS, OilBenchmark, OilHistory, OilLatest, OilObservation, OilRange
 from app.schemas.fuel_buildup import BuildUpType, FuelBuildUp
 from app.schemas.fuel import FUEL_PRODUCTS, FuelHistory, FuelLatest, FuelPrice, FuelProduct, FuelRange, PriceType
 from app.schemas.bonds import (
@@ -33,8 +31,7 @@ from app.services.fuel_buildup_store import fetch_build_up
 from app.services.fuel_store import fetch_fuel_history, fetch_latest_fuel
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, save_fx_quote
 from app.services.tbill_store import TbillConflictError, fetch_tbill_history, save_tbill_auctions
-from app.services.oil_store import OilConflictError, fetch_oil_history, save_oil_observations
-from app.services.openbb_oil import OIL_LATEST_WINDOW_DAYS, OIL_TIMEOUT_SECONDS, fetch_oil_series, is_stale
+from app.services.oil_store import fetch_latest_oil, fetch_oil_history
 from app.services.provider_policy import PROVIDER_POLICIES, ProviderPolicy
 from app.services.openbb import get_openbb_coverage, openbb_is_ready
 
@@ -268,55 +265,27 @@ async def agriculture_commodity(commodity: AgricultureCommodity) -> AgricultureP
     return match[0]
 
 
-async def _load_oil_latest(benchmarks: tuple[str, ...]) -> list[OilObservation]:
-    """Live OpenBB/FRED fetch of the recent window; newest observation per benchmark (none if the window is empty)."""
-    now = datetime.now(timezone.utc)
-    today = now.date()
-    try:
-        async with httpx.AsyncClient(timeout=OIL_TIMEOUT_SECONDS) as client:
-            fetched = await asyncio.gather(*(
-                fetch_oil_series(b, today - timedelta(days=OIL_LATEST_WINDOW_DAYS), today, client=client)
-                for b in benchmarks))
-    except httpx.TimeoutException as exc:
-        raise HTTPException(status_code=504, detail="Oil benchmark request timed out") from exc
-    except (httpx.HTTPError, ValueError) as exc:
-        logger.warning("Oil benchmark fetch failed (%s)", type_name(exc))
-        raise HTTPException(status_code=502, detail="Oil benchmark data unavailable or invalid") from exc
-    # Valid live data is still returned if storage fails. Each benchmark is its own atomic batch so one
-    # benchmark's conflict cannot block the other; only the benchmark and exception type are logged.
-    for benchmark, points in zip(benchmarks, fetched):
-        if not points:
-            continue
-        try:
-            await asyncio.to_thread(save_oil_observations, points, retrieved_at=now)
-        except OilConflictError:
-            logger.warning("%s oil persistence conflict; live data returned unsaved", benchmark)
-        except Exception as exc:
-            logger.warning("%s oil persistence failed (%s); live data returned unsaved", benchmark, type_name(exc))
-    observations = []
-    for points in fetched:
-        if points:
-            newest = points[-1]
-            series = OIL_SERIES[newest.benchmark]
-            observations.append(OilObservation(
-                **newest.model_dump(), name=series.name, series_id=series.series_id, source_url=series.source_url,
-                retrieved_at=now, stale=is_stale(newest.observed_date, today=today)))
-    return observations
+def _utc_today() -> date:
+    return datetime.now(timezone.utc).date()
 
 
 @router.get("/oil/latest", response_model=OilLatest)
 async def oil_latest() -> OilLatest:
-    """Newest Brent and WTI daily values (global benchmarks, USD per barrel) via OpenBB/FRED."""
-    observations = await _load_oil_latest(OIL_BENCHMARKS)
+    """Newest stored World Bank Pink Sheet month per benchmark (monthly averages, USD/bbl); the World Bank is never called here."""
+    try:
+        observations = await asyncio.to_thread(fetch_latest_oil, today=_utc_today())
+    except Exception as exc:
+        logger.warning("Oil read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored oil benchmarks unavailable") from exc
     have = {o.benchmark for o in observations}
     return OilLatest(observations=observations, missing_benchmarks=[b for b in OIL_BENCHMARKS if b not in have])
 
 
 @router.get("/oil/history", response_model=OilHistory)
 async def oil_history(benchmark: OilBenchmark = "BRENT", range: OilRange = "1Y") -> OilHistory:
-    """Stored observations only: OpenBB and FRED are never called here."""
+    """Stored months only, ascending; the World Bank is never called here."""
     try:
-        points = await asyncio.to_thread(fetch_oil_history, benchmark, range, today=datetime.now(timezone.utc).date())
+        points = await asyncio.to_thread(fetch_oil_history, benchmark, range, today=_utc_today())
     except Exception as exc:
         logger.warning("Oil history read failed (%s)", type_name(exc))
         raise HTTPException(status_code=503, detail="Stored oil benchmarks unavailable") from exc
@@ -325,10 +294,15 @@ async def oil_history(benchmark: OilBenchmark = "BRENT", range: OilRange = "1Y")
 
 @router.get("/oil/{benchmark}", response_model=OilObservation)
 async def oil_benchmark(benchmark: OilBenchmark) -> OilObservation:
-    observations = await _load_oil_latest((benchmark,))
-    if not observations:
-        raise HTTPException(status_code=404, detail=f"No recent {benchmark} observation published upstream")
-    return observations[0]
+    try:
+        observations = await asyncio.to_thread(fetch_latest_oil, today=_utc_today())
+    except Exception as exc:
+        logger.warning("Oil read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored oil benchmarks unavailable") from exc
+    match = [o for o in observations if o.benchmark == benchmark]
+    if not match:
+        raise HTTPException(status_code=404, detail=f"No stored World Bank monthly price for {benchmark}")
+    return match[0]
 
 
 @router.get("/providers", response_model=list[ProviderPolicy])

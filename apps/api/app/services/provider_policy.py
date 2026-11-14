@@ -118,31 +118,34 @@ MOA_AGRICULTURE_POLICY = ProviderPolicy(
     ),
 )
 
-FRED_OIL_POLICY = ProviderPolicy(
-    provider_id="fred",
-    dataset_id="fred_crude_oil_spot_prices",
-    name="Federal Reserve Bank of St. Louis (FRED), series published by the U.S. Energy Information Administration",
-    source_url="https://fred.stlouisfed.org/series/DCOILBRENTEU",
+WORLD_BANK_OIL_POLICY = ProviderPolicy(
+    provider_id="world_bank",
+    dataset_id="world_bank_pink_sheet_monthly_prices",
+    name="World Bank, Commodity Price Data (The Pink Sheet)",
+    source_url="https://www.worldbank.org/en/research/commodity-markets",
     classification="public_market_data",
     personal_data_expected=False,
-    authentication="api_key",
+    authentication="none",
     normalized_storage_allowed=True,
     raw_response_storage="disabled",
     attribution_required=True,
-    required_provenance=("source", "series_id", "source_url", "unit", "currency"),
-    required_timestamps=("observed_date", "retrieved_at"),
-    redistribution="review_required",
-    commercial_use="review_required",
+    required_provenance=("source", "source_series", "source_url", "unit", "currency"),
+    required_timestamps=("period_start", "period_end", "publication_date", "retrieved_at"),
+    redistribution="permitted",
+    commercial_use="permitted",
     request_guidance=(
-        "Through the OpenBB boundary only (fred provider, /commodity/price/spot; commodity brent=DCOILBRENTEU, "
-        "wti=DCOILWTICO; both USD per barrel, daily). Requires FRED_API_KEY on the OpenBB service. One request per "
-        "benchmark per user action (30-day window), 20 s timeout, no retries, no background polling. Manual bounded "
-        "backfill via app.jobs.backfill_oil. FRED/EIA publish with a lag of days; non-trading days have no value and "
-        "are never filled. Source terms (FRED API and EIA) were not reviewed in this release."
+        "Manual import only (python -m app.jobs.backfill_oil): one request for the official Commodity Markets page to "
+        "find the single monthly-workbook link, one download of CMO-Historical-Data-Monthly.xlsx (about 0.6 MB, 15 MB "
+        "cap, official HTTPS hosts only), 30 s timeout, no retries, no polling, nothing written to disk, API calls never "
+        "reach the World Bank. Only the Brent and WTI monthly-average columns ($/bbl) are read. Updated monthly (about "
+        "the 2nd business day); past months can be revised, which surfaces as a conflict. Licence: the World Bank Data "
+        "Catalog entry 'Commodity Prices - History and Projections' (dataset 0038238) states Creative Commons "
+        "Attribution 4.0 (CC BY 4.0), checked 2026-11-14; attribution is required. The workbook itself carries no licence "
+        "text and the Pink Sheet PDF footer reads 'Official Use Only'; confirm with data@worldbank.org if that matters."
     ),
 )
 
 # Keyed by dataset: one provider may publish several datasets.
 PROVIDER_POLICIES: dict[str, ProviderPolicy] = {
-    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY, ERB_FUEL_POLICY, MOA_AGRICULTURE_POLICY, FRED_OIL_POLICY)
+    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY, ERB_FUEL_POLICY, MOA_AGRICULTURE_POLICY, WORLD_BANK_OIL_POLICY)
 }

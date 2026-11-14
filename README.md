@@ -2,7 +2,7 @@
 
 A personal, Zambia-first market intelligence terminal built with React, FastAPI, PostgreSQL, OpenBB and Docker.
 
-> Status: **active Zambia-first market terminal with multiple implemented vertical slices**: Bank of Zambia USD/ZMW, Treasury bills, Government bonds, stored fixed-income history, ERB fuel prices/build-ups, Ministry of Agriculture maize/soya national-average prices, and global Brent/WTI oil benchmarks (pending live FRED verification). The application deliberately does not display fabricated market prices. LuSE, BTC, copper, `OIL ZM`, broader macro and other planned domains remain pending.
+> Status: **active Zambia-first market terminal with multiple implemented vertical slices**: Bank of Zambia USD/ZMW, Treasury bills, Government bonds, stored fixed-income history, ERB fuel prices/build-ups, Ministry of Agriculture maize/soya national-average prices, and global Brent/WTI monthly oil benchmarks (World Bank Pink Sheet). The application deliberately does not display fabricated market prices. LuSE, BTC, copper, `OIL ZM`, broader macro and other planned domains remain pending.
 
 ## Goals
 
@@ -228,7 +228,7 @@ zm-terminal/
 
 The canonical sequencing lives in [`docs/ROADMAP.md`](docs/ROADMAP.md), while [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) records implemented behavior and known limitations.
 
-Current implemented domains are USD/ZMW, BoZ Treasury bills and Government bonds with stored history, ERB fuel prices/build-ups, Ministry maize/soya national-average prices, and global Brent/WTI oil benchmarks (OpenBB/FRED; set `FRED_API_KEY` and run `docker compose up -d openbb`, see `docs/CURRENT_STATE.md`). The next planned item is the derived `OIL ZM` view.
+Current implemented domains are USD/ZMW, BoZ Treasury bills and Government bonds with stored history, ERB fuel prices/build-ups, Ministry maize/soya national-average prices, and global Brent/WTI monthly oil benchmarks (World Bank Pink Sheet, USD/bbl, stored and imported manually with `python -m app.jobs.backfill_oil --from 2025-01`; see `docs/CURRENT_STATE.md`). The next planned item is the derived `OIL ZM` view.
 
 ## Development principles
 

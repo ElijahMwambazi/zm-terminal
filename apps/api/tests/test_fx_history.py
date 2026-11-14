@@ -44,7 +44,7 @@ def test_providers_endpoint():
         ("boz", "boz_zmw_usd_daily_exchange_rates"), ("boz", "boz_treasury_bill_auction_results"),
         ("boz", "boz_government_bond_auction_results"), ("erb", "erb_zambia_fuel_prices"),
         ("moa", "moa_national_average_grain_prices"),
-            ("fred", "fred_crude_oil_spot_prices")]
+            ("world_bank", "world_bank_pink_sheet_monthly_prices")]
 
 
 # ---- range handling ----

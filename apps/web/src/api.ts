@@ -290,29 +290,34 @@ export async function getAgricultureHistory(
 
 export const OIL_BENCHMARKS = ["BRENT", "WTI"] as const;
 export type OilBenchmark = (typeof OIL_BENCHMARKS)[number];
-export const OIL_RANGES = ["1M", "3M", "1Y", "5Y", "ALL"] as const;
+export const OIL_RANGES = ["1Y", "3Y", "5Y", "ALL"] as const;
 export type OilRange = (typeof OIL_RANGES)[number];
 
-/** Global crude-oil benchmark, USD per barrel exactly as published. observed_date is a trading day (no time zone). */
+/** Global crude-oil benchmark: one calendar-month average in USD per barrel, exactly as the World Bank publishes it.
+ * Not a daily or live price; period_start/period_end are the first and last day of the month. */
 export type OilObservation = {
   benchmark: OilBenchmark;
   name: string;
-  observed_date: string;
+  description: string;
+  period_start: string;
+  period_end: string;
   value: string;
   currency: "USD";
   unit: "barrel";
-  source: "fred";
-  series_id: string;
+  source: "world_bank";
+  price_basis: "monthly_average";
+  source_series: string;
   source_url: string;
+  publication_date: string;
   retrieved_at: string;
   stale: boolean;
-  /** Backend heuristic threshold (calendar days); the UI displays it and never hardcodes it. */
-  stale_after_days: number;
+  /** Backend heuristic (calendar months behind the current month); the UI displays it and never hardcodes it. */
+  stale_after_months: number;
 };
 export type OilLatest = { observations: OilObservation[]; missing_benchmarks: OilBenchmark[] };
-export type OilPoint = { benchmark: OilBenchmark; observed_date: string; value: string };
+export type OilPoint = { benchmark: OilBenchmark; period_start: string; period_end: string; value: string };
 
-/** The shared getJson names the Bank of Zambia for 502/504, so oil uses its own error mapping. */
+/** Oil is read from storage only, so the shared getJson (which names the Bank of Zambia) is not used. */
 async function getOilJson<T>(path: string): Promise<T> {
   let response: Response;
   try {
@@ -320,8 +325,6 @@ async function getOilJson<T>(path: string): Promise<T> {
   } catch {
     throw new ApiError("api", "ZM Terminal API is unreachable");
   }
-  if (response.status === 504) throw new ApiError("upstream", "Oil benchmark provider timed out");
-  if (response.status === 502) throw new ApiError("upstream", "Oil benchmark data is unavailable or invalid (provider or OpenBB)");
   if (response.status === 503) throw new ApiError("api", "Stored oil benchmarks are unavailable (database)");
   if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
   return response.json();

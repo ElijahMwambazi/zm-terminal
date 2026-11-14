@@ -12,12 +12,13 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - ERB latest-month retail prices + fuel build-ups (monthly PDF discovery, strict text parsing, narrow OCR fallback, stored build-up API/UI)
 - Zambia agriculture source discovery (`docs/research/zambia-agriculture-sources.md`)
 - Ministry maize + soya national-average vertical slice (Layout B, Apr 2025-Jan 2026, stored API/history/UI and `AGRI` commands)
+- Global oil: Brent + WTI monthly averages from the World Bank Pink Sheet (CC BY 4.0), stored API/history/UI and `OIL` commands (FRED/EIA daily spot was evaluated and set aside on licensing/fit grounds)
 
 ## Current
-- **Global oil: Brent + WTI** is implemented on `feat/global-oil-benchmarks` (OpenBB/FRED, stored history, API, UI, `OIL` commands) and verified offline. Live verification with a real `FRED_API_KEY` is outstanding (blocked: key missing); it moves to Completed only once the live response shape and a first backfill are confirmed.
+- No active implementation branch after global oil.
 
 ## Next
-- **`OIL ZM`** (Brent converted at the BoZ USD/ZMW rate): derived view, only after the stored Brent history and BoZ FX semantics are confirmed stable. Not implemented.
+- **`OIL ZM`** (Brent converted at the BoZ USD/ZMW rate): derived view built on the stored monthly Brent history and BoZ FX. The monthly (not daily) Brent semantics must be shown explicitly, and a monthly average must not be paired with a different day's exchange rate without saying so. Not implemented.
 
 ## Planned
 - Zambia sovereign yield curve (needs the stored T-bill and bond history)

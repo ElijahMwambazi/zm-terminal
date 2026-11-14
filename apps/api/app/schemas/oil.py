@@ -1,54 +1,66 @@
+import calendar
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Literal, NamedTuple
 
-from pydantic import AwareDatetime, BaseModel, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, Field, field_validator, model_validator
 
 OilBenchmark = Literal["BRENT", "WTI"]
 OIL_BENCHMARKS: tuple[str, ...] = ("BRENT", "WTI")
-OilRange = Literal["1M", "3M", "1Y", "5Y", "ALL"]
-OIL_SOURCE = "fred"
-# Application heuristic, not a market-calendar or publisher rule: a daily series is "stale" when its newest
-# observation is more than this many calendar days old (allows weekends, holidays and publication timing).
-# The single source of truth; it is also returned in API responses so the UI never hardcodes it.
-OIL_STALE_AFTER_DAYS = 14
-OIL_SOURCE_UNIT = "Dollars per Barrel"  # FRED's units string; anything else is rejected, never converted
+OilRange = Literal["1Y", "3Y", "5Y", "ALL"]
+OIL_PROVIDER = "world_bank"
+OIL_SOURCE_NAME = "World Bank Commodity Price Data (The Pink Sheet)"
+OIL_SOURCE_PAGE_URL = "https://www.worldbank.org/en/research/commodity-markets"
+OIL_SOURCE_UNIT = "($/bbl)"  # the workbook's unit label; any other label is rejected, never converted
+# Application heuristic, not a publisher SLA: the Pink Sheet is updated monthly (about the 2nd business day), so the
+# newest published month is normally the previous calendar month. "Stale" means the newest stored month is more than
+# this many calendar months before the current month. The single source of truth; it is returned in API responses
+# so the UI never hardcodes it.
+OIL_STALE_AFTER_MONTHS = 2
 
 
 class OilSeries(NamedTuple):
     benchmark: str
     name: str
-    series_id: str  # FRED series, validated against openbb_fred's SERIES_MAP
-    openbb_commodity: str
-    source_url: str
+    description: str  # from the workbook's own "Description" sheet
+    source_series: str  # exact workbook column label
 
 
 OIL_SERIES: dict[str, OilSeries] = {
-    "BRENT": OilSeries("BRENT", "Brent crude oil (Europe)", "DCOILBRENTEU", "brent",
-                       "https://fred.stlouisfed.org/series/DCOILBRENTEU"),
-    "WTI": OilSeries("WTI", "WTI crude oil (Cushing, Oklahoma)", "DCOILWTICO", "wti",
-                     "https://fred.stlouisfed.org/series/DCOILWTICO"),
+    "BRENT": OilSeries("BRENT", "Brent crude oil", "Crude oil, U.K. Brent 38° API", "Crude oil, Brent"),
+    "WTI": OilSeries("WTI", "WTI crude oil", "Crude oil, U.S. West Texas Intermediate (WTI) 40° API", "Crude oil, WTI"),
 }
 
 
 class OilPoint(BaseModel):
-    """One published daily benchmark value. Negative values are valid (WTI, 2020-04-20)."""
+    """One published calendar-month average. period_start/period_end are the month's first and last day."""
 
     benchmark: OilBenchmark
-    observed_date: date  # the trading day the benchmark refers to (a date, not a timestamp)
+    period_start: date
+    period_end: date
     value: Decimal = Field(allow_inf_nan=False)
     currency: Literal["USD"] = "USD"
     unit: Literal["barrel"] = "barrel"
-    source: Literal["fred"] = "fred"
+    source: Literal["world_bank"] = "world_bank"
+    price_basis: Literal["monthly_average"] = "monthly_average"
+
+    @model_validator(mode="after")
+    def calendar_month(self) -> "OilPoint":
+        last = calendar.monthrange(self.period_start.year, self.period_start.month)[1]
+        if self.period_start.day != 1 or self.period_end != self.period_start.replace(day=last):
+            raise ValueError("Oil period must be exactly one calendar month")
+        return self
 
 
 class OilObservation(OilPoint):
     name: str
-    series_id: str
+    description: str
+    source_series: str
     source_url: str
+    publication_date: date
     retrieved_at: AwareDatetime
     stale: bool
-    stale_after_days: int = OIL_STALE_AFTER_DAYS
+    stale_after_months: int = OIL_STALE_AFTER_MONTHS
 
     @field_validator("retrieved_at")
     @classmethod
@@ -57,7 +69,7 @@ class OilObservation(OilPoint):
 
 
 class OilLatest(BaseModel):
-    """Newest live observation per benchmark; a benchmark with no recent upstream observation is listed as missing."""
+    """Newest stored month per benchmark; a benchmark with nothing stored is listed as missing."""
 
     observations: list[OilObservation]
     missing_benchmarks: list[OilBenchmark]
