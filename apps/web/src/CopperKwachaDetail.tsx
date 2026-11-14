@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useMemo, useState } from "react";
 import { ApiError, COPPER_RANGES, getCopperZmHistory, type CopperRange, type CopperZmHistory } from "./api";
 import CopperKwachaCorrelationSection from "./CopperKwachaCorrelation";
+import CopperKwachaSensitivitySection from "./CopperKwachaSensitivity";
 import CopperKwachaCompareChart, { type CompareSeries } from "./CopperKwachaCompareChart";
 import { rebaseTo100 } from "./compareIndex";
 import { formatFixed, formatMonth } from "./format";
@@ -119,6 +120,7 @@ const CopperKwachaDetail = forwardRef<HTMLElement, object>(function CopperKwacha
           </>
         )}
         <CopperKwachaCorrelationSection range={range} reloadKey={reloadKey} />
+        <CopperKwachaSensitivitySection range={range} reloadKey={reloadKey} />
       </div>
     </article>
   );

@@ -10,10 +10,12 @@ from sqlalchemy import create_engine, text
 
 from app.main import app
 from app.schemas.copper import COPPER_SOURCE_DEFINITION
-from app.schemas.copper_kwacha import CORR_METHODOLOGY_ID, SMALL_SAMPLE_WARNING
+from app.schemas.copper_kwacha import CORR_METHODOLOGY_ID, SENS_METHODOLOGY_ID, SMALL_SAMPLE_WARNING
 from app.schemas.copper_zm import CopperZmMonth
 from app.services import copper_kwacha
-from app.services.copper_kwacha import Change, analyse, build_changes, consecutive_months, pearson, rolling_correlation
+from app.services.copper_kwacha import (
+    Change, analyse, analyse_sensitivity, build_changes, consecutive_months, pearson, rolling_correlation, sensitivity_beta,
+)
 from app.services.copper_store import save_copper_months
 from app.services.imf_pcps import IMF_COPPER_URL, CopperMonth
 
@@ -389,3 +391,127 @@ def test_pg_nothing_is_persisted(engine):
     before = snap()
     copper_kwacha.fetch_copper_kwacha_correlation("ALL", "6M", today=TODAY, engine=engine)
     assert snap() == before and not list(Path(__file__).parents[3].joinpath("db/init").glob("012*"))
+
+
+# ======================= historical sensitivity (beta) =======================
+CX = [D(v) for v in ("0.01", "0.02", "0.03", "0.04", "0.05", "0.06")]
+
+
+def test_beta_perfect_proportional_negative_and_offset_are_exact():
+    assert sensitivity_beta(CX, [x * 2 for x in CX]) == D(2)
+    assert sensitivity_beta(CX, [x * D("-0.5") for x in CX]) == D("-0.5")
+    assert sensitivity_beta(CX, [x * 2 + D("0.007") for x in CX]) == D(2)  # a constant offset does not matter: mean-centred
+
+
+def test_beta_is_not_symmetric_and_matches_an_independent_calculation():
+    xs, ys = [D("0.01"), D("-0.02"), D("0.015"), D("0.03"), D("-0.005"), D("0.0")], [D("0.002"), D("0.001"), D("-0.004"), D("0.003"), D("0.0"), D("-0.001")]
+    n = len(xs); mx, my = sum(xs) / n, sum(ys) / n
+    expected = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
+    assert abs(sensitivity_beta(xs, ys) - expected) < D("1e-25")
+    assert sensitivity_beta(xs, ys) != sensitivity_beta(ys, xs)  # dependent = FX, explanatory = Copper
+    # scaling Copper changes by 100 (percent instead of fraction) divides beta by 100; scaling FX multiplies it
+    assert abs(sensitivity_beta([x * 100 for x in xs], ys) - sensitivity_beta(xs, ys) / 100) < D("1e-25")
+
+
+def test_constant_copper_is_undefined_but_constant_fx_with_varying_copper_is_exactly_zero():
+    assert sensitivity_beta([D("0.01")] * 6, CX) is None  # undefined, never 0 and never the FX variance as denominator
+    assert sensitivity_beta(CX, [D("0.02")] * 6) == D(0)  # valid: covariance 0, Copper variance nonzero
+    assert sensitivity_beta([D(1)], [D(1)]) is None and sensitivity_beta([], []) is None
+
+
+def test_repeating_decimal_constant_copper_changes_are_undefined_for_beta_too():
+    entries, _ = build_changes(series((2026, 2), [(c, f) for c, f in zip(THIRDS, ["20", "21", "19", "23", "22", "26", "24"])]))
+    assert len({e.copper for e in entries}) == 1
+    assert sensitivity_beta([e.copper for e in entries], [e.fx for e in entries]) is None
+    assert sensitivity_beta(CX, [D(1) / D(3)] * 6) == D(0)  # repeating-decimal constant FX: exactly zero, no spurious residue
+    r = analyse_sensitivity(series((2026, 2), [(c, f) for c, f in zip(THIRDS, ["20", "21", "19", "23", "22", "26", "24"])]), "ALL")
+    assert r.status == "zero_copper_variance" and r.beta is None and r.sample_size == 6 and "constant" in r.reason
+
+
+def test_near_constant_copper_is_not_suppressed_by_exact_detection():
+    near = [D("-0.6666666666666666666666666666666666666667")] * 5 + [D("-0.6666666666666666666666666666666666666666")]
+    b = sensitivity_beta(near, [D(i) / 100 for i in range(6)])
+    assert b is not None and b != 0 and b.is_finite()
+
+
+def test_sample_size_boundary_for_beta():
+    five = analyse_sensitivity(series((2026, 2), levels_with_known_changes(5)), "ALL")
+    six = analyse_sensitivity(series((2026, 2), levels_with_known_changes(6)), "ALL")
+    assert (five.status, five.beta, five.sample_size) == ("insufficient_sample", None, 5) and "6 eligible" in five.reason
+    assert six.status == "available" and six.sample_size == 6 and six.beta is not None and six.small_sample is True
+    assert analyse_sensitivity(series((2025, 1), levels_with_known_changes(12)), "ALL").small_sample is False
+    assert analyse_sensitivity([], "ALL").status == "insufficient_sample"
+
+
+def test_known_proportional_changes_give_beta_two_through_the_full_pipeline():
+    # FX changes are exactly twice the Copper changes in every month
+    copper, fx, levels = D(100), D(20), [("100", "20")]
+    for st in ("0.01", "0.02", "-0.015", "0.03", "0.005", "-0.01", "0.02"):
+        copper, fx = copper * (1 + D(st)), fx * (1 + D(st) * 2)
+        levels.append((str(copper), str(fx)))
+    r = analyse_sensitivity(series((2026, 2), levels), "ALL")
+    assert r.status == "available" and abs(r.beta - 2) < D("1e-30")  # Copper/FX levels are Decimal strings, no float anywhere
+
+
+def mixed_fixture():
+    return [mon(2026, 1, "100", "20", partial=True), mon(2026, 2, "101", "20.1"), mon(2026, 3, "103", "20.3"), mon(2026, 5, "104", "20.2"),
+            mon(2026, 6, "0", "20.4"), mon(2026, 7, "106", "20.5"), mon(2026, 8, "108", "20.4"), mon(2026, 9, "107", "20.6"), mon(2026, 10, "110", "20.5")]
+
+
+def test_sample_metadata_matches_the_correlation_exactly_on_gap_partial_and_nonpositive_inputs():
+    months = mixed_fixture()
+    c, b = analyse(months, "ALL", "6M"), analyse_sensitivity(months, "ALL")
+    assert (c.matched_months, c.candidate_changes, c.changes_used, c.changes_excluded_gap, c.changes_excluded_partial, c.changes_excluded_nonpositive) == \
+           (b.matched_months, b.candidate_changes, b.changes_used, b.changes_excluded_gap, b.changes_excluded_partial, b.changes_excluded_nonpositive)
+    assert (c.full_sample.first_change_month, c.full_sample.last_change_month, c.full_sample.sample_size) == (b.first_change_month, b.last_change_month, b.sample_size)
+    assert b.changes_excluded_gap == 1 and b.changes_excluded_partial == 1 and b.changes_excluded_nonpositive == 2  # the fixture really exercises all three
+    assert b.candidate_changes == b.changes_used + b.changes_excluded_gap + b.changes_excluded_partial + b.changes_excluded_nonpositive
+
+
+def test_beta_uses_only_the_two_inputs_not_the_derived_zmw_value():
+    a = series((2026, 2), levels_with_known_changes(7))
+    b = [m.model_copy(update={"zmw_per_mt": D("999.5")}) for m in a]
+    assert analyse_sensitivity(a, "ALL").model_dump() == analyse_sensitivity(b, "ALL").model_dump()
+    r = analyse_sensitivity(a, "ALL")
+    assert (r.dependent, r.explanatory, r.methodology_id) == ("usd_zmw_observed_days_avg", "copper_usd_per_mt", "copper_kwacha_beta_v1")
+    assert SENS_METHODOLOGY_ID == "copper_kwacha_beta_v1"
+
+
+def test_sensitivity_endpoint_defaults_422_503_and_no_significance_fields(monkeypatch):
+    seen = []
+    monkeypatch.setattr(router_module, "fetch_copper_kwacha_sensitivity", lambda r, today: seen.append(r) or analyse_sensitivity(series((2026, 2), levels_with_known_changes(8)), r))
+    body = client.get("/api/v1/copper/kwacha/sensitivity").json()
+    assert seen == ["ALL"] and body["status"] == "available" and isinstance(body["beta"], str) and body["small_sample"] is True
+    assert "kwacha per US dollar" in body["sign_note"] and "causal" in body["notice"] and "Fractional USD/ZMW" in body["units"]
+    assert not {"r_squared", "p_value", "t_stat", "intercept", "standard_error", "confidence_interval", "rolling"} & set(body)
+    assert client.get("/api/v1/copper/kwacha/sensitivity?range=3Y").status_code == 200 and seen[-1] == "3Y"
+    for bad in ("range=1M", "range=", "range=1y"):
+        assert client.get(f"/api/v1/copper/kwacha/sensitivity?{bad}").status_code == 422
+    monkeypatch.setattr(router_module, "fetch_copper_kwacha_sensitivity", lambda r, today: analyse_sensitivity([], r))
+    empty = client.get("/api/v1/copper/kwacha/sensitivity")
+    assert empty.status_code == 200 and empty.json()["beta"] is None and empty.json()["status"] == "insufficient_sample"
+    def boom(*a, **k):
+        raise RuntimeError("postgresql://u:SECRET@h/db")
+    monkeypatch.setattr(router_module, "fetch_copper_kwacha_sensitivity", boom)
+    response = client.get("/api/v1/copper/kwacha/sensitivity")
+    assert response.status_code == 503 and "SECRET" not in response.text
+
+
+def test_pg_sensitivity_matches_correlation_sample_and_persists_nothing(engine):
+    rows = []
+    for i in range(14):
+        y, m = 2025 + i // 12, i % 12 + 1
+        rows.append((y, m, str(D(8000) + D(i * 37 % 91)), str(D("17") + D(i * 13 % 17) / 10)))
+    put(engine, rows)
+    def snap():
+        with engine.connect() as c:
+            names = sorted(r[0] for r in c.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public'")))
+            return names, [c.execute(text(f'SELECT count(*) FROM "{n}"')).scalar() for n in names]
+    before = snap()
+    for rng in ("ALL", "1Y"):
+        s_ = copper_kwacha.fetch_copper_kwacha_sensitivity(rng, today=TODAY, engine=engine)
+        c_ = copper_kwacha.fetch_copper_kwacha_correlation(rng, "6M", today=TODAY, engine=engine)
+        assert (s_.matched_months, s_.candidate_changes, s_.changes_used, s_.first_change_month, s_.last_change_month) == \
+               (c_.matched_months, c_.candidate_changes, c_.changes_used, c_.full_sample.first_change_month, c_.full_sample.last_change_month)
+    assert copper_kwacha.fetch_copper_kwacha_sensitivity("ALL", today=TODAY, engine=engine).status == "available"
+    assert snap() == before

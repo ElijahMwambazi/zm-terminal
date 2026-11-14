@@ -9,6 +9,7 @@ A candidate change is eligible only if (precedence, one reason per pair so count
   2. partial:   either endpoint has fx_coverage = partial_source_window;
   3. nonpositive: any of the four endpoint levels is <= 0 (this is an analytical rule of this methodology only; the stored
      source values are never altered or rejected).
+Sensitivity (beta = Sxy / Sxx, x = Copper change, y = USD/ZMW change) is computed on exactly the same eligible sample.
 Pearson r uses Decimal at 40 significant digits (no float, no numpy). Zero variance means no coefficient (never a division by
 zero). A full-sample r needs at least 6 eligible paired changes. Rolling windows of 6 or 12 consecutive eligible CHANGES
 (7 or 13 consecutive valid monthly levels) never cross an ineligible change. No p-values, strength labels, R-squared or
@@ -22,7 +23,8 @@ from decimal import Decimal, localcontext
 from sqlalchemy.engine import Engine
 
 from app.schemas.copper_kwacha import (
-    CORRELATION_WINDOWS, MIN_FULL_SAMPLE, SMALL_SAMPLE_BELOW, CopperKwachaCorrelation, FullSample, RollingPoint,
+    CORRELATION_WINDOWS, MIN_FULL_SAMPLE, SMALL_SAMPLE_BELOW, CopperKwachaCorrelation, CopperKwachaSensitivity, FullSample,
+    RollingPoint,
 )
 from app.schemas.copper_zm import CopperZmMonth
 from app.services.copper_zm import fetch_copper_zm
@@ -42,6 +44,12 @@ def consecutive_months(earlier: date, later: date) -> bool:
     return (later.year * 12 + later.month) - (earlier.year * 12 + earlier.month) == 1
 
 
+def is_constant(values: list[Decimal]) -> bool:
+    """Exact Decimal equality of every value: zero variance is a property of the inputs, decided before any rounded mean
+    (a repeating Decimal such as -2/3 at 40 digits averaged and divided can differ slightly from the identical inputs)."""
+    return all(value == values[0] for value in values)
+
+
 def pearson(xs: list[Decimal], ys: list[Decimal]) -> Decimal | None:
     """Pearson product-moment correlation in Decimal; None when fewer than two pairs or either series has zero variance."""
     if len(xs) != len(ys) or len(xs) < 2:
@@ -49,7 +57,7 @@ def pearson(xs: list[Decimal], ys: list[Decimal]) -> Decimal | None:
     # Zero variance is known exactly when all analytical values are equal. Decide it here, before any mean: a repeating
     # Decimal (e.g. -2/3 rounded to 40 digits) averaged and divided can differ from the identical inputs by rounding and
     # would otherwise leave a spurious tiny variance (and r = 1).
-    if all(x == xs[0] for x in xs) or all(y == ys[0] for y in ys):
+    if is_constant(xs) or is_constant(ys):
         return None
     with localcontext() as context:
         context.prec = MATH_PRECISION
@@ -62,6 +70,24 @@ def pearson(xs: list[Decimal], ys: list[Decimal]) -> Decimal | None:
         sxy = sum(((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)), Decimal(0))
         r = sxy / (sxx * syy).sqrt()
         return max(Decimal(-1), min(Decimal(1), r))  # rounding at 40 digits can never push r outside [-1, 1]
+
+
+def sensitivity_beta(xs: list[Decimal], ys: list[Decimal]) -> Decimal | None:
+    """Historical sensitivity of y to x: Sxy / Sxx on mean-centred Decimal values (the 1/N factors cancel).
+    x = Copper USD fractional change, y = USD/ZMW fractional change. None when x has zero variance (never the y variance as
+    a substitute denominator). A constant y with varying x is a valid beta of exactly 0."""
+    if len(xs) != len(ys) or len(xs) < 2 or is_constant(xs):
+        return None
+    if is_constant(ys):
+        return Decimal(0)  # covariance is exactly zero; do not let a rounded mean of y leave a spurious residue
+    with localcontext() as context:
+        context.prec = MATH_PRECISION
+        n = Decimal(len(xs))
+        mean_x, mean_y = sum(xs, Decimal(0)) / n, sum(ys, Decimal(0)) / n
+        sxx = sum(((x - mean_x) ** 2 for x in xs), Decimal(0))
+        if sxx == 0:
+            return None
+        return sum(((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)), Decimal(0)) / sxx
 
 
 def build_changes(months: list[CopperZmMonth]) -> tuple[list[Change | str], int]:
@@ -117,9 +143,29 @@ def full_sample(used: list[Change]) -> FullSample:
     return FullSample(status="available", correlation=r, sample_size=n, first_change_month=first, last_change_month=last, small_sample=small)
 
 
-def analyse(months: list[CopperZmMonth], range_: str, window: str) -> CopperKwachaCorrelation:
+@dataclass(frozen=True)
+class Eligibility:
+    """The one eligible-change sample shared by correlation and sensitivity (same rules, same exclusion accounting)."""
+
+    entries: list[Change | str]
+    used: list[Change]
+    matched_months: int
+    candidate_changes: int
+    excluded_gap: int
+    excluded_partial: int
+    excluded_nonpositive: int
+
+
+def eligibility(months: list[CopperZmMonth]) -> Eligibility:
     entries, candidates = build_changes(months)
     used = [e for e in entries if isinstance(e, Change)]
+    count = lambda reason: sum(1 for e in entries if e == reason)  # noqa: E731
+    return Eligibility(entries, used, len(months), candidates, count("gap"), count("partial"), count("nonpositive"))
+
+
+def analyse(months: list[CopperZmMonth], range_: str, window: str) -> CopperKwachaCorrelation:
+    sample = eligibility(months)
+    entries, candidates, used = sample.entries, sample.candidate_changes, sample.used
     count = lambda reason: sum(1 for e in entries if e == reason)  # noqa: E731
     size = CORRELATION_WINDOWS[window]
     rolling = rolling_correlation(entries, size)
@@ -134,3 +180,29 @@ def fetch_copper_kwacha_correlation(range_: str, window: str, *, today: date, en
     """Stored data only: the same matched months as COPPER ZM for the range."""
     months, _ = fetch_copper_zm(range_, today=today, engine=engine)
     return analyse(months, range_, window)
+
+
+def analyse_sensitivity(months: list[CopperZmMonth], range_: str) -> CopperKwachaSensitivity:
+    """Full-sample historical sensitivity (beta) on exactly the sample the correlation uses."""
+    sample = eligibility(months)
+    used = sample.used
+    n = len(used)
+    first, last = (used[0].end_month, used[-1].end_month) if used else (None, None)
+    common = dict(
+        range=range_, matched_months=sample.matched_months, candidate_changes=sample.candidate_changes, changes_used=n,
+        changes_excluded_gap=sample.excluded_gap, changes_excluded_partial=sample.excluded_partial,
+        changes_excluded_nonpositive=sample.excluded_nonpositive, first_change_month=first, last_change_month=last, sample_size=n)
+    if n < MIN_FULL_SAMPLE:
+        return CopperKwachaSensitivity(**common, status="insufficient_sample", small_sample=n < SMALL_SAMPLE_BELOW,
+                                       reason=f"At least {MIN_FULL_SAMPLE} eligible monthly changes are needed; {n} available.")
+    beta = sensitivity_beta([c.copper for c in used], [c.fx for c in used])
+    if beta is None:
+        return CopperKwachaSensitivity(**common, status="zero_copper_variance", small_sample=n < SMALL_SAMPLE_BELOW,
+                                       reason="The Copper change series is constant, so a sensitivity to Copper changes is undefined.")
+    return CopperKwachaSensitivity(**common, status="available", beta=beta, small_sample=n < SMALL_SAMPLE_BELOW)
+
+
+def fetch_copper_kwacha_sensitivity(range_: str, *, today: date, engine: Engine | None = None) -> CopperKwachaSensitivity:
+    """Stored data only: the same matched months as COPPER ZM (and the correlation) for the range."""
+    months, _ = fetch_copper_zm(range_, today=today, engine=engine)
+    return analyse_sensitivity(months, range_)
