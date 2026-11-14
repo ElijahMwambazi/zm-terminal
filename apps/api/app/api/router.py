@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from app.db import database_is_ready, get_engine
 from app.schemas.btc import BtcRange, BtcUsdHistory, BtcUsdQuote, BtcZmwHistory, BtcZmwQuote
+from app.schemas.copper import CopperHistory, CopperLatest, CopperRange
 from app.schemas.fx import FxHistory, FxQuote
 from app.schemas.agriculture import (
     AGRICULTURE_COMMODITIES, AgricultureCommodity, AgricultureHistory, AgricultureLatest, AgriculturePrice, AgricultureRange,
@@ -39,6 +40,7 @@ from app.services.fuel_buildup_store import fetch_build_up
 from app.services.fuel_store import fetch_fuel_history, fetch_latest_fuel
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, fetch_latest_fx_mid, save_fx_quote
 from app.services.tbill_store import TbillConflictError, fetch_tbill_history, save_tbill_auctions
+from app.services.copper_store import fetch_copper_history, fetch_latest_copper
 from app.services.oil_store import fetch_latest_oil, fetch_oil_history
 from app.services.oil_zm import fetch_oil_zm
 from app.services.yield_curve import fetch_yield_curve
@@ -384,6 +386,30 @@ async def agriculture_commodity(commodity: AgricultureCommodity) -> AgricultureP
     if not match:
         raise HTTPException(status_code=404, detail=f"No stored Ministry national-average price for {commodity}")
     return match[0]
+
+
+@router.get("/copper/latest", response_model=CopperLatest)
+async def copper_latest() -> CopperLatest:
+    """Latest stored monthly IMF Copper benchmark (nominal USD per metric ton, a monthly average, not a live price); the IMF is never called here.
+
+    Nothing stored yet is a deliberate structured empty state: HTTP 200 with observation null."""
+    try:
+        observation = await asyncio.to_thread(fetch_latest_copper, today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("Copper read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored copper benchmark unavailable") from exc
+    return CopperLatest(observation=observation)
+
+
+@router.get("/copper/history", response_model=CopperHistory)
+async def copper_history(range: CopperRange = "5Y") -> CopperHistory:
+    """Stored months only, ascending; months the IMF did not publish stay absent and the IMF is never called here."""
+    try:
+        points = await asyncio.to_thread(fetch_copper_history, range, today=_lusaka_today())
+    except Exception as exc:
+        logger.warning("Copper history read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored copper benchmark unavailable") from exc
+    return CopperHistory(range=range, count=len(points), observations=points)
 
 
 @router.get("/oil/latest", response_model=OilLatest)

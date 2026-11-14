@@ -177,7 +177,37 @@ BITSTAMP_BTC_POLICY = ProviderPolicy(
     ),
 )
 
+IMF_COPPER_POLICY = ProviderPolicy(
+    provider_id="imf",
+    dataset_id="imf_pcps_copper",
+    name="International Monetary Fund, Primary Commodity Prices",
+    source_url="https://data.imf.org/en/datasets/IMF.RES:PCPS",
+    classification="public_market_data",
+    personal_data_expected=False,
+    authentication="none",
+    normalized_storage_allowed=True,
+    raw_response_storage="disabled",
+    attribution_required=True,
+    required_provenance=("source", "source_series", "source_definition", "source_url", "unit", "currency"),
+    required_timestamps=("period_start", "period_end", "retrieved_at"),
+    redistribution="review_required",
+    commercial_use="review_required",
+    request_guidance=(
+        "Local/internal implementation. Manual import only (python -m app.jobs.backfill_copper): one request for exactly "
+        "the monthly series G001.PCOPP.USD.M on api.imf.org (HTTPS only, no key, 30 s timeout, response-size cap, "
+        "Content-Type check, no redirects, no retries, no polling, no bulk dataset download); the response is parsed in memory "
+        "and no raw response is stored. API calls never reach the IMF. Monthly average, nominal US dollars per metric ton; the "
+        "IMF defines the series as copper, grade A cathode, LME spot price, CIF European ports. The source history may be "
+        "revised, so a changed stored month is a conflict, never an overwrite. Attribution is required: \"Source: "
+        "International Monetary Fund, Primary Commodity Price System\" with a link to the dataset, and any material "
+        "transformation must be stated. Public display, API redistribution, commercial use and public derived use remain "
+        "review_required: the IMF's statistical-data terms name Primary Commodity Prices and permit reuse with attribution, "
+        "commercial reuse is referred to copyright@imf.org, and whether the underlying LME origin adds downstream "
+        "restrictions is unresolved (docs/research/copper-provider-discovery.md); the IMF clarification email is unsent."
+    ),
+)
+
 # Keyed by dataset: one provider may publish several datasets.
 PROVIDER_POLICIES: dict[str, ProviderPolicy] = {
-    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY, ERB_FUEL_POLICY, MOA_AGRICULTURE_POLICY, WORLD_BANK_OIL_POLICY, BITSTAMP_BTC_POLICY)
+    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY, ERB_FUEL_POLICY, MOA_AGRICULTURE_POLICY, WORLD_BANK_OIL_POLICY, BITSTAMP_BTC_POLICY, IMF_COPPER_POLICY)
 }
