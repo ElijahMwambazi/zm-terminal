@@ -26,13 +26,14 @@ const formatChartPrice = (value: number) => `K${value.toFixed(2)}`;
 const AgricultureDetail = forwardRef<HTMLElement, {
   state: AgricultureState;
   focus: AgricultureCommodity | null;
+  navigationKey: number;
   onRefresh: () => void;
-}>(function AgricultureDetail({ state, focus, onRefresh }, ref) {
+}>(function AgricultureDetail({ state, focus, navigationKey, onRefresh }, ref) {
   const [commodity, setCommodity] = useState<AgricultureCommodity>(focus ?? "MAIZE");
   const [range, setRange] = useState<AgricultureRange>("ALL");
   const [history, setHistory] = useState<History>({ status: "loading" });
 
-  useEffect(() => { if (focus) setCommodity(focus); }, [focus]);
+  useEffect(() => { if (focus) setCommodity(focus); }, [focus, navigationKey]);
   useEffect(() => {
     let cancelled = false;
     setHistory({ status: "loading" });
