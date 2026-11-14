@@ -20,6 +20,7 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - BTC/USD + live derived BTC/ZMW, **local/internal implementation**: Bitstamp BTC/USD SPOT (live last trade, stored completed daily OHLCV with a manual `backfill_btc` import and a conflict-detecting append-only table), indicative BTC/ZMW derived from Bitstamp BTC/USD and the latest stored BoZ USD/ZMW mid, `BTC` / `BTC USD` / `BTC ZMW` commands and market cards. Public display, API redistribution and commercial use remain `review_required` pending Bitstamp's written clarification or readable terms
 - Historical derived BTC/ZMW (`GET /api/v1/btc/zmw/history`, `btc_zmw_daily_v1`), **local/internal**: computed on request from stored Bitstamp daily closes and stored BoZ USD/ZMW only (completed UTC-day close x the arithmetic mean of that Africa/Lusaka date's stored BoZ mids); dates without a BoZ observation are omitted and counted (no forward-fill or interpolation); nothing is persisted and there is no migration; the first derived date is set by the stored BoZ history (2026-01-22 locally); shown as a `DERIVED DAILY HISTORY` section of the `BTC ZMW` view. The inputs are not simultaneous and the series is not a live quote or an executable price; public rights remain `review_required`
 - Gold provider discovery (`docs/research/gold-provider-discovery.md`): **World Bank preferred; licence clarification pending.** World Bank Pink Sheet monthly `Gold` ($/troy oz) is the preferred source and IMF PCPS `PGOLD` the backup; LBMA/IBA and FRED rejected. Research only: no gold code, table, route or UI exists.
+- Copper provider discovery (`docs/research/copper-provider-discovery.md`): **IMF PCPS `PCOPP` preferred** (monthly average, USD per metric ton, defined as copper grade A cathode, LME spot price, CIF European ports; 1992-M01 to 2026-M10; anonymous SDMX API); World Bank Pink Sheet Copper is the backup, FRED a cross-check, direct LME rejected. **Approved for local implementation; public display, API redistribution, commercial use and derived `COPPER ZM` remain `review_required`** pending the IMF's answer on the underlying-LME question. Research only: no copper code exists
 
 
 ## Current
@@ -28,13 +29,14 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 ## Next
 - **1. Gold licence confirmation (blocker):** obtain World Bank written clarification for dataset 0038238 covering the monthly workbook, Gold, Brent and WTI (drafted, unsent: `docs/research/gold-provider-discovery.md` section 8); the Gold series also changed definition in June 2025
 - **2. `GOLD` vertical slice, only if that clarification permits it:** not approved and not started; no gold code until then
-- **Copper provider discovery** (licensing first): the next independent task while Gold waits on the World Bank
+- **Copper vertical slice (local/internal):** IMF PCPS `PCOPP` monthly series (`COPPER` view and stored history, manual import, append-only with conflict detection; Decimal USD per metric ton; no public deployment). Not started
+- **Before any public deployment of copper data:** obtain the IMF's written clarification for public display, API redistribution, commercial use and derived values given the series' LME origin; the IMF email is drafted and unsent (`docs/research/copper-provider-discovery.md` section 21)
 - **Before any public deployment of Bitcoin data:** obtain Bitstamp's written clarification (or a Data License Agreement) for public display, API redistribution and commercial use; the Bitstamp email is drafted and unsent (`docs/research/btc-provider-discovery.md` section 7)
 - **Before public deployment:** confirm with data@worldbank.org that the World Bank Data Catalog licence (CC BY 4.0, dataset 0038238) applies to the monthly Pink Sheet workbook used for oil; `OIL ZM` inherits Brent as an input, so it must not be described as freely redistributable until then. Not a blocker for development or the code PR.
 
 ## Planned
 - `GOLD` / `GOLD ZM` once the World Bank (preferred) or IMF (backup) gold source is approved in writing; not started
-- Copper
+- `COPPER ZM` (derived monthly copper in ZMW per metric ton from the IMF series and stored BoZ USD/ZMW, like `OIL ZM`; from January 2026 at the earliest) and copper-versus-kwacha analytics, after the `COPPER` slice and the rights answer
 - Further yield-curve analytics: historical spread charts, inversion interpretation, steepening/flattening, curvature, PCA, real-yield curves, term premium
 - `OIL ZM` versus ERB petrol/diesel comparisons (lagged comparisons or spreads); `OIL ZM` is not a pump price and is not combined with ERB fuel anywhere today
 - Cross-market `COMPARE` / `CHART` / `CORR` (after the underlying histories are stable)

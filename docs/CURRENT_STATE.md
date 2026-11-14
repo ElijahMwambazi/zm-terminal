@@ -14,7 +14,7 @@ Implemented and verified on `main`:
 - **Provider/source discipline**: exact Decimal storage, source provenance, fail-closed parsing, idempotent inserts, conflict detection without overwrite, no fabricated values and no raw-source storage unless explicitly justified.
 - **CI**: API tests run with PostgreSQL integration coverage and the web build runs on GitHub Actions.
 
-Not implemented: LuSE market data (blocked pending suitable access), FRA procurement prices, ZAMACE spot prices, copper, gold (source discovery done: World Bank preferred, licence confirmation pending; see `docs/research/gold-provider-discovery.md`), macro indicators, general yield-curve analytics (only the four fixed published-tenor spreads below exist), watchlist persistence, authentication, alerts, scheduled ingestion, frontend test runner/lint step, cross-market compare/correlation tools, Atlas and the long-term expansion domains in `docs/ROADMAP.md`.
+Not implemented: LuSE market data (blocked pending suitable access), FRA procurement prices, ZAMACE spot prices, copper (source discovery done: IMF PCPS preferred, public rights pending; see `docs/research/copper-provider-discovery.md`), gold (source discovery done: World Bank preferred, licence confirmation pending; see `docs/research/gold-provider-discovery.md`), macro indicators, general yield-curve analytics (only the four fixed published-tenor spreads below exist), watchlist persistence, authentication, alerts, scheduled ingestion, frontend test runner/lint step, cross-market compare/correlation tools, Atlas and the long-term expansion domains in `docs/ROADMAP.md`.
 
 Important source limitations:
 - BoZ USD/ZMW JSON history begins on 2026-01-22; the older analyst XLSX was deliberately not imported.
