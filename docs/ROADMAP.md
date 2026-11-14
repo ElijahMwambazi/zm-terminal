@@ -14,6 +14,7 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - Ministry maize + soya national-average vertical slice (Layout B, Apr 2025-Jan 2026, stored API/history/UI and `AGRI` commands)
 - Global oil: Brent + WTI monthly averages from the World Bank Pink Sheet (catalog licence CC BY 4.0; applicability to the workbook still to be confirmed), stored API/history/UI and `OIL` commands (FRED/EIA daily spot was evaluated and set aside because it did not provide a sufficiently clear fit for ZM Terminal's persisted-history design)
 - `OIL ZM`: derived monthly Brent-in-ZMW indicator (stored World Bank Brent monthly average x the mean of stored daily BoZ USD/ZMW mid-rate averages over the observed days; sparse BoZ months stay derivable and carry their day/observation counts; January 2026 is marked partial because the stored source begins on 22 January), stored-only API, UI and `OIL ZM` command; derived on request and never persisted; available only where both stored histories overlap (from January 2026)
+- Yield-curve spreads: four fixed derived published-tenor spreads (10Y-364D, 15Y-364D, 10Y-2Y, 15Y-91D; long yield minus short yield in basis points, with both endpoint auction dates and a mixed-vintage flag), stored-only API and `CURVE ZM` section. Only these four are done; no general curve analytics, interpretation or history exists
 - Zambia sovereign yield curve, modelled as the **derived published-auction-yield tenor curve**: the latest stored accepted BoZ T-bill (91D/182D/273D/364D) and Government-bond (2Y/3Y/5Y/7Y/10Y/15Y) auction yield per published tenor bucket at or before an as-of date, stored-only API, `CURVE ZM` / `YIELD CURVE ZM` view with an AS OF control; mixed auction vintages are shown, nothing is interpolated, fitted or bootstrapped, no maturity dates exist, and nothing is persisted
 - Gold provider discovery (`docs/research/gold-provider-discovery.md`): **World Bank preferred; licence clarification pending.** World Bank Pink Sheet monthly `Gold` ($/troy oz) is the preferred source and IMF PCPS `PGOLD` the backup; LBMA/IBA and FRED rejected. Research only: no gold code, table, route or UI exists.
 
@@ -30,7 +31,7 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - `GOLD` / `GOLD ZM` once the World Bank (preferred) or IMF (backup) gold source is approved in writing; not started
 - BTC/USD + BTC/ZMW
 - Copper
-- Yield-curve slope and spread metrics between published tenor buckets (for example long minus short), built on the stored curve; not part of the first curve slice
+- Further yield-curve analytics: historical spread charts, inversion interpretation, steepening/flattening, curvature, PCA, real-yield curves, term premium
 - `OIL ZM` versus ERB petrol/diesel comparisons (lagged comparisons or spreads); `OIL ZM` is not a pump price and is not combined with ERB fuel anywhere today
 - Cross-market `COMPARE` / `CHART` / `CORR` (after the underlying histories are stable)
 

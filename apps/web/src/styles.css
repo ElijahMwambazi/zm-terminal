@@ -228,3 +228,12 @@ th { text-align: left; color: #8c8c8c; font-weight: normal; padding: 6px 4px; }
 .legend-mark { display: inline-block; width: 9px; height: 9px; margin: 0 2px 0 0; vertical-align: baseline; }
 .legend-bill { background: #ffb000; border-radius: 50%; }
 .legend-bond { background: #7cc4ff; }
+.spreads { padding: 0 16px 8px; }
+.spreads-heading { margin: 10px 0 4px; font-size: 0.75rem; font-weight: normal; letter-spacing: 0.06em; color: #8c8c8c; }
+.spreads .notice { padding-left: 0; padding-right: 0; }
+.spread-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
+.spread-card { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border: 1px solid #292929; background: #0f0f0f; overflow-wrap: anywhere; }
+.spread-name { font-size: 0.72rem; color: #8c8c8c; }
+.spread-value { font-size: 1.25rem; color: #e6e6e6; font-weight: normal; }
+.spread-support { font-size: 0.75rem; color: #bdbdbd; }
+.spread-vintage { font-size: 0.7rem; color: #8c8c8c; }

@@ -45,7 +45,7 @@ export default function App() {
   const [oilNavigationKey, setOilNavigationKey] = useState(0);
   const { state: oilState, refresh: refreshOil } = useOil();
   const { state: oilZmState, refresh: refreshOilZm } = useOilZm();
-  const { state: curveState, asOf: curveAsOf, setAsOf: setCurveAsOf, refresh: refreshCurve } = useYieldCurve();
+  const { state: curveState, spreadState: curveSpreadState, asOf: curveAsOf, setAsOf: setCurveAsOf, refresh: refreshCurve } = useYieldCurve();
   const [curveNavigationKey, setCurveNavigationKey] = useState(0);
   const [fuelFocus, setFuelFocus] = useState<FuelProduct | null>(null);
   const { state: fuelState, refresh: refreshFuel } = useFuel();
@@ -278,7 +278,7 @@ export default function App() {
         ) : detail === "agriculture" ? (
           <AgricultureDetail ref={detailRef} state={agricultureState} focus={agricultureFocus} navigationKey={agricultureNavigationKey} onRefresh={refreshAgriculture} />
         ) : detail === "yield-curve" ? (
-          <YieldCurveDetail ref={detailRef} state={curveState} asOf={curveAsOf} onAsOf={setCurveAsOf} navigationKey={curveNavigationKey} onRefresh={refreshCurve} />
+          <YieldCurveDetail ref={detailRef} state={curveState} spreads={curveSpreadState} asOf={curveAsOf} onAsOf={setCurveAsOf} navigationKey={curveNavigationKey} onRefresh={refreshCurve} />
         ) : detail === "oil-zm" ? (
           <OilZmDetail ref={detailRef} state={oilZmState} onRefresh={refreshOilZm} />
         ) : detail === "oil" ? (

@@ -446,3 +446,51 @@ export async function getYieldCurve(asOf: string | null): Promise<YieldCurve | n
   if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
   return response.json();
 }
+
+export type SpreadId = "10Y_364D" | "15Y_364D" | "10Y_2Y" | "15Y_91D";
+/** long_yield_rate minus short_yield_rate in basis points, computed by the backend from the derived curve snapshot. The
+ * two endpoints may come from different auction dates (`same_vintage`, `vintage_gap_days`). No interpretation attached. */
+export type YieldSpreadPoint = {
+  classification: "derived";
+  derived: true;
+  metric_type: "published_tenor_yield_spread";
+  spread_id: SpreadId;
+  short_tenor: CurveTenor;
+  long_tenor: CurveTenor;
+  short_yield_rate: string; // percent per annum as published
+  long_yield_rate: string;
+  spread_bps: string; // exact decimal string; may be negative or zero
+  short_auction_date: string;
+  long_auction_date: string;
+  same_vintage: boolean;
+  vintage_gap_days: number;
+  yield_unit: "percent_per_annum_as_published";
+  spread_unit: "basis_points";
+};
+export type MissingYieldSpread = { spread_id: SpreadId; short_tenor: CurveTenor; long_tenor: CurveTenor; missing_tenors: CurveTenor[] };
+export type YieldSpreads = {
+  classification: "derived";
+  derived: true;
+  metric_type: "published_tenor_yield_spread";
+  curve_type: "published_auction_yield_tenor_curve";
+  methodology: string;
+  notice: string;
+  as_of: string;
+  available_spreads: YieldSpreadPoint[];
+  missing_spreads: MissingYieldSpread[];
+};
+
+/** Spreads for exactly one as-of date (the curve's own as_of), so spreads and curve always share one snapshot. */
+export async function getYieldSpreads(asOf: string): Promise<YieldSpreads | null> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/v1/yield-curve/spreads/as-of?date=${encodeURIComponent(asOf)}`);
+  } catch {
+    throw new ApiError("api", "ZM Terminal API is unreachable");
+  }
+  if (response.status === 404) return null;
+  if (response.status === 422) throw new ApiError("api", "That as-of date is not accepted (it must be a past or present date)");
+  if (response.status === 503) throw new ApiError("api", "Stored auction data is unavailable (database)");
+  if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
+  return response.json();
+}
