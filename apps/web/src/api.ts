@@ -494,3 +494,86 @@ export async function getYieldSpreads(asOf: string): Promise<YieldSpreads | null
   if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
   return response.json();
 }
+
+/** Bitcoin. BTC/USD is Bitstamp's BTC/USD SPOT last trade (one exchange's market, not a global reference price). Decimals are
+ * plain-notation strings; the UI only presents and rounds, and the API owns every calculation, age and stale state. */
+export const BTC_RANGES = ["1M", "3M", "6M", "1Y", "3Y", "5Y", "ALL"] as const;
+export type BtcRange = (typeof BTC_RANGES)[number];
+
+export type BtcUsdQuote = {
+  symbol: "BTCUSD";
+  market: "BTC/USD";
+  market_type: "SPOT";
+  price_type: "last_trade";
+  last: string;
+  bid: string;
+  ask: string;
+  high_24h: string; // rolling last 24 hours, not the UTC day
+  low_24h: string;
+  vwap_24h: string;
+  volume_24h_btc: string;
+  observed_at: string; // Bitstamp ticker timestamp
+  retrieved_at: string;
+  source: "bitstamp";
+  source_url: string;
+  stale: boolean;
+  stale_after_seconds: number;
+};
+
+/** One completed UTC-day candle: close is the last trade of that day, not an average. */
+export type BtcDailyCandle = { candle_open_at: string; open: string; high: string; low: string; close: string; volume_btc: string };
+export type BtcUsdHistory = { market: "BTC/USD"; provider: "bitstamp"; interval: "1d"; range: BtcRange; count: number; observations: BtcDailyCandle[] };
+
+/** DERIVED live conversion; never an exchange-traded BTC/ZMW, dealer, P2P or mobile-money quote. */
+export type BtcZmwQuote = {
+  classification: "derived";
+  derived: true;
+  symbol: "BTCZMW";
+  methodology_id: "btc_zmw_live_v1";
+  methodology: string;
+  notice: string;
+  btc_zmw: string;
+  currency: "ZMW";
+  unit: "bitcoin";
+  btc_usd_last: string;
+  btc_source: "bitstamp";
+  btc_market: "BTC/USD";
+  btc_price_type: "last_trade";
+  btc_observed_at: string;
+  btc_source_url: string;
+  btc_age_seconds: number;
+  btc_stale: boolean;
+  usd_zmw_mid: string;
+  fx_source: "boz";
+  fx_pair: "USDZMW";
+  fx_price: "mid";
+  fx_observed_at: string;
+  fx_source_url: string;
+  fx_age_seconds: number;
+  fx_stale: boolean;
+  derived_at: string;
+  derived_stale: boolean;
+};
+
+async function getBtcJson<T>(path: string, messages: Partial<Record<number, string>>): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`);
+  } catch {
+    throw new ApiError("api", "ZM Terminal API is unreachable");
+  }
+  const message = messages[response.status];
+  if (message) throw new ApiError(response.status === 502 || response.status === 504 ? "upstream" : "api", message);
+  if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
+  return response.json();
+}
+
+const BITSTAMP_DOWN = { 502: "Bitstamp data is currently unavailable or invalid", 504: "Bitstamp request timed out" };
+export const getBtcUsdLatest = () => getBtcJson<BtcUsdQuote>("/api/v1/btc/usd/latest", BITSTAMP_DOWN);
+export const getBtcUsdHistory = async (range: BtcRange) =>
+  (await getBtcJson<BtcUsdHistory>(`/api/v1/btc/usd/history?range=${range}`, { 503: "Stored BTC/USD history is unavailable (database)" })).observations;
+export const getBtcZmwLatest = () => getBtcJson<BtcZmwQuote>("/api/v1/btc/zmw/latest", {
+  ...BITSTAMP_DOWN,
+  404: "No stored Bank of Zambia USD/ZMW observation to convert with",
+  503: "Stored USD/ZMW observations are unavailable (database)",
+});

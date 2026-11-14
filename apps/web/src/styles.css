@@ -237,3 +237,12 @@ th { text-align: left; color: #8c8c8c; font-weight: normal; padding: 6px 4px; }
 .spread-value { font-size: 1.25rem; color: #e6e6e6; font-weight: normal; }
 .spread-support { font-size: 0.75rem; color: #bdbdbd; }
 .spread-vintage { font-size: 0.7rem; color: #8c8c8c; }
+.btc-equation { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; padding: 10px 16px; }
+.btc-term { display: flex; flex-direction: column; gap: 3px; min-width: 150px; flex: 1 1 150px; padding: 8px 10px; border: 1px solid #292929; background: #0f0f0f; overflow-wrap: anywhere; }
+.btc-term strong { font-size: 1.2rem; font-weight: normal; color: #e6e6e6; }
+.btc-term small { font-size: 0.7rem; color: #8c8c8c; }
+.btc-label { font-size: 0.72rem; color: #8c8c8c; }
+.btc-result { border-color: #8a6a1a; }
+.btc-result strong { color: #ffb000; }
+.btc-op { align-self: center; color: #8c8c8c; font-size: 1.2rem; }
+@media (max-width: 480px) { .btc-op { flex: 0 0 100%; text-align: center; line-height: 1; } }

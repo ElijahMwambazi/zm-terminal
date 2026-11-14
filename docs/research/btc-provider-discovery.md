@@ -183,3 +183,7 @@ Local research `acceptable for local research`; public display, API, commercial 
 Read the Bitstamp Terms of Use, then build `BTC` (BTC/USD live and daily OHLCV, local use only) while the Bitstamp email is reviewed and sent by the user. Do not enable a public deployment until written confirmation or a DLA exists. Gold remains blocked on the World Bank response; this does not change it.
 
 **Final state: APPROVED FOR LOCAL IMPLEMENTATION — PUBLIC RIGHTS PENDING**
+
+## 9. Implementation decision update (2026-11-14)
+
+The project owner elected to proceed with a local/internal BTC implementation (direct Bitstamp adapter, local normalized storage, live derived BTC/ZMW) while the Bitstamp Terms of Use remain unread through the available tooling. This is a project decision, not a legal conclusion: the unread-Terms limitation is unresolved, `redistribution` and `commercial_use` stay `review_required`, and public deployment of Bitstamp-derived observations remains blocked pending Bitstamp's written clarification or readable applicable terms. The earlier gate ("read the Terms before coding") was superseded by this decision for local work only; it is not a claim that the Terms permit anything. The email in section 7 is still unsent. The implementation is described in `docs/CURRENT_STATE.md`.

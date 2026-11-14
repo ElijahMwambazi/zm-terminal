@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import text
 
 from app.db import database_is_ready, get_engine
+from app.schemas.btc import BtcRange, BtcUsdHistory, BtcUsdQuote, BtcZmwQuote
 from app.schemas.fx import FxHistory, FxQuote
 from app.schemas.agriculture import (
     AGRICULTURE_COMMODITIES, AgricultureCommodity, AgricultureHistory, AgricultureLatest, AgriculturePrice, AgricultureRange,
@@ -26,13 +27,16 @@ from app.schemas.tbills import (
     TENORS, HistoryRange, RejectedTender, Tenor, TreasuryBillAuction, TreasuryBillHistory, TreasuryBillsLatest,
 )
 from app.services.boz import get_boz_fx_quote
+from app.services.bitstamp_btc import get_bitstamp_btc_quote
+from app.services.btc_store import fetch_btc_history
+from app.services.btc_zmw import derive_btc_zmw
 from app.services.agriculture_store import fetch_agriculture_history, fetch_latest_agriculture
 from app.services.bond_store import BondConflictError, fetch_bond_history, save_bond_auctions
 from app.services.boz_bonds import get_boz_bonds, latest_per_tenor as latest_bonds, unverified_tenors
 from app.services.boz_treasury import LUSAKA, get_boz_tbills, latest_per_tenor
 from app.services.fuel_buildup_store import fetch_build_up
 from app.services.fuel_store import fetch_fuel_history, fetch_latest_fuel
-from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, save_fx_quote
+from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, fetch_latest_fx_mid, save_fx_quote
 from app.services.tbill_store import TbillConflictError, fetch_tbill_history, save_tbill_auctions
 from app.services.oil_store import fetch_latest_oil, fetch_oil_history
 from app.services.oil_zm import fetch_oil_zm
@@ -275,6 +279,51 @@ async def yield_spreads_as_of(
 ) -> YieldSpreads:
     """Spreads computed from exactly the curve snapshot /yield-curve/as-of returns for that date (no second selection)."""
     return derive_yield_spreads(await _load_yield_curve(_parse_curve_date(date_)))
+
+
+async def _live_btc_quote() -> BtcUsdQuote:
+    try:
+        return await get_bitstamp_btc_quote()
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="Bitstamp request timed out") from exc
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Bitstamp BTC/USD failed (%s)", type_name(exc))
+        raise HTTPException(status_code=502, detail="Bitstamp data unavailable or invalid") from exc
+
+
+@router.get("/btc/usd/latest", response_model=BtcUsdQuote)
+async def btc_usd_latest() -> BtcUsdQuote:
+    """Live Bitstamp BTC/USD last trade (upstream request; nothing is persisted)."""
+    return await _live_btc_quote()
+
+
+@router.get("/btc/usd/history", response_model=BtcUsdHistory)
+async def btc_usd_history(range: BtcRange = "1Y") -> BtcUsdHistory:
+    """Stored completed daily BTC/USD candles only; never contacts Bitstamp."""
+    try:
+        candles = await asyncio.to_thread(fetch_btc_history, range, now=datetime.now(timezone.utc))
+    except Exception as exc:
+        logger.warning("BTC/USD history read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored BTC/USD history unavailable") from exc
+    return BtcUsdHistory(range=range, count=len(candles), observations=candles)
+
+
+@router.get("/btc/zmw/latest", response_model=BtcZmwQuote)
+async def btc_zmw_latest() -> BtcZmwQuote:
+    """Indicative derived BTC/ZMW: live Bitstamp last x the latest STORED BoZ USD/ZMW mid (no BoZ request, nothing persisted)."""
+    try:
+        fx = await asyncio.to_thread(fetch_latest_fx_mid)
+    except Exception as exc:
+        logger.warning("Stored USD/ZMW read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored USD/ZMW observations unavailable") from exc
+    if fx is None:
+        raise HTTPException(status_code=404, detail="No stored Bank of Zambia USD/ZMW observation to convert with")
+    btc = await _live_btc_quote()
+    try:
+        return derive_btc_zmw(btc, fx)
+    except ValueError as exc:
+        logger.warning("BTC/ZMW derivation rejected the stored USD/ZMW observation (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored USD/ZMW observation is invalid") from exc
 
 
 @router.get("/agriculture/latest", response_model=AgricultureLatest)

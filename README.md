@@ -2,7 +2,7 @@
 
 A personal, Zambia-first market intelligence terminal built with React, FastAPI, PostgreSQL, OpenBB and Docker.
 
-> Status: **active Zambia-first market terminal with multiple implemented vertical slices**: Bank of Zambia USD/ZMW, Treasury bills, Government bonds, stored fixed-income history, ERB fuel prices/build-ups, Ministry of Agriculture maize/soya national-average prices, global Brent/WTI monthly oil benchmarks (World Bank Pink Sheet), the derived `OIL ZM` monthly Brent-in-kwacha indicator, and the derived Zambia sovereign auction-yield tenor curve. The application deliberately does not display fabricated market prices. LuSE, BTC, copper, broader macro and other planned domains remain pending.
+> Status: **active Zambia-first market terminal with multiple implemented vertical slices**: Bank of Zambia USD/ZMW, Treasury bills, Government bonds, stored fixed-income history, ERB fuel prices/build-ups, Ministry of Agriculture maize/soya national-average prices, global Brent/WTI monthly oil benchmarks (World Bank Pink Sheet), the derived `OIL ZM` monthly Brent-in-kwacha indicator, the derived Zambia sovereign auction-yield tenor curve, and Bitstamp BTC/USD with an indicative derived BTC/ZMW (local/internal use; public rights pending). The application deliberately does not display fabricated market prices. LuSE, copper, broader macro and other planned domains remain pending.
 
 ## Goals
 
@@ -192,9 +192,14 @@ OIL WTI
 OIL ZM
 CURVE ZM
 YIELD CURVE ZM
+BTC
+BTC USD
+BTC ZMW
 ```
 
 `OIL ZM` is a derived monthly indicator (World Bank Brent monthly average x the mean of stored daily BoZ USD/ZMW mid-rate averages over the stored observation days, not a full-month FX average), computed from stored data only and labelled DERIVED; it is not an official series or a pump price. `CURVE ZM` / `YIELD CURVE ZM` open a derived Zambia sovereign auction-yield tenor curve: the latest stored accepted BoZ auction yield for each published T-bill and bond tenor at or before an as-of date, with mixed auction vintages shown; it is not an official BoZ curve and not a bootstrapped or fitted curve, and bond tenors are published buckets, not remaining maturities. The same view shows four derived published-tenor spreads (10Y-364D, 15Y-364D, 10Y-2Y, 15Y-91D: long yield minus short yield in basis points, computed by the API from the same curve snapshot, with each endpoint's auction date and a mixed-vintage flag, and no interpretation). Future command ideas such as BTC, copper, macro and cross-market research commands are tracked in `docs/ROADMAP.md`.
+
+`BTC` / `BTC USD` open Bitstamp BTC/USD SPOT: the live last trade (one exchange's market, not a global reference price; one upstream request per page load or refresh, nothing stored) and a chart of stored completed daily OHLCV (`python -m app.jobs.backfill_btc`, manual; apply `db/init/010_btc_usd_daily.sql` to an existing database with `docker compose exec -T postgres psql -U zm_terminal -d zm_terminal < db/init/010_btc_usd_daily.sql`). `BTC ZMW` opens an indicative derived BTC/ZMW: Bitstamp BTC/USD last x the latest stored BoZ USD/ZMW mid, with both inputs' ages shown; it is not an executable BTC/ZMW quote and never calls BoZ. **This is a local/internal implementation:** public display, API redistribution and commercial use of Bitstamp data remain `review_required` pending Bitstamp's written clarification (see `docs/research/btc-provider-discovery.md`).
 
 ## Data-provider strategy
 
@@ -204,7 +209,8 @@ The application will normalize providers behind its own service layer:
 USD/ZMW -> Bank of Zambia adapter
 LuSE    -> LuSE adapter
 Global  -> OpenBB provider packages
-BTC/ZMW -> derived from BTC/USD and USD/ZMW
+BTC/USD -> Bitstamp public API adapter (direct; OpenBB is not involved)
+BTC/ZMW -> derived from Bitstamp BTC/USD and stored BoZ USD/ZMW
 ```
 
 This repository does not assume that OpenBB provides Zambia-specific market data.
