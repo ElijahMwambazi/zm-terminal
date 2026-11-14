@@ -3,9 +3,10 @@
     zmw_per_mt = copper_usd_per_mt * usd_zmw_observed_days_avg
 
 - copper_usd_per_mt: the stored IMF PCPS Copper monthly average (series PCOPP; nominal USD per metric ton).
-- usd_zmw_observed_days_avg: exactly the OIL ZM methodology and the same stored BoZ population (the FX query, the
-  Africa/Lusaka day assignment, the per-day mean, the equal-day-weight mean, and the partial_source_window rule are shared
-  with `oil_zm`, so the two derived indicators can never disagree about a month's FX component). Days without a stored
+- usd_zmw_observed_days_avg: the OIL ZM methodology over the same stored BoZ population. The FX query and the small helpers
+  (FxMid, lusaka_date, the 40-digit precision, trailing-zero cleanup) are imported from `oil_zm`; the aggregation loop itself
+  is a separate implementation here (Africa/Lusaka day assignment, per-day mean, equal-day-weight mean, partial_source_window
+  rule), and the parity tests in `test_copper_zm.py` guard that it stays equivalent to OIL ZM. Days without a stored
   observation are simply absent: nothing is interpolated, filled or synthesized; buy/sell are never used.
 - A month is derived only when a stored Copper month and at least one stored FX day exist in the same calendar month
   (the overlap of the two stored histories, never extended from elsewhere).
