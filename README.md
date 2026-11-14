@@ -2,7 +2,7 @@
 
 A personal, Zambia-first market intelligence terminal built with React, FastAPI, PostgreSQL, OpenBB and Docker.
 
-> Status: **active Zambia-first market terminal with multiple implemented vertical slices**: Bank of Zambia USD/ZMW, Treasury bills, Government bonds, stored fixed-income history, and ERB fuel prices/build-ups. The application deliberately does not display fabricated market prices. Agriculture source research is complete and the Ministry maize/soya national-average slice is next; LuSE, BTC, copper, broader macro and other planned domains remain pending.
+> Status: **active Zambia-first market terminal with multiple implemented vertical slices**: Bank of Zambia USD/ZMW, Treasury bills, Government bonds, stored fixed-income history, ERB fuel prices/build-ups, and Ministry of Agriculture maize/soya national-average prices. The application deliberately does not display fabricated market prices. LuSE, BTC, copper, global oil, broader macro and other planned domains remain pending.
 
 ## Goals
 
@@ -105,6 +105,10 @@ GET /api/v1/fuel/latest
 GET /api/v1/fuel/{PETROL|DIESEL|KEROSENE|JET_A1|LSGO}
 GET /api/v1/fuel/history?product=...&range=1Y|3Y|5Y|ALL&type=retail|wholesale
 GET /api/v1/fuel/build-up?product=...&type=pump|wholesale&month=YYYY-MM
+
+GET /api/v1/agriculture/latest
+GET /api/v1/agriculture/{MAIZE|SOYA_BEANS}
+GET /api/v1/agriculture/history?commodity=...&range=1Y|3Y|ALL
 ```
 
 ### Bank of Zambia USD/ZMW backend
@@ -177,9 +181,14 @@ FUEL DIESEL
 FUEL KEROSENE
 FUEL JET
 FUEL LSGO
+AGRI ZM
+MAIZE ZM
+SOYA ZM
+MAIZE AVG
+SOYA AVG
 ```
 
-Future command ideas such as agriculture, BTC, copper, macro, yield-curve and cross-market research commands are tracked in `docs/ROADMAP.md`.
+Future command ideas such as BTC, copper, oil, macro, yield-curve and cross-market research commands are tracked in `docs/ROADMAP.md`.
 
 ## Data-provider strategy
 
@@ -216,7 +225,7 @@ zm-terminal/
 
 The canonical sequencing lives in [`docs/ROADMAP.md`](docs/ROADMAP.md), while [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) records implemented behavior and known limitations.
 
-Current implemented domains are USD/ZMW, BoZ Treasury bills and Government bonds with stored history, and ERB fuel prices/build-ups. Agriculture source discovery is complete; the next planned implementation is the Ministry of Agriculture maize and soya national-average vertical slice.
+Current implemented domains are USD/ZMW, BoZ Treasury bills and Government bonds with stored history, ERB fuel prices/build-ups, and Ministry maize/soya national-average prices. The next planned market-data implementation is global oil (Brent + WTI), followed by the derived `OIL ZM` view.
 
 ## Development principles
 

@@ -221,3 +221,69 @@ export async function getFuelBuildUp(product: FuelProduct, type: BuildUpType): P
     throw error;
   }
 }
+
+
+export const AGRICULTURE_COMMODITIES = ["MAIZE", "SOYA_BEANS"] as const;
+export type AgricultureCommodity = (typeof AGRICULTURE_COMMODITIES)[number];
+export const AGRICULTURE_LABELS: Record<AgricultureCommodity, string> = {
+  MAIZE: "MAIZE", SOYA_BEANS: "SOYA BEANS",
+};
+export const AGRICULTURE_RANGES = ["1Y", "3Y", "ALL"] as const;
+export type AgricultureRange = (typeof AGRICULTURE_RANGES)[number];
+
+export type AgriculturePrice = {
+  commodity: AgricultureCommodity;
+  market_type: "national_average";
+  provider: "moa";
+  period_start: string;
+  period_end: string;
+  publication_date: string | null;
+  publication_date_source: string | null;
+  grade: string | null;
+  variety: string | null;
+  location_scope: "national";
+  location: string | null;
+  price_basis: "indicative_average";
+  source_price: string;
+  source_currency: "ZMW";
+  source_unit: "kg";
+  normalized_zmw_per_kg: string;
+  source: string;
+  source_url: string;
+  source_period_label: string;
+  retrieved_at: string;
+};
+
+export type AgricultureLatest = {
+  prices: AgriculturePrice[];
+  missing_commodities: AgricultureCommodity[];
+};
+
+export type AgricultureHistoryPoint = {
+  commodity: AgricultureCommodity;
+  period_start: string;
+  period_end: string;
+  source_price: string;
+  normalized_zmw_per_kg: string;
+  source_unit: "kg";
+  price_basis: "indicative_average";
+  source: string;
+  source_url: string;
+};
+
+export const getAgricultureLatest = () => getJson<AgricultureLatest>("/api/v1/agriculture/latest");
+
+export async function getAgricultureHistory(
+  commodity: AgricultureCommodity, range: AgricultureRange,
+): Promise<AgricultureHistoryPoint[]> {
+  try {
+    return (await getJson<{ observations: AgricultureHistoryPoint[] }>(
+      `/api/v1/agriculture/history?commodity=${commodity}&range=${range}`,
+    )).observations;
+  } catch (error) {
+    if (error instanceof ApiError && error.message.includes("(503)")) {
+      throw new ApiError("api", "Stored agriculture prices are unavailable (database)");
+    }
+    throw error;
+  }
+}

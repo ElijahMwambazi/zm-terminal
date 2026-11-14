@@ -6,16 +6,17 @@ Implemented and verified on `main`:
 - **Treasury Bills**: live BoZ auction adapter for 91D/182D/273D/364D, persistence, manual historical backfill, stored history API/charts, dashboard/detail UI and tenor commands.
 - **Government Bonds**: live BoZ auction adapter for 2Y/3Y/5Y/7Y/10Y/15Y, persistence, manual historical backfill, stored history API/charts, dashboard/detail UI and tenor commands.
 - **ERB fuel**: long-run XLSX retail/wholesale history, current retail prices from supported monthly press statements, strict OCR fallback for image-only press statements, pump/wholesale build-up ingestion, stored APIs, charts/detail views and `FUEL` commands.
+- **Ministry agriculture**: maize and soya national-average monthly prices from the verified Layout B bulletin family, stored history, API/UI/chart and `AGRI` / `MAIZE` / `SOYA` commands.
 - **Provider/source discipline**: exact Decimal storage, source provenance, fail-closed parsing, idempotent inserts, conflict detection without overwrite, no fabricated values and no raw-source storage unless explicitly justified.
 - **CI**: API tests run with PostgreSQL integration coverage and the web build runs on GitHub Actions.
 
-Not implemented: LuSE market data (blocked pending suitable access), agriculture ingestion (source research is complete), BTC, copper, global oil, gold, macro indicators, sovereign yield curve, watchlist persistence, authentication, alerts, scheduled ingestion, frontend test runner/lint step, cross-market compare/correlation tools, Atlas and the long-term expansion domains in `docs/ROADMAP.md`.
+Not implemented: LuSE market data (blocked pending suitable access), FRA procurement prices, ZAMACE spot prices, BTC, copper, global oil, gold, macro indicators, sovereign yield curve, watchlist persistence, authentication, alerts, scheduled ingestion, frontend test runner/lint step, cross-market compare/correlation tools, Atlas and the long-term expansion domains in `docs/ROADMAP.md`.
 
 Important source limitations:
 - BoZ USD/ZMW JSON history begins on 2026-01-22; the older analyst XLSX was deliberately not imported.
 - LuSE remains blocked pending an acceptable machine-readable source or authorised access.
 - ZAMACE spot integration is blocked pending permission / suitable reuse rights.
-- Ministry agriculture source discovery is complete; the next planned implementation is maize and soya national-average prices.
+- Ministry agriculture source discovery and the first maize/soya national-average implementation are complete; older Layout A bulletins remain deferred because of their printed `ZMK` labels.
 - Migrations remain plain SQL in `db/init` and must be applied manually to existing database volumes.
 
 Known limitations:
@@ -76,3 +77,16 @@ Known limitations:
 - **Job:** `python -m app.jobs.backfill_fuel_buildups --from YYYY-MM [--to YYYY-MM] [--dry-run]` (months up to the current Lusaka month, at most 24, sequential, 1 s apart, no retries, counts only, dry-run never touches PostgreSQL). Needs `pdfplumber` (in `requirements.txt`; rebuild the API image to run it in-container).
 - **API / UI:** `GET /api/v1/fuel/build-up?product=&type=pump|wholesale&month=YYYY-MM` (stored only; month optional = newest; 422 invalid, 404 none, 503 database). The fuel detail view has `RETAIL HISTORY | PUMP BUILD-UP | WHOLESALE BUILD-UP` for the selected product; rows are shown in ERB's order with the published unit, without claiming they add up.
 - **Real verification (2026-11-13, dev DB), 2025-09..2026-11:** 15 months and 56 discovered documents; 4 press statements are scanned. November 2026 OCR succeeds with PETROL 33.06, DIESEL 34.45, KEROSENE 32.08 and JET_A1 34.51. April, June and September scanned statements remain deliberately unsupported because they fail the narrow validation rules. After the stricter wholesale-row fix, January/February 2026 wholesale documents with incomplete BPS Premium rows are also unsupported. The idempotent re-run inserted nothing: 32 retail rows and 1719 build-up rows were already present.
+
+
+## Ministry agriculture national averages
+- **Source:** official Ministry of Agriculture / Department of Agribusiness and Marketing monthly market-information bulletin PDFs discovered through the Ministry WordPress media API. The first supported family is Layout B; the verified bulletin covers April 2025 through January 2026.
+- **Semantics:** only grain rows `MAIZE` and `SOYA_BEANS`; `market_type = national_average`, `price_basis = indicative_average`, national scope, source unit ZMW/kg. Seed, meal, flour, fertilizer and other rows are not imported.
+- **Parser:** text-layer PDFs only. Table 3 must contain ten calendar months and exactly the expected row shape; only the ten published prices are ingested. Printed percentage-change values are ignored. Table 1 must exactly reconcile the December and January maize/soya prices or the document is rejected. Known older Layout A bulletins with `ZMK/MT` / `ZMK/Kg` are deliberately unsupported rather than silently re-labelled.
+- **Dates:** each observation is a calendar month with `period_start` / `period_end`; upload/publication date is stored separately and is never used as the observation date.
+- **Schema:** `db/init/008_zambia_agricultural_prices.sql`. National-average identity uses a partial PostgreSQL `UNIQUE ... NULLS NOT DISTINCT` index across provider, commodity, reporting period and nullable dimensions. Same identity + same numeric value is idempotent; a different value is a conflict and is never overwritten.
+- **Job:** `python -m app.jobs.backfill_agriculture --from 2025-04 [--to 2026-01] [--dry-run]`. The job discovers official PDFs, accepts Layout B only, validates all observations before one atomic write, logs counts only, and stores no raw PDF/text.
+- **TLS:** certificate verification is always enabled. If the Ministry server's incomplete certificate chain is not resolved by the host trust store, set `MOA_CA_BUNDLE` to a trusted CA bundle containing the required intermediate; the importer never uses `verify=False`.
+- **API:** stored data only: `GET /api/v1/agriculture/latest`, `GET /api/v1/agriculture/{MAIZE|SOYA_BEANS}`, and `GET /api/v1/agriculture/history?commodity=&range=1Y|3Y|ALL`.
+- **UI:** one `MAIZE ZM` dashboard card plus an agriculture detail view with maize/soya monthly history. The period is displayed prominently and described as an indicative national average, not a live trade price. Commands: `AGRI ZM`, `MAIZE ZM`, `SOYA ZM`, `MAIZE AVG`, `SOYA AVG`.
+- **Deferred:** FRA is a separate procurement/policy branch; ZAMACE remains blocked pending permission / suitable reuse rights. Neither is folded into the Ministry series.

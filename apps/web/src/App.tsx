@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getSystemStatus, type BondTenor, type FuelProduct, type SystemStatus, type Tenor } from "./api";
+import { getSystemStatus, type AgricultureCommodity, type BondTenor, type FuelProduct, type SystemStatus, type Tenor } from "./api";
 import { COMMAND_NAMES, parseCommand } from "./commands";
 import FuelDetail, { archiveLags, perLitre } from "./FuelDetail";
+import AgricultureDetail, { perKg } from "./AgricultureDetail";
 import { formatDate, formatLusaka, formatMonth } from "./format";
 import { useFuel } from "./useFuel";
+import { useAgriculture } from "./useAgriculture";
 import TbillDetail, { fallbackWarning, rejectedNote, tbillProblem } from "./TbillDetail";
 import BondDetail, { bondFallbackWarning, bondProblem } from "./BondDetail";
 import { useGovernmentBonds } from "./useGovernmentBonds";
@@ -32,9 +34,12 @@ export default function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [command, setCommand] = useState("");
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | null>(null);
+  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | null>(null);
   const [fuelFocus, setFuelFocus] = useState<FuelProduct | null>(null);
   const { state: fuelState, refresh: refreshFuel } = useFuel();
+  const [agricultureFocus, setAgricultureFocus] = useState<AgricultureCommodity | null>(null);
+  const [agricultureNavigationKey, setAgricultureNavigationKey] = useState(0);
+  const { state: agricultureState, refresh: refreshAgriculture } = useAgriculture();
   const [bondFocus, setBondFocus] = useState<BondTenor | null>(null);
   const { state: bondState, refresh: refreshBonds } = useGovernmentBonds();
   const [tbillFocus, setTbillFocus] = useState<Tenor | null>(null);
@@ -78,6 +83,13 @@ export default function App() {
     requestAnimationFrame(() => detailRef.current?.focus());
   };
 
+  const openAgriculture = (commodity: AgricultureCommodity | null) => {
+    setAgricultureFocus(commodity);
+    setAgricultureNavigationKey((value) => value + 1);
+    setDetail("agriculture");
+    requestAnimationFrame(() => detailRef.current?.focus());
+  };
+
   const runCommand = () => {
     const result = parseCommand(command);
     if (!result.ok) return setCommandError(result.error);
@@ -86,7 +98,8 @@ export default function App() {
     if (result.action.type === "open-usdzmw") openUsdZmw();
     else if (result.action.type === "open-tbill") openTbill(result.action.tenor);
     else if (result.action.type === "open-bond") openBond(result.action.tenor);
-    else openFuel(result.action.product);
+    else if (result.action.type === "open-fuel") openFuel(result.action.product);
+    else openAgriculture(result.action.commodity);
   };
 
   useEffect(() => {
@@ -97,6 +110,7 @@ export default function App() {
 
   const bond10 = bondState.status === "ready" ? bondState.data.tenors.find((t) => t.tenor === "10Y") : undefined;
   const petrol = fuelState.status === "ready" ? fuelState.data.prices.find((p) => p.product === "PETROL") : undefined;
+  const maize = agricultureState.status === "ready" ? agricultureState.data.prices.find((p) => p.commodity === "MAIZE") : undefined;
   const tbillSkipped = tbillState.status === "ready" ? tbillState.data.skipped_tenders : [];
 
   const now = useMemo(
@@ -124,7 +138,7 @@ export default function App() {
         <span><StatusDot ok={status?.api} /> API</span>
         <span><StatusDot ok={status?.database} /> POSTGRES</span>
         <span><StatusDot ok={status?.openbb} /> OPENBB</span>
-        <span className="status-note">v0.1 — live: USD/ZMW, Treasury Bills and Government Bonds (Bank of Zambia) and fuel prices (ERB)</span>
+        <span className="status-note">v0.1 — USD/ZMW, BoZ fixed income, ERB fuel, and Ministry agriculture averages</span>
       </section>
 
       <section className="market-grid" aria-label="Market overview">
@@ -191,6 +205,17 @@ export default function App() {
             )}
           </small>
         </button>
+        <button type="button" className="market-card market-card--live" onClick={() => openAgriculture("MAIZE")}>
+          <span className="market-label">MAIZE ZM</span>
+          {maize ? <strong>{perKg(maize.source_price)}</strong> : <strong>{agricultureState.status === "loading" ? "…" : "—"}</strong>}
+          <small>
+            {agricultureState.status === "loading" && "Loading stored Ministry prices…"}
+            {agricultureState.status === "error" && `${agricultureState.message}. No price is shown.`}
+            {agricultureState.status === "ready" && !maize && "No stored Ministry maize average"}
+            {maize && <>Ministry indicative avg · {formatMonth(maize.period_start)}</>}
+            {maize && <><br /><span className="text-stale">Published period, not a live market quote</span></>}
+          </small>
+        </button>
         {markets.map((market) => (
           <article className="market-card" key={market.label}>
             <span className="market-label">{market.label}</span>
@@ -205,6 +230,8 @@ export default function App() {
           <UsdZmwDetail ref={detailRef} state={quoteState} refreshKey={refreshKey} onRefresh={refresh} />
         ) : detail === "fuel" ? (
           <FuelDetail ref={detailRef} state={fuelState} focus={fuelFocus} onRefresh={refreshFuel} />
+        ) : detail === "agriculture" ? (
+          <AgricultureDetail ref={detailRef} state={agricultureState} focus={agricultureFocus} navigationKey={agricultureNavigationKey} onRefresh={refreshAgriculture} />
         ) : detail === "bond" ? (
           <BondDetail ref={detailRef} state={bondState} focus={bondFocus} onRefresh={refreshBonds} />
         ) : detail === "tbill" ? (
@@ -212,7 +239,7 @@ export default function App() {
         ) : (
           <article className="panel">
             <div className="panel-heading"><span>WORKSPACE</span></div>
-            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, or <code>FUEL ZM</code> for fuel prices.</p>
+            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, or <code>AGRI ZM</code> for Ministry agriculture averages.</p>
           </article>
         )}
 
