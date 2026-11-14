@@ -302,3 +302,90 @@ def test_pg_empty_tables_and_read_only(engine):
                  sorted(r[0] for r in c.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public'"))))
     assert before == after and not [t for t in after[2] if "zmw" in t]  # nothing derived is persisted and no BTC/ZMW table exists
     assert not [f for f in Path(__file__).parents[3].glob("db/init/*") if "zmw" in f.name.lower() and "btc" in f.name.lower()]
+
+
+# ---------------- PostgreSQL: range-limited counts, FX timezone bounds, global fx_stored_from ----------------
+def put_candle_on(engine, day, close="70000"):
+    c = Decimal(close)
+    save_daily_candles([DailyCandle(datetime(day.year, day.month, day.day, tzinfo=UTC), c, c, c, c, Decimal("1"))], retrieved_at=D0, engine=engine)
+
+
+def test_pg_omission_count_covers_only_the_selected_btc_dates_in_the_range(engine):
+    outside = [date(2026, 1, 25), date(2026, 1, 28), date(2026, 2, 1)]          # before the 1M window
+    inside = [date(2026, 2, 20), date(2026, 2, 25), date(2026, 3, 1), date(2026, 3, 3), date(2026, 3, 5)]
+    for d in outside + inside:
+        put_candle_on(engine, d)
+    put_fx(engine, datetime(2026, 1, 28, 7, 30, tzinfo=UTC), "19")                    # eligible FX, but its BTC date is outside the range
+    put_fx(engine, datetime(2026, 2, 22, 7, 30, tzinfo=UTC), "18")                    # an FX-only date: no BTC candle
+    put_fx(engine, datetime(2026, 2, 25, 7, 30, tzinfo=UTC), "17", source="other")    # ineligible FX on a selected BTC date
+    put_fx(engine, datetime(2026, 3, 3, 7, 30, tzinfo=UTC), "20")                     # the only eligible FX on a selected BTC date
+    now = datetime(2026, 3, 6, 12, tzinfo=UTC)                                         # 1M window starts at 2026-02-04 00:00 UTC
+    month = fetch_btc_zmw_history("1M", now=now, engine=engine)
+    assert [p.date for p in month.observations] == [date(2026, 3, 3)]
+    assert (month.count, month.btc_days_without_fx) == (1, 4)                          # not 7: dates outside the range and FX-only dates are not counted
+    assert month.count + month.btc_days_without_fx == len(inside)                      # selected BTC candles = derived + omitted
+    everything = fetch_btc_zmw_history("ALL", now=now, engine=engine)
+    assert [p.date for p in everything.observations] == [date(2026, 1, 28), date(2026, 3, 3)]
+    assert (everything.count, everything.btc_days_without_fx) == (2, 6) and everything.count + everything.btc_days_without_fx == len(inside + outside)
+
+
+def _single_candle_fixture(engine):
+    put_candle_on(engine, date(2026, 3, 5), "70000")
+
+
+def test_pg_fx_lower_bound_includes_lusaka_midnight_and_excludes_the_previous_lusaka_date(engine):
+    _single_candle_fixture(engine)
+    put_fx(engine, datetime(2026, 3, 4, 21, 59, tzinfo=UTC), "98")  # Lusaka 2026-03-04 23:59: not 5 March
+    put_fx(engine, datetime(2026, 3, 4, 22, 0, tzinfo=UTC), "21")    # Lusaka 2026-03-05 00:00 although its UTC date is 4 March
+    result = fetch_btc_zmw_history("ALL", now=datetime(2026, 3, 6, tzinfo=UTC), engine=engine)
+    (p,) = result.observations
+    assert p.date == date(2026, 3, 5) and p.usd_zmw_daily_mid_avg == Decimal("21") and p.fx_observation_count == 1
+    assert p.fx_first_observation == datetime(2026, 3, 4, 22, 0, tzinfo=UTC) and p.btc_zmw == Decimal("1470000")
+
+
+def test_pg_fx_upper_bound_includes_the_last_minute_and_excludes_the_next_lusaka_date(engine):
+    _single_candle_fixture(engine)
+    put_fx(engine, datetime(2026, 3, 5, 21, 59, tzinfo=UTC), "22")   # Lusaka 2026-03-05 23:59
+    put_fx(engine, datetime(2026, 3, 5, 22, 0, tzinfo=UTC), "99")    # Lusaka 2026-03-06 00:00
+    result = fetch_btc_zmw_history("ALL", now=datetime(2026, 3, 6, tzinfo=UTC), engine=engine)
+    (p,) = result.observations
+    assert p.usd_zmw_daily_mid_avg == Decimal("22") and p.fx_observation_count == 1 and p.fx_last_observation == datetime(2026, 3, 5, 21, 59, tzinfo=UTC)
+
+
+def test_pg_fx_both_edges_together_average_only_the_included_observations(engine):
+    _single_candle_fixture(engine)
+    for stamp, mid in ((datetime(2026, 3, 4, 21, 59, tzinfo=UTC), "98"), (datetime(2026, 3, 4, 22, 0, tzinfo=UTC), "21"),
+                       (datetime(2026, 3, 5, 21, 59, tzinfo=UTC), "22"), (datetime(2026, 3, 5, 22, 0, tzinfo=UTC), "99")):
+        put_fx(engine, stamp, mid)
+    (p,) = fetch_btc_zmw_history("ALL", now=datetime(2026, 3, 6, tzinfo=UTC), engine=engine).observations
+    assert p.usd_zmw_daily_mid_avg == Decimal("21.5") and p.fx_observation_count == 2 and p.btc_zmw == Decimal("1505000.0")
+    assert (p.fx_first_observation, p.fx_last_observation) == (datetime(2026, 3, 4, 22, 0, tzinfo=UTC), datetime(2026, 3, 5, 21, 59, tzinfo=UTC))
+
+
+def test_pg_the_sql_window_is_exactly_the_lusaka_calendar_day_of_the_selected_dates(engine):
+    from app.services.btc_zmw_history import _lusaka_midnight_utc
+    from app.services.fx_store import fetch_boz_mid_observations
+    lo, hi = _lusaka_midnight_utc(date(2026, 3, 5)), _lusaka_midnight_utc(date(2026, 3, 6))
+    assert (lo, hi) == (datetime(2026, 3, 4, 22, 0, tzinfo=UTC), datetime(2026, 3, 5, 22, 0, tzinfo=UTC))
+    for stamp, mid in ((datetime(2026, 3, 4, 21, 59, tzinfo=UTC), "98"), (lo, "21"), (datetime(2026, 3, 5, 12, tzinfo=UTC), "23"),
+                       (hi - timedelta(minutes=1), "22"), (hi, "99")):
+        put_fx(engine, stamp, mid)
+    rows = fetch_boz_mid_observations(lo, hi, engine=engine)  # the real SQL: since inclusive, until exclusive, ascending
+    assert [str(m) for _, m in rows] == ["21", "23", "22"]
+
+
+def test_pg_fx_stored_from_is_the_global_eligible_boundary_not_range_local(engine):
+    put_fx(engine, datetime(2026, 1, 10, 7, 30, tzinfo=UTC), "50", base="EUR", quote="USD")   # earlier but the wrong pair
+    put_fx(engine, datetime(2026, 1, 12, 7, 30, tzinfo=UTC), "51", source="other")             # earlier but the wrong provider
+    put_fx(engine, datetime(2026, 1, 15, 7, 30, tzinfo=UTC), "52", sell=None)                  # earlier but incomplete
+    put_fx(engine, datetime(2026, 1, 22, 7, 30, tzinfo=UTC), "19")                             # the earliest ELIGIBLE row
+    for d in (date(2026, 11, 10), date(2026, 11, 11), date(2026, 11, 12)):
+        put_candle_on(engine, d)
+    put_fx(engine, datetime(2026, 11, 11, 7, 30, tzinfo=UTC), "20.5")
+    now = datetime(2026, 11, 14, 12, tzinfo=UTC)
+    month = fetch_btc_zmw_history("1M", now=now, engine=engine)
+    assert [p.date for p in month.observations] == [date(2026, 11, 11)] and month.btc_days_without_fx == 2  # range-limited
+    assert month.fx_stored_from == date(2026, 1, 22)                                                      # global, and untouched by the distractors
+    assert fetch_btc_zmw_history("ALL", now=now, engine=engine).fx_stored_from == date(2026, 1, 22)
+    empty_range = fetch_btc_zmw_history("1M", now=datetime(2027, 6, 1, tzinfo=UTC), engine=engine)
+    assert empty_range.count == 0 and empty_range.fx_stored_from == date(2026, 1, 22)

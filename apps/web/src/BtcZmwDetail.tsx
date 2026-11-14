@@ -100,7 +100,7 @@ const BtcZmwDetail = forwardRef<HTMLElement, { state: BtcZmwState; onRefresh: ()
           <section className="history-section" aria-label="Derived daily BTC/ZMW history">
             <div className="panel-heading"><span>BTC/ZMW · DERIVED DAILY HISTORY (STORED INPUTS)</span><span className="badge-derived">DERIVED</span></div>
             <p className="notice">
-              Derived from stored Bitstamp BTC/USD daily closes and stored Bank of Zambia USD/ZMW observations. Dates without BoZ observations are omitted; no interpolation or forward-fill. The BTC close and FX observations are not simultaneous: the close is the last trade of a completed UTC day, the FX value is the mean of that Zambia date's BoZ observations taken earlier in the day.
+              Derived from stored Bitstamp BTC/USD daily closes and stored Bank of Zambia USD/ZMW observations. Dates without BoZ observations are omitted; no interpolation or forward-fill. The BTC close and FX observations are not simultaneous: the close is the last trade of a completed UTC day, and the FX value is the mean of that Zambia date's BoZ observations. They represent different observation times within the matched calendar date.
             </p>
             <div className="range-row" role="group" aria-label="History range">
               {BTC_RANGES.map((item) => (
@@ -130,7 +130,7 @@ const BtcZmwDetail = forwardRef<HTMLElement, { state: BtcZmwState; onRefresh: ()
                     <p className="notice">
                       {history.data.count} derived {history.data.count === 1 ? "day" : "days"}, {formatDate(points[0].date)} to {formatDate(points[points.length - 1].date)}.
                       {" "}{history.data.btc_days_without_fx} stored BTC/USD {history.data.btc_days_without_fx === 1 ? "day" : "days"} in this range had no BoZ observation and {history.data.btc_days_without_fx === 1 ? "is" : "are"} omitted
-                      (weekends, holidays and dates before the stored BoZ history). The chart joins real points with a line; it does not imply daily observations. Larger ranges currently show the same window because the stored BoZ USD/ZMW history is the limit{history.data.fx_stored_from ? ` (it begins ${formatDate(history.data.fx_stored_from)})` : ""}, not missing Bitcoin data. This is not the live quote above: that uses the current Bitstamp last trade.
+                      (normally weekends, holidays and any dates before the stored BoZ history; there is no weekday exclusion rule, so a date with a stored BoZ observation is derived). The chart joins real points with a line; it does not imply daily observations.{history.data.fx_stored_from && points[0].date <= history.data.fx_stored_from ? ` BTC/USD history extends further back, but derived BTC/ZMW is available only from the stored Bank of Zambia source window (it begins ${formatDate(history.data.fx_stored_from)}); this is a source boundary, not missing Bitcoin data.` : ""} This is not the live quote above: that uses the current Bitstamp last trade.
                     </p>
                     <div className="table-scroll">
                       <table aria-label="Recent derived days">

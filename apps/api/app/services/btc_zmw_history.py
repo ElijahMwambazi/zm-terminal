@@ -12,6 +12,10 @@
 - A candle whose date has no eligible BoZ observation is omitted and counted (`btc_days_without_fx`): no forward-fill,
   backward-fill, interpolation, nearest-observation substitution, zero or null point. The first derived date therefore comes
   from the overlap of the stored histories (BoZ machine-readable history begins 2026-01-22), never from another FX source.
+- Validation scope: every stored BTC candle loaded for the requested range and every BoZ row loaded for the matching window is
+  validated; an invalid stored value fails the whole request (a 503) rather than being silently skipped, even if that row would
+  not have produced a derived point. There is no weekday exclusion rule: a date derives whenever an eligible BoZ observation
+  exists for it (weekends and holidays normally drop out only because BoZ has no observation then).
 - Decimal at 40 significant digits, never rounded; rounding is presentation only. Not an official or executable BTC/ZMW price.
   This differs from the live quote (current Bitstamp last x the latest stored mid) and must not be used as a fallback for it.
 """
