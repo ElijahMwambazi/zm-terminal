@@ -725,3 +725,47 @@ export async function getCopperZmHistory(range: CopperRange): Promise<CopperZmHi
   if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
   return response.json();
 }
+
+/** Copper-Kwacha correlation: a DESCRIPTIVE Pearson coefficient between monthly changes in IMF Copper USD and the stored BoZ
+ * USD/ZMW observed-days average, calculated by the API from stored data. Not causal, not predictive; no significance testing. */
+export type CorrelationWindow = "6M" | "12M";
+export const CORRELATION_WINDOWS: readonly CorrelationWindow[] = ["6M", "12M"];
+export type CopperKwachaCorrelation = {
+  range: CopperRange;
+  window: CorrelationWindow;
+  window_changes: number;
+  methodology_id: string;
+  methodology: string;
+  basis_note: string;
+  notice: string;
+  variables: string[];
+  matched_months: number;
+  candidate_changes: number;
+  changes_used: number;
+  changes_excluded_gap: number;
+  changes_excluded_partial: number;
+  changes_excluded_nonpositive: number;
+  full_sample: {
+    status: "available" | "insufficient_sample" | "zero_variance";
+    correlation: string | null;
+    sample_size: number;
+    first_change_month: string | null;
+    last_change_month: string | null;
+    small_sample: boolean;
+    reason: string | null;
+  };
+  rolling: { window_end_month: string; correlation: string | null; sample_size: number }[];
+  rolling_reason: string | null;
+};
+
+export async function getCopperKwachaCorrelation(range: CopperRange, window: CorrelationWindow): Promise<CopperKwachaCorrelation> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/v1/copper/kwacha/correlation?range=${range}&window=${window}`);
+  } catch {
+    throw new ApiError("api", "ZM Terminal API is unreachable");
+  }
+  if (response.status === 503) throw new ApiError("api", "Stored Copper and FX data are unavailable (database)");
+  if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
+  return response.json();
+}
