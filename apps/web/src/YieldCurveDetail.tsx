@@ -1,7 +1,7 @@
 import { forwardRef, useEffect } from "react";
-import type { CurvePoint } from "./api";
+import type { CurvePoint, YieldSpreadPoint } from "./api";
 import { formatDate, formatFixed } from "./format";
-import type { YieldCurveState } from "./useYieldCurve";
+import type { YieldCurveState, YieldSpreadsState } from "./useYieldCurve";
 import YieldCurveChart from "./YieldCurveChart";
 
 const lusakaToday = () => new Date(Date.now() + 2 * 3600 * 1000).toISOString().slice(0, 10); // Africa/Lusaka is UTC+2 year-round; input max only
@@ -9,15 +9,29 @@ const instrument = (p: CurvePoint) => (p.instrument_type === "treasury_bill" ? "
 const supporting = (p: CurvePoint) =>
   p.instrument_type === "treasury_bill" ? `discount ${formatFixed(p.discount_rate, 4)}%` : `coupon ${formatFixed(p.coupon_rate, 4)}%`;
 
+const SPREAD_LABEL: Record<string, string> = { "10Y_364D": "10Y – 364D", "15Y_364D": "15Y – 364D", "10Y_2Y": "10Y – 2Y", "15Y_91D": "15Y – 91D" };
+// Presentation only: the exact decimal string from the API, rounded to at most 2 places (never calculated here).
+function formatBps(value: string): string {
+  const text = formatFixed(value, 2).replace(/\.?0+$/, "");
+  return `${text.startsWith("-") || text === "0" ? "" : "+"}${text} bp`;
+}
+const spreadSupport = (s: YieldSpreadPoint) =>
+  `${formatFixed(s.long_yield_rate, 2)}% – ${formatFixed(s.short_yield_rate, 2)}%`;
+const spreadVintage = (s: YieldSpreadPoint) =>
+  s.same_vintage
+    ? `same auction date (${formatDate(s.long_auction_date)})`
+    : `${s.long_tenor} ${formatDate(s.long_auction_date)} vs ${s.short_tenor} ${formatDate(s.short_auction_date)} · mixed vintage, ${s.vintage_gap_days}-day gap`;
+
 type Props = {
   state: YieldCurveState;
+  spreads: YieldSpreadsState;
   asOf: string | null;
   onAsOf: (value: string | null) => void;
   navigationKey: number;
   onRefresh: () => void;
 };
 
-const YieldCurveDetail = forwardRef<HTMLElement, Props>(function YieldCurveDetail({ state, asOf, onAsOf, navigationKey, onRefresh }, ref) {
+const YieldCurveDetail = forwardRef<HTMLElement, Props>(function YieldCurveDetail({ state, spreads, asOf, onAsOf, navigationKey, onRefresh }, ref) {
   // Every CURVE ZM command returns to the latest snapshot, even when the view is already open on a historical date.
   useEffect(() => { onAsOf(null); }, [navigationKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const curve = state.status === "ready" ? state.data : null;
@@ -68,6 +82,40 @@ const YieldCurveDetail = forwardRef<HTMLElement, Props>(function YieldCurveDetai
             {curve.missing_tenors.length > 0 && (
               <p className="notice text-stale">No stored accepted observation on or before this date for: {curve.missing_tenors.join(", ")}. They are left empty, never interpolated or substituted.</p>
             )}
+            <section className="spreads" aria-label="Published-tenor spreads">
+              <h3 className="spreads-heading">PUBLISHED-TENOR SPREADS</h3>
+              {spreads.status === "loading" && <p className="notice">Loading spreads…</p>}
+              {spreads.status === "error" && <p className="notice notice--error" role="alert">{spreads.message}. Spreads are not shown.</p>}
+              {spreads.status === "unavailable" && <p className="notice" role="status">No spreads: no curve snapshot for this date.</p>}
+              {spreads.status === "ready" && (
+                <>
+                  <p className="notice">{spreads.data.notice} Long yield minus short yield, in basis points; no interpretation is implied.</p>
+                  <div className="spread-grid">
+                    {(["10Y_364D", "15Y_364D", "10Y_2Y", "15Y_91D"] as const).map((id) => {
+                      const spread = spreads.data.available_spreads.find((s) => s.spread_id === id);
+                      const missing = spreads.data.missing_spreads.find((m) => m.spread_id === id);
+                      return (
+                        <div className="spread-card" key={id} data-spread={id}>
+                          <span className="spread-name">{SPREAD_LABEL[id]}</span>
+                          {spread ? (
+                            <>
+                              <strong className="spread-value">{formatBps(spread.spread_bps)}</strong>
+                              <span className="spread-support">{spreadSupport(spread)}</span>
+                              <span className={spread.same_vintage ? "spread-vintage" : "spread-vintage text-stale"}>{spreadVintage(spread)}</span>
+                            </>
+                          ) : (
+                            <>
+                              <strong className="spread-value">n/a</strong>
+                              <span className="spread-support">Missing {missing?.missing_tenors.join(" and ")} observation at this as-of date</span>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </section>
             <div className="table-scroll">
               <table aria-label="Curve points">
                 <thead>

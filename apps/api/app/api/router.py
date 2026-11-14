@@ -15,6 +15,7 @@ from app.schemas.agriculture import (
 from app.schemas.oil import OIL_BENCHMARKS, OilBenchmark, OilHistory, OilLatest, OilObservation, OilRange
 from app.schemas.oil_zm import OilZmHistory, OilZmMonth
 from app.schemas.yield_curve import YieldCurve
+from app.schemas.yield_spreads import YieldSpreads
 from app.schemas.fuel_buildup import BuildUpType, FuelBuildUp
 from app.schemas.fuel import FUEL_PRODUCTS, FuelHistory, FuelLatest, FuelPrice, FuelProduct, FuelRange, PriceType
 from app.schemas.bonds import (
@@ -36,6 +37,7 @@ from app.services.tbill_store import TbillConflictError, fetch_tbill_history, sa
 from app.services.oil_store import fetch_latest_oil, fetch_oil_history
 from app.services.oil_zm import fetch_oil_zm
 from app.services.yield_curve import fetch_yield_curve
+from app.services.yield_spreads import derive_yield_spreads
 from app.services.provider_policy import PROVIDER_POLICIES, ProviderPolicy
 from app.services.openbb import get_openbb_coverage, openbb_is_ready
 
@@ -243,18 +245,36 @@ async def yield_curve_latest() -> YieldCurve:
     return await _load_yield_curve(_lusaka_today())
 
 
+def _parse_curve_date(value: str) -> date:
+    try:
+        as_of = date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="date must be a valid calendar date (YYYY-MM-DD)") from exc
+    if as_of > _lusaka_today():
+        raise HTTPException(status_code=422, detail="date must not be in the future")
+    return as_of
+
+
 @router.get("/yield-curve/as-of", response_model=YieldCurve)
 async def yield_curve_as_of(
     date_: Annotated[str, Query(alias="date", pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")],
 ) -> YieldCurve:
     """Historical stored snapshot: each tenor's latest stored accepted observation on or before the (past or present) date."""
-    try:
-        as_of = date.fromisoformat(date_)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="date must be a valid calendar date (YYYY-MM-DD)") from exc
-    if as_of > _lusaka_today():
-        raise HTTPException(status_code=422, detail="date must not be in the future")
-    return await _load_yield_curve(as_of)
+    return await _load_yield_curve(_parse_curve_date(date_))
+
+
+@router.get("/yield-curve/spreads/latest", response_model=YieldSpreads)
+async def yield_spreads_latest() -> YieldSpreads:
+    """Four published-tenor spreads (bp) computed from the latest derived curve snapshot (mixed auction vintages possible)."""
+    return derive_yield_spreads(await _load_yield_curve(_lusaka_today()))
+
+
+@router.get("/yield-curve/spreads/as-of", response_model=YieldSpreads)
+async def yield_spreads_as_of(
+    date_: Annotated[str, Query(alias="date", pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")],
+) -> YieldSpreads:
+    """Spreads computed from exactly the curve snapshot /yield-curve/as-of returns for that date (no second selection)."""
+    return derive_yield_spreads(await _load_yield_curve(_parse_curve_date(date_)))
 
 
 @router.get("/agriculture/latest", response_model=AgricultureLatest)
