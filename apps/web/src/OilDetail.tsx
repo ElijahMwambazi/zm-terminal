@@ -7,7 +7,19 @@ import AuctionChart from "./AuctionChart";
 import { formatDate, formatLusaka } from "./format";
 import type { OilState } from "./useOil";
 
-export const perBarrel = (value: string) => `${value.startsWith("-") ? "-" : ""}$${value.replace("-", "")}/bbl`;
+/** Display only: exactly two decimals ("79.1" -> "$79.10/bbl", "-37.63" -> "-$37.63/bbl"). Stored precision is untouched. */
+export function perBarrel(value: string): string {
+  const negative = value.startsWith("-");
+  const digits = negative ? value.slice(1) : value;
+  const [whole, fraction = ""] = digits.split(".");
+  // Plain decimal strings with at most two decimals are padded exactly; anything longer is rounded for display only.
+  const shown = /^\d+$/.test(whole) && fraction.length <= 2 && /^\d*$/.test(fraction)
+    ? `${whole}.${fraction.padEnd(2, "0")}`
+    : Math.abs(Number(value)).toFixed(2);
+  return `${negative ? "-" : ""}$${shown}/bbl`;
+}
+/** Charts do not draw a marker per observation beyond this many points (the line and all data are unchanged). */
+const MARKER_LIMIT = 250;
 const formatChartPrice = (value: number) => `${value < 0 ? "-" : ""}$${Math.abs(value).toFixed(2)}`;
 
 type History =
@@ -15,15 +27,18 @@ type History =
   | { status: "error"; message: string }
   | { status: "ready"; points: OilPoint[] };
 
-const OilDetail = forwardRef<HTMLElement, { state: OilState; focus: OilBenchmark | null; onRefresh: () => void }>(
-  function OilDetail({ state, focus, onRefresh }, ref) {
+const OilDetail = forwardRef<HTMLElement, { state: OilState; focus: OilBenchmark | null; navigationKey: number; onRefresh: () => void }>(
+  function OilDetail({ state, focus, navigationKey, onRefresh }, ref) {
     const [benchmark, setBenchmark] = useState<OilBenchmark>(focus ?? "BRENT");
     const [range, setRange] = useState<OilRange>("1Y");
     const [history, setHistory] = useState<History>({ status: "loading" });
-    useEffect(() => { if (focus) setBenchmark(focus); }, [focus]);
+    // navigationKey changes on every OIL command, so a repeated command re-selects even if focus is unchanged.
+    useEffect(() => { if (focus) setBenchmark(focus); }, [focus, navigationKey]);
     useEffect(() => {
       let cancelled = false;
       setHistory({ status: "loading" });
+      // Wait for the latest read (it persists fresh rows) so mount and refresh issue one history request each.
+      if (state.status === "loading") return () => { cancelled = true; };
       getOilHistory(benchmark, range)
         .then((points) => !cancelled && setHistory({ status: "ready", points }))
         .catch((error: unknown) =>
@@ -34,6 +49,7 @@ const OilDetail = forwardRef<HTMLElement, { state: OilState; focus: OilBenchmark
     const data = state.status === "ready" ? state.data : null;
     const byBenchmark = new Map<OilBenchmark, OilObservation>((data?.observations ?? []).map((o) => [o.benchmark, o]));
     const selected = byBenchmark.get(benchmark);
+    const staleDays = data?.observations[0]?.stale_after_days ?? null;
 
     return (
       <article className="panel detail-panel" ref={ref} tabIndex={-1} aria-label="Global oil benchmarks detail">
@@ -68,8 +84,10 @@ const OilDetail = forwardRef<HTMLElement, { state: OilState; focus: OilBenchmark
                   </tbody>
                 </table>
               </div>
-              {data.observations.some((o) => o.stale) && (
-                <p className="notice text-stale">Stale: the newest published observation is more than 10 days old (application heuristic).</p>
+              {staleDays !== null && (
+                <p className={data.observations.some((o) => o.stale) ? "notice text-stale" : "notice"}>
+                  Daily benchmark series. Shown as stale after {staleDays} calendar days without a newer observation; this is a heuristic allowing for weekends, holidays and publication timing, not a market-calendar rule.
+                </p>
               )}
               <p className="notice">Daily values for trading days only. Weekends and holidays have no observation and are never filled in. The source publishes with a lag of days, so the latest value is not a live quote.</p>
               {selected && (
@@ -108,8 +126,8 @@ const OilDetail = forwardRef<HTMLElement, { state: OilState; focus: OilBenchmark
                 <AuctionChart
                   points={history.points.map((p) => ({ auction_date: p.observed_date, yield_rate: p.value }))}
                   label={`${benchmark} crude oil history, USD per barrel`}
-                  precision={2} formatPrice={formatChartPrice} />
-                <p className="notice">{history.points.length} stored observations, {formatDate(history.points[0].observed_date)} to {formatDate(history.points[history.points.length - 1].observed_date)}. Each marker is a published value; lines only join markers and do not imply values on days without one. USD per barrel · Source: FRED.</p>
+                  precision={2} formatPrice={formatChartPrice} markers={history.points.length <= MARKER_LIMIT} />
+                <p className="notice">{history.points.length} stored observations, {formatDate(history.points[0].observed_date)} to {formatDate(history.points[history.points.length - 1].observed_date)}. Each point is a published value; the line only joins published points and does not imply values on days without one. USD per barrel · Source: FRED.</p>
               </>
             )}
           </section>

@@ -8,6 +8,10 @@ OilBenchmark = Literal["BRENT", "WTI"]
 OIL_BENCHMARKS: tuple[str, ...] = ("BRENT", "WTI")
 OilRange = Literal["1M", "3M", "1Y", "5Y", "ALL"]
 OIL_SOURCE = "fred"
+# Application heuristic, not a market-calendar or publisher rule: a daily series is "stale" when its newest
+# observation is more than this many calendar days old (allows weekends, holidays and publication timing).
+# The single source of truth; it is also returned in API responses so the UI never hardcodes it.
+OIL_STALE_AFTER_DAYS = 14
 OIL_SOURCE_UNIT = "Dollars per Barrel"  # FRED's units string; anything else is rejected, never converted
 
 
@@ -44,6 +48,7 @@ class OilObservation(OilPoint):
     source_url: str
     retrieved_at: AwareDatetime
     stale: bool
+    stale_after_days: int = OIL_STALE_AFTER_DAYS
 
     @field_validator("retrieved_at")
     @classmethod

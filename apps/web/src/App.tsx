@@ -38,6 +38,7 @@ export default function App() {
   const [commandError, setCommandError] = useState<string | null>(null);
   const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | null>(null);
   const [oilFocus, setOilFocus] = useState<OilBenchmark | null>(null);
+  const [oilNavigationKey, setOilNavigationKey] = useState(0);
   const { state: oilState, refresh: refreshOil } = useOil();
   const [fuelFocus, setFuelFocus] = useState<FuelProduct | null>(null);
   const { state: fuelState, refresh: refreshFuel } = useFuel();
@@ -96,6 +97,7 @@ export default function App() {
 
   const openOil = (benchmark: OilBenchmark | null) => {
     setOilFocus(benchmark);
+    setOilNavigationKey((value) => value + 1);
     setDetail("oil");
     requestAnimationFrame(() => detailRef.current?.focus());
   };
@@ -256,7 +258,7 @@ export default function App() {
         ) : detail === "agriculture" ? (
           <AgricultureDetail ref={detailRef} state={agricultureState} focus={agricultureFocus} navigationKey={agricultureNavigationKey} onRefresh={refreshAgriculture} />
         ) : detail === "oil" ? (
-          <OilDetail ref={detailRef} state={oilState} focus={oilFocus} onRefresh={refreshOil} />
+          <OilDetail ref={detailRef} state={oilState} focus={oilFocus} navigationKey={oilNavigationKey} onRefresh={refreshOil} />
         ) : detail === "bond" ? (
           <BondDetail ref={detailRef} state={bondState} focus={bondFocus} onRefresh={refreshBonds} />
         ) : detail === "tbill" ? (

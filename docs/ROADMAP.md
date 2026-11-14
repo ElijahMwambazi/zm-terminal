@@ -14,7 +14,7 @@ Implemented work lives in `docs/CURRENT_STATE.md`; this file is only sequencing.
 - Ministry maize + soya national-average vertical slice (Layout B, Apr 2025-Jan 2026, stored API/history/UI and `AGRI` commands)
 
 ## Current
-- **Global oil: Brent + WTI** is implemented on `feat/global-oil-benchmarks` (OpenBB/FRED, stored history, API, UI, `OIL` commands) and verified offline. It moves to Completed once a live run with a real `FRED_API_KEY` confirms the OpenBB response shape and the first backfill.
+- **Global oil: Brent + WTI** is implemented on `feat/global-oil-benchmarks` (OpenBB/FRED, stored history, API, UI, `OIL` commands) and verified offline. Live verification with a real `FRED_API_KEY` is outstanding (blocked: key missing); it moves to Completed only once the live response shape and a first backfill are confirmed.
 
 ## Next
 - **`OIL ZM`** (Brent converted at the BoZ USD/ZMW rate): derived view, only after the stored Brent history and BoZ FX semantics are confirmed stable. Not implemented.

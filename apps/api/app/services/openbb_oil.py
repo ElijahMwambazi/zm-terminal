@@ -6,18 +6,19 @@ converted, filled, interpolated or averaged. Missing days are simply absent (FRE
 """
 
 import json
+import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 import httpx
 
 from app.config import get_settings
-from app.schemas.oil import OIL_SERIES, OIL_SOURCE_UNIT, OilPoint
+from app.schemas.oil import OIL_SERIES, OIL_SOURCE_UNIT, OIL_STALE_AFTER_DAYS, OilPoint
 
 OIL_TIMEOUT_SECONDS = 20.0
 OIL_LATEST_WINDOW_DAYS = 30
-# Application heuristic, not a publisher SLA: FRED mirrors EIA's daily series with a lag of days.
-OIL_STALE_AFTER = timedelta(days=10)
+OIL_STALE_AFTER = timedelta(days=OIL_STALE_AFTER_DAYS)  # heuristic; defined in app.schemas.oil
+_DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")  # the provider contract; no other ISO forms
 SPOT_PATH = "/api/v1/fred/commodity/price/spot"
 
 
@@ -41,7 +42,7 @@ def parse_oil_payload(raw_text: str, benchmark: str, *, today: date | None = Non
         if row.get("unit") != OIL_SOURCE_UNIT:
             raise ValueError("Oil row has an unexpected unit")
         raw_date, raw_price = row.get("date"), row.get("price")
-        if not isinstance(raw_date, str) or isinstance(raw_price, bool) or not isinstance(raw_price, (Decimal, int)):
+        if not isinstance(raw_date, str) or not _DATE_PATTERN.fullmatch(raw_date) or isinstance(raw_price, bool) or not isinstance(raw_price, (Decimal, int)):
             raise ValueError("Oil row has a malformed date or price")
         try:
             observed = date.fromisoformat(raw_date)
@@ -61,7 +62,7 @@ def parse_oil_payload(raw_text: str, benchmark: str, *, today: date | None = Non
 async def fetch_oil_series(
     benchmark: str, start: date, end: date, *, client: httpx.AsyncClient | None = None,
 ) -> list[OilPoint]:
-    """One OpenBB request. Raises httpx errors on transport/status problems and ValueError on bad data."""
+    """One OpenBB request. [] when OpenBB reports no data (204); httpx errors on transport/status problems; ValueError on bad data."""
     params = {"provider": "fred", "commodity": OIL_SERIES[benchmark].openbb_commodity,
               "start_date": start.isoformat(), "end_date": end.isoformat()}
     url = f"{get_settings().openbb_url}{SPOT_PATH}"
@@ -71,7 +72,10 @@ async def fetch_oil_series(
     else:
         response = await client.get(url, params=params)
     response.raise_for_status()
-    return parse_oil_payload(response.text, benchmark)
+    if response.status_code == 204:
+        # OpenBB maps an empty provider result (EmptyDataError) to 204 with no body: valid, no observations.
+        return []
+    return parse_oil_payload(response.text, benchmark)  # any other empty/malformed body still fails closed
 
 
 def is_stale(observed: date, *, today: date) -> bool:

@@ -306,6 +306,8 @@ export type OilObservation = {
   source_url: string;
   retrieved_at: string;
   stale: boolean;
+  /** Backend heuristic threshold (calendar days); the UI displays it and never hardcodes it. */
+  stale_after_days: number;
 };
 export type OilLatest = { observations: OilObservation[]; missing_benchmarks: OilBenchmark[] };
 export type OilPoint = { benchmark: OilBenchmark; observed_date: string; value: string };

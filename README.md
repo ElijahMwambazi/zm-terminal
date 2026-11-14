@@ -228,7 +228,7 @@ zm-terminal/
 
 The canonical sequencing lives in [`docs/ROADMAP.md`](docs/ROADMAP.md), while [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) records implemented behavior and known limitations.
 
-Current implemented domains are USD/ZMW, BoZ Treasury bills and Government bonds with stored history, ERB fuel prices/build-ups, Ministry maize/soya national-average prices, and global Brent/WTI oil benchmarks (OpenBB/FRED; set `FRED_API_KEY`, see `docs/CURRENT_STATE.md`). The next planned item is the derived `OIL ZM` view.
+Current implemented domains are USD/ZMW, BoZ Treasury bills and Government bonds with stored history, ERB fuel prices/build-ups, Ministry maize/soya national-average prices, and global Brent/WTI oil benchmarks (OpenBB/FRED; set `FRED_API_KEY` and run `docker compose up -d openbb`, see `docs/CURRENT_STATE.md`). The next planned item is the derived `OIL ZM` view.
 
 ## Development principles
 

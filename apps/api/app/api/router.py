@@ -282,13 +282,17 @@ async def _load_oil_latest(benchmarks: tuple[str, ...]) -> list[OilObservation]:
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("Oil benchmark fetch failed (%s)", type_name(exc))
         raise HTTPException(status_code=502, detail="Oil benchmark data unavailable or invalid") from exc
-    # Valid live data is still returned if storage fails; only the exception type is logged.
-    try:
-        await asyncio.to_thread(save_oil_observations, [p for points in fetched for p in points], retrieved_at=now)
-    except OilConflictError:
-        logger.warning("Oil persistence conflict; live data returned unsaved")
-    except Exception as exc:
-        logger.warning("Oil persistence failed (%s); live data returned unsaved", type_name(exc))
+    # Valid live data is still returned if storage fails. Each benchmark is its own atomic batch so one
+    # benchmark's conflict cannot block the other; only the benchmark and exception type are logged.
+    for benchmark, points in zip(benchmarks, fetched):
+        if not points:
+            continue
+        try:
+            await asyncio.to_thread(save_oil_observations, points, retrieved_at=now)
+        except OilConflictError:
+            logger.warning("%s oil persistence conflict; live data returned unsaved", benchmark)
+        except Exception as exc:
+            logger.warning("%s oil persistence failed (%s); live data returned unsaved", benchmark, type_name(exc))
     observations = []
     for points in fetched:
         if points:
