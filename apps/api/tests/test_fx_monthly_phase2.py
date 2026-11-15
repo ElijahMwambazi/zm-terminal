@@ -73,7 +73,7 @@ def temp_dirs_left(tmp_path_factory=None) -> list:
     return glob.glob(os.path.join(tempfile.gettempdir(), "zmt-pdf-*"))
 
 
-def test_extractor_uses_popen_without_a_shell_with_file_sinks(monkeypatch):
+def test_extractor_uses_popen_without_a_shell_with_bounded_pipes(monkeypatch):
     seen = {}
     real = subprocess.Popen
 
@@ -86,7 +86,8 @@ def test_extractor_uses_popen_without_a_shell_with_file_sinks(monkeypatch):
     assert seen["command"][:7] == ["pdftotext", "-layout", "-f", "7", "-l", "7", "-enc"] and seen["command"][-1] == "-"
     kw = seen["kwargs"]
     assert kw["shell"] is False and kw["stdin"] == subprocess.DEVNULL
-    assert kw["stdout"] is not subprocess.PIPE and kw["stderr"] is not subprocess.PIPE  # file sinks, never in-memory pipes
+    assert kw["stdout"] == subprocess.PIPE and kw["stderr"] == subprocess.PIPE  # drained by bounded reader threads
+    assert "preexec_fn" not in kw  # correctness does not depend on OS resource limits
     assert seen["input"] == b"%PDF-1.4 data" and not seen["dir"].exists()
 
 
@@ -120,49 +121,88 @@ def test_unrunnable_executable_is_reported_by_class_only(tmp_path):
 
 
 FLOOD = "chunk = b'x' * 65536\nwhile True:\n    os.write({fd}, chunk)\n"
+BOTH = ("chunk = b'x' * 65536\nwhile True:\n    os.write(1, chunk)\n    os.write(2, chunk)\n")
 
 
-def test_oversized_stdout_kills_the_child_before_unbounded_buffering(tmp_path, monkeypatch):
-    sizes, pids = [], []
-    real_stat = layout._size
+@pytest.fixture
+def spied(monkeypatch):
+    """Small caps, and capture of the Popen child and the bounded readers (no OS resource limit exists in this design)."""
+    monkeypatch.setattr(layout, "MAX_OUTPUT_BYTES", 20_000)
+    monkeypatch.setattr(layout, "MAX_STDERR_BYTES", 10_000)
+    seen = {"procs": [], "readers": []}
+    real_popen, real_reader = subprocess.Popen, layout._BoundedReader
 
-    def watching(path):
-        n = real_stat(path)
-        sizes.append(n)
-        return n
+    def popen(*a, **k):
+        seen["procs"].append(real_popen(*a, **k))
+        return seen["procs"][-1]
 
-    real_popen = subprocess.Popen
+    class Spy(real_reader):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            seen["readers"].append(self)
 
-    def spy(*a, **k):
-        p = real_popen(*a, **k)
-        pids.append(p)
-        return p
+    monkeypatch.setattr(layout.subprocess, "Popen", popen)
+    monkeypatch.setattr(layout, "_BoundedReader", Spy)
+    return seen
 
-    monkeypatch.setattr(layout, "_size", watching)
-    monkeypatch.setattr(layout.subprocess, "Popen", spy)
+
+def assert_stopped(seen):
+    assert seen["procs"][0].returncode is not None  # reaped
+    assert not any(r.is_alive() for r in seen["readers"])  # no blocked reader threads
+
+
+def test_stdout_flood_is_bounded_by_cap_plus_one_chunk(tmp_path, spied):
+    before = set(temp_dirs_left())
     with pytest.raises(layout.LayoutExtractionError, match="larger than expected"):
         layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, FLOOD.format(fd=1)), timeout=20)
-    assert pids[0].returncode is not None  # reaped (killed by the monitor or by the RLIMIT_FSIZE hard cap)
-    assert max(sizes) <= layout.MAX_OUTPUT_BYTES + 1  # on-disk output never grew past the cap (+1 detection byte)
+    out, err = spied["readers"]
+    assert out.overflow and len(out.retained) <= layout.MAX_OUTPUT_BYTES
+    assert out.total_seen <= layout.MAX_OUTPUT_BYTES + layout.READ_CHUNK_BYTES  # overshoot, not megabytes
+    assert_stopped(spied)
+    assert set(temp_dirs_left()) == before and not list(tmp_path.glob("*.txt"))  # no output files anywhere
 
 
-def test_oversized_stderr_is_bounded_too(tmp_path, monkeypatch):
-    pids = []
-    real_popen = subprocess.Popen
-    monkeypatch.setattr(layout.subprocess, "Popen", lambda *a, **k: pids.append(real_popen(*a, **k)) or pids[-1])
-    body = "chunk = b'e' * 4096\nwhile True:\n    os.write(2, chunk)\n    time.sleep(0.001)\n"
-    with pytest.raises(layout.LayoutExtractionError, match="larger than expected"):
+def test_stderr_flood_is_bounded_and_not_leaked(tmp_path, spied):
+    body = "chunk = b'SECRETERR' * 8000\nwhile True:\n    os.write(2, chunk)\n"
+    with pytest.raises(layout.LayoutExtractionError, match="larger than expected") as info:
         layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, body), timeout=20)
-    assert pids[0].returncode is not None
+    out, err = spied["readers"]
+    assert err.overflow and len(err.retained) <= layout.MAX_STDERR_BYTES
+    assert err.total_seen <= layout.MAX_STDERR_BYTES + layout.READ_CHUNK_BYTES
+    assert "SECRETERR" not in str(info.value)
+    assert_stopped(spied)
 
 
-def test_timeout_kills_and_reaps_the_child(tmp_path, monkeypatch):
-    pids = []
-    real_popen = subprocess.Popen
-    monkeypatch.setattr(layout.subprocess, "Popen", lambda *a, **k: pids.append(real_popen(*a, **k)) or pids[-1])
+def test_concurrent_stdout_and_stderr_flood_does_not_deadlock(tmp_path, spied):
+    with pytest.raises(layout.LayoutExtractionError, match="larger than expected"):
+        layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, BOTH), timeout=20)
+    out, err = spied["readers"]
+    assert out.overflow or err.overflow
+    assert out.total_seen <= layout.MAX_OUTPUT_BYTES + layout.READ_CHUNK_BYTES
+    assert err.total_seen <= layout.MAX_STDERR_BYTES + layout.READ_CHUNK_BYTES
+    assert_stopped(spied)
+
+
+def test_timeout_kills_reaps_and_stops_reader_threads(tmp_path, spied):
     with pytest.raises(layout.LayoutExtractionError, match="timed out"):
         layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, "time.sleep(60)"), timeout=0.3)
-    assert pids[0].returncode is not None and pids[0].poll() is not None
+    assert_stopped(spied)
+
+
+def test_overflow_takes_precedence_over_nonzero_exit(tmp_path, spied):
+    body = FLOOD.format(fd=1).replace("while True:", "for _ in range(8):").replace("os.write", "os.write") + "sys.exit(5)"
+    with pytest.raises(layout.LayoutExtractionError, match="larger than expected"):
+        layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, body), timeout=20)
+
+
+def test_output_exactly_at_the_cap_is_accepted(tmp_path, spied):
+    body = f"sys.stdout.write('y' * {layout.MAX_OUTPUT_BYTES})"
+    assert len(layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, body))) == layout.MAX_OUTPUT_BYTES
+
+
+def test_multibyte_utf8_output_is_decoded_exactly(tmp_path):
+    body = "sys.stdout.buffer.write('K 5,283.60 \\u00e9\\u20ac\\n'.encode('utf-8'))"
+    assert layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, body)) == "K 5,283.60 \u00e9\u20ac\n"
 
 
 @pytest.mark.parametrize("body,exc", [
