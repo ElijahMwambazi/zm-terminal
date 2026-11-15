@@ -257,8 +257,28 @@ Notes:
 - The printed Table 14 title contains "mini- hydro" with a space. Contents-page titles for Tables 13-16 are not used for identity.
 - **Table 14 continues from PDF page 22 to 23**: the **header row repeats** on page 23 (`Year Chishimba Falls ... Total (GWh)`), but the **caption "Table 14" is not repeated**. Page 23 contains only that header and the years 2021-2025, followed by the printed page number 16. Table 15 starts on the next PDF page (24) under its own heading `2.1.3`.
 - Tables 13, 15 and 16 are single-page. Table 15 and Table 16 share PDF page 24 (Table 15 ends, section heading `2.1.4`, then Table 16).
-- Table 16 has a **multi-line stacked header** in which words are split across 6 lines. The column order below was established from word x-coordinates and cross-checked against the 2025 values in ESR 2025 Table 3-6; a text-line parse of the header is not reliable, so a future parser should pin the header by coordinates or by the exact ordered column list.
-- **Table 16 column order** (left to right, after `Year`): 1 `Bangweulu Power Limited`; 2 `Itezhi tezhi Power Corporation`; 3 `Kafue Gorge Lower`; 4 `Kariba North Bank Extension`; 5 `Lunsemfwa Hydro Power Limited`; 6 `Maamba Energy Limited`; 7 `Ndola Energy Corporation Limited`; 8 `Kafue Gorge Mini Hydro`; 9 `Chisamba`; 10 `Solarcentury` (printed `Solar` / `century`); 11 `United Capital Fertiliser Limited`; 12 `Ngonye Power Limited`; 13 `Dangote`; 14 `CEC Emergency Generators`; then `Total GWh`. Header wording is reconstructed from fragments and must be re-confirmed against the PDF when the manifest is built.
+- Table 16 has a **multi-line stacked header** in which words are split across 7 printed lines. The ordered list below was extracted from word coordinates (every header word assigned to the nearest data column) and cross-checked against the 2025 values in ESR 2025 Table 3-6; it is the **final pinned list**. Whitespace-only normalization applied: header lines belonging to one column are joined with a single space, in top-to-bottom order. Nothing else is normalized; capitalization and spelling are as printed.
+- **Table 16 final ordered columns** (PDF page 24, left to right after `Year`; positions are the ordinal among the 14 station columns):
+
+  | # | Printed header (line-joined) | Role |
+  |---|---|---|
+  | 1 | `Bangweulu Power Limited` | station observation |
+  | 2 | `Itezhi tezhi Power Corporation` | station observation |
+  | 3 | `Kafue Gorge Lower` | station observation |
+  | 4 | `Kariba North Bank Extension` | station observation |
+  | 5 | `Lunsemfwa Hydro Power Limited` | station observation |
+  | 6 | `Maamba Energy Limited` | station observation |
+  | 7 | `Ndola Energy Corporation Limited` | station observation |
+  | 8 | `Kafue Gorge Mini Hydro` | station observation |
+  | 9 | `Chisamba` | station observation |
+  | 10 | `Solar century` (printed on two lines: `Solar` / `century`) | station observation |
+  | 11 | `United Capital Fertiliser` (no `Limited`) | station observation |
+  | 12 | `Ngonye Power Limited` | station observation |
+  | 13 | `Dangote` | station observation |
+  | 14 | `CEC Emergency Generators` | station observation (flagged `group_like`) |
+  | - | `Total GWh` (printed `Total` / `GWh`) | **diagnostic total only, never an observation** |
+
+  The `Solar century` identity is the line-joined printed text; ESR 2025 spells the same plant `Solarcentury`, which is a different publication and is **not** used to rewrite the bulletin's identity.
 - **Name collision**: Table 15's `Itezhi tezhi` is a ZESCO diesel station; Table 16's `Itezhi tezhi Power Corporation` is the IPP hydro station. They are different stations and must never be merged by name.
 - No footnotes, explanatory notes or legend appear on PDF pages 22-24 for these tables.
 
@@ -302,8 +322,12 @@ Identity for each table is its exact normalized caption, its page(s), its ordere
 - an unexpected, missing, extra or reordered station column in any table (including the Table 16 order above);
 - a missing, extra, duplicated or non-increasing year; the first year must be 2013 and the last 2025, with 13 consecutive rows;
 - a cell that is neither a decimal nor `-` (and `-` only in Tables 14-15); a Table 16 cell that is neither a decimal nor `0`;
-- a different count of numeric tokens per row than the expected column count (4, 7, 8 and 15 tokens for Tables 13, 14, 15, 16);
+- a row whose **source value cells** differ from the expected count, independent of whether a cell is numeric or `-`/`0`: excluding the `Year` cell, each row must have the station cells (3, 6, 7 and 14 for Tables 13, 14, 15, 16) plus exactly one total cell, so 4, 7, 8 and 15 value cells. Every station cell counts whether numeric or dash; dash cells never reduce the expected row width, and the total cell is counted separately for structural validation;
 - scanning text elsewhere in the PDF for similar tables: only the pinned pages are read.
+
+### 19.6a Complete-grid invariant
+
+The four tables together define a complete logical grid of **390 station/year observation cells**: (3 + 6 + 7 + 14) = 30 station columns x 13 years (2013-2025). The parser must verify the whole expected station/year grid (every expected station for every expected year exists exactly once) rather than counting emitted numeric values. Dash cells are part of the grid and are emitted (`generation_gwh = null`, `value_state = not_reported`); they are never omitted. A numeric cell becomes a Decimal, and a printed numeric zero becomes Decimal zero. Total cells are outside the 390.
 
 ### 19.7 Total reconciliation and the Table 16 versus Table 12 discrepancy
 
@@ -318,14 +342,15 @@ Table 16 versus Table 12 (2025):
 
 - Table 16 `Total GWh`, 2025: **5,875.67 GWh**, summing 14 columns including `CEC Emergency Generators` 2.50.
 - Table 12 (printed "Generation (GWh)"), 2025 rows: `ZESCO's Major-Hydro` 8,511.89; `ZESCO's Mini-Hydro` 171.37; `ZESCO's Diesel` 1.30; **`IPPs` 5,873.17**; `Total` 14,560.23.
-- **5,875.67 - 2.50 = 5,873.17 exactly.** Table 12's `IPPs` line equals Table 16's total **excluding** `CEC Emergency Generators`, which ESR 2025 Table 3-6 classifies under "LSGO" (with Shang'ombo 1.30 = 3.80 together), not under IPPs.
-- Table 12's rows **do not foot to its own total**: 8,511.89 + 171.37 + 1.30 + 5,873.17 = 14,557.73, but the printed total is 14,560.23 (+2.50). Using Table 16's 5,875.67 instead gives exactly 14,560.23. So Table 12's total includes the CEC generators while its `IPPs` row excludes them.
+- **5,875.67 - 2.50 = 5,873.17 exactly** (arithmetic fact): Table 12's `IPPs` figure equals Table 16's 2025 total minus the `CEC Emergency Generators` value. Separately, ESR 2025 Table 3-6 classifies `CEC emergency Generators` under "LSGO" (2.50 with Shang'ombo 1.30 = 3.80 for 2025), not under IPPs.
+- Table 12's rows **do not foot to its own total**: 8,511.89 + 171.37 + 1.30 + 5,873.17 = 14,557.73, but the printed total is 14,560.23 (+2.50). Using Table 16's 5,875.67 instead gives exactly 14,560.23. This is a footing discrepancy printed in Table 12 itself.
 - The same pattern appears in 2024 (Table 16 6,096.15; CEC 5.95; ESR Table 3-6 IPP subtotal 6,090.15, a 0.05 residual).
 
 **Conclusion and policy:**
-1. The two figures do not describe the same population: the bulletin's Table 16 **includes** `CEC Emergency Generators` in its IPP group; Table 12's `IPPs` row and ESR Table 3-6's IPP subtotal **exclude** them (ESR classes them as LSGO). The label scope differs even though both are called IPP generation.
+1. **Verified facts:** Table 16's 2025 total is 5,875.67 GWh; Table 12's `IPPs` value is 5,873.17 GWh; the difference is 2.50 GWh; Table 12's printed total has a corresponding +2.50 GWh footing discrepancy; and ESR 2025 classifies `CEC Emergency Generators` under LSGO/diesel rather than IPPs.
+   **Supported inference (not source-proven):** the matching 2.50 GWh and ERB's classification strongly suggest that Table 12's composition or scoping treatment involves `CEC Emergency Generators`, with Table 16 grouping them under IPPs and Table 12's `IPPs` row not. Table 12 itself does not enumerate its constituent stations, so this causal explanation is **not** established by the source and must not be recorded as fact.
 2. Neither figure is repaired. Table 12 and Table 16 are both stored/diagnosed as published; the parser records the discrepancy rather than forcing equality.
-3. National/group total comparison is a **diagnostic**, not an equality gate: it reports the footing residuals above and the Table 16/Table 12 difference as a *known source classification difference* with its explanation, and fails only if a residual **changes unexpectedly from the recorded values** (so any re-served file with different numbers is caught).
+3. National/group total comparison is a **diagnostic**, not an equality gate: it reports the footing residuals above and the Table 16/Table 12 difference as a *known pinned source discrepancy* (with the supported, unproven CEC inference above), and fails only if a residual **changes unexpectedly from the recorded values** (so any re-served file with different numbers is caught).
 4. Table 12's own footing error (+2.50) is a source discrepancy to be flagged, not corrected.
 
 ### 19.8 Proposed manifest entry (documentation only)
@@ -377,6 +402,7 @@ source_url, source_publication, source_sha256, publication_year, column_flags (e
 - Years are exactly 2013-2025, strictly increasing, one row each, no duplicates, none missing or extra.
 - Every numeric cell parses exactly with `Decimal` (no float), thousands separators removed; the printed decimals are preserved.
 - `-` appears only in Tables 14-15 and `0` only as a printed Table 16 numeral; neither is converted to the other and neither is interpolated.
+- The complete 390-cell station/year grid is present exactly once (30 stations x 13 years), including dash cells emitted as null/`not_reported`; row structure is validated by source value-cell count, not by the number of numeric values.
 - No duplicate (year, station) observation; station names are unique within a table and are not merged across tables (the Itezhi tezhi collision).
 - Totals are never treated as stations and never copied into the station observations.
 - Published totals are never repaired or silently reconciled; the known residuals (+0.05 in 2024 and +0.01 in 2025 for Table 16, and the Table 12 / Table 16 relationship in 19.7) are recorded as expected diagnostics, and any other residual fails.
