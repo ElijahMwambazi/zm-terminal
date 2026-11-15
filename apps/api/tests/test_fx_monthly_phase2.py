@@ -12,6 +12,8 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -187,6 +189,93 @@ def test_timeout_kills_reaps_and_stops_reader_threads(tmp_path, spied):
     with pytest.raises(layout.LayoutExtractionError, match="timed out"):
         layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, "time.sleep(60)"), timeout=0.3)
     assert_stopped(spied)
+
+
+def stream_fd(seen, name):
+    return getattr(seen["procs"][0], name).fileno()
+
+
+def test_full_drain_after_child_exit_is_not_truncated_by_a_delayed_reader(tmp_path, spied, monkeypatch):
+    monkeypatch.setattr(layout, "MAX_OUTPUT_BYTES", 200_000)
+    real_read, first = layout._read, {"done": False}
+
+    def delayed(fd, n):  # the reader does not start reading until the child has exited and been reaped
+        if not first["done"]:
+            first["done"] = True
+            while spied["procs"][0].returncode is None:
+                time.sleep(0.01)
+            time.sleep(0.05)
+        return real_read(fd, n)
+
+    monkeypatch.setattr(layout, "_read", delayed)
+    body = "sys.stdout.buffer.write(bytes(range(65, 91)) * 1923 + b'\\n')"  # ~50,000 bytes, several chunks
+    expected = (bytes(range(65, 91)) * 1923 + b"\n").decode()
+    for _ in range(3):
+        first["done"] = False
+        spied["procs"].clear(); spied["readers"].clear()
+        assert layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, body)) == expected
+        assert len(expected) == 49_999 and all(r.state == "eof" and not r.is_alive() for r in spied["readers"])
+        assert spied["procs"][0].returncode == 0
+
+
+@pytest.mark.parametrize("name", ["stdout", "stderr"])
+def test_unexpected_reader_io_error_rejects_extraction(tmp_path, spied, monkeypatch, name):
+    import errno
+    real_read = layout._read
+
+    def faulty(fd, n):
+        if fd == stream_fd(spied, name):
+            raise OSError(errno.EIO, "injected")
+        return real_read(fd, n)
+
+    monkeypatch.setattr(layout, "_read", faulty)
+    body = "sys.stdout.write('page text that looks valid\\n'); sys.stderr.write('SECRETERR'); time.sleep(0.2)"
+    with pytest.raises(layout.LayoutExtractionError, match="output reader failed") as info:
+        layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, body), timeout=20)
+    assert "SECRETERR" not in str(info.value) and "injected" not in str(info.value)
+    assert any(r.state == "failed" and isinstance(r.error, OSError) for r in spied["readers"])
+    assert_stopped(spied)
+
+
+def test_unexpected_non_io_exception_in_a_reader_rejects_extraction(tmp_path, spied, monkeypatch):
+    real_read = layout._read
+
+    def buggy(fd, n):
+        if fd == stream_fd(spied, "stderr"):
+            raise RuntimeError("bug")
+        return real_read(fd, n)
+
+    monkeypatch.setattr(layout, "_read", buggy)
+    with pytest.raises(layout.LayoutExtractionError, match="output reader failed"):
+        layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, "sys.stdout.write('ok\\n')"))
+    assert_stopped(spied)
+
+
+def test_reader_that_does_not_finish_fails_extraction_instead_of_returning_data(tmp_path, spied, monkeypatch):
+    monkeypatch.setattr(layout, "JOIN_SECONDS", 0.3)
+    release = threading.Event()
+    real_read = layout._read
+
+    def stuck(fd, n):
+        if fd == stream_fd(spied, "stdout"):
+            release.wait(10)  # never finishes within the join deadline
+        return real_read(fd, n)
+
+    monkeypatch.setattr(layout, "_read", stuck)
+    try:
+        with pytest.raises(layout.LayoutExtractionError, match="could not be fully read"):
+            layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, "sys.stdout.write('ok\\n')"))
+        assert spied["procs"][0].returncode is not None  # child still reaped
+    finally:
+        release.set()
+        for r in spied["readers"]:
+            r.join(5)
+    assert not any(r.is_alive() for r in spied["readers"])
+
+
+def test_large_normal_output_below_the_cap_is_returned_byte_for_byte(tmp_path, spied):
+    body = "sys.stdout.write(''.join(chr(97 + i % 26) for i in range(15000)))"  # > 1 chunk, < 20,000 cap
+    assert layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, body)) == "".join(chr(97 + i % 26) for i in range(15000))
 
 
 def test_overflow_takes_precedence_over_nonzero_exit(tmp_path, spied):
