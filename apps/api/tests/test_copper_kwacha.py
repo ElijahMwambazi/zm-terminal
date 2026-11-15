@@ -18,6 +18,7 @@ from app.services.copper_kwacha import (
 )
 from app.services.copper_store import save_copper_months
 from app.services.imf_pcps import IMF_COPPER_URL, CopperMonth
+from tests.storage_contract import assert_no_derived_storage, schema_objects
 
 router_module = importlib.import_module("app.api.router")
 client = TestClient(app)
@@ -387,10 +388,11 @@ def test_pg_nothing_is_persisted(engine):
     def snap():
         with engine.connect() as c:
             names = sorted(r[0] for r in c.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public'")))
-            return names, [c.execute(text(f'SELECT count(*) FROM "{n}"')).scalar() for n in names]
+            return names, [c.execute(text(f'SELECT count(*) FROM "{n}"')).scalar() for n in names], schema_objects(c)
     before = snap()
     copper_kwacha.fetch_copper_kwacha_correlation("ALL", "6M", today=TODAY, engine=engine)
-    assert snap() == before and not [f for f in Path(__file__).parents[3].joinpath("db/init").glob("*.sql") if int(f.name[:3]) > 11 and "copper" in f.read_text().lower()]
+    assert snap() == before
+    assert_no_derived_storage(engine, Path(__file__).parents[3] / "db/init")
 
 
 # ======================= historical sensitivity (beta) =======================

@@ -18,6 +18,7 @@ from app.services.copper_store import save_copper_months
 from app.services.copper_zm import CopperRow, derive_copper_zm
 from app.services.imf_pcps import IMF_COPPER_URL, CopperMonth
 from app.services.oil_zm import FxMid, derive_oil_zm, BrentMonth
+from tests.storage_contract import assert_no_derived_storage, schema_objects
 
 router_module = importlib.import_module("app.api.router")
 client = TestClient(app)
@@ -338,9 +339,10 @@ def test_pg_derivation_is_read_only_and_persists_nothing(engine):
         with engine.connect() as c:
             tables = {r[0] for r in c.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public'"))}
             counts = {t: c.execute(text(f'SELECT count(*) FROM "{t}"')).scalar() for t in tables}
-        return tables, counts
+            objects = schema_objects(c)
+        return tables, counts, objects
     before = snapshot()
     copper_zm.fetch_copper_zm("ALL", today=TODAY, engine=engine); copper_zm.fetch_copper_zm("1Y", today=TODAY, engine=engine)
     assert snapshot() == before
     assert not [t for t in before[0] if "zm" in t and "copper" in t]  # no derived table exists
-    assert not [f for f in Path(__file__).parents[3].joinpath("db/init").glob("*.sql") if int(f.name[:3]) > 11 and "copper" in f.read_text().lower()]  # no copper-derivation migration after 011
+    assert_no_derived_storage(engine, Path(__file__).parents[3] / "db/init")

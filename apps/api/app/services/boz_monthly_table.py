@@ -43,7 +43,7 @@ MONTHS = ("January", "February", "March", "April", "May", "June", "July", "Augus
 ORDERING_EXCEPTIONS: frozenset[date] = frozenset()
 
 _HEADING = "KWACHA/US DOLLAR EXCHANGE RATES"
-_TABLE_LINE = re.compile(r"(?:^|\s)Table 02$")
+_TABLE_TOKEN = re.compile(r"\bTable 02\b")
 _BOZ_COLUMNS = "Bank of Zambia Rates Bureau Rates"
 _COLUMN_LABELS = "Buying Selling Mid-rate Buying Selling Mid-rate"
 _VALUE = r"\d{1,3}\.\d{2}"
@@ -85,11 +85,26 @@ def _lines(page_text: str) -> list[str]:
 def _header_indexes(lines: list[str]) -> list[int]:
     found = []
     for i, line in enumerate(lines):
-        if not _TABLE_LINE.search(line):
+        if not _TABLE_TOKEN.search(line):
             continue
-        around = lines[max(0, i - 1): i + 2]
-        if any(_HEADING in candidate for candidate in around):
+        # Vetted forms: heading + table number on one line, or two exact adjacent
+        # lines in either order. Never borrow a heading carrying another table id.
+        if line == f"{_HEADING} Table 02":
             found.append(i)
+        elif line == "Table 02":
+            adjacent = [lines[j] for j in (i - 1, i + 1) if 0 <= j < len(lines)]
+            matches = adjacent.count(_HEADING)
+            if matches > 1:
+                raise Table02Error("Ambiguous headings adjacent to Table 02")
+            if matches != 1:
+                raise Table02NotFound("Table 02 has no exact associated heading")
+            heading_index = i - 1 if i and lines[i - 1] == _HEADING else i + 1
+            beyond_heading = heading_index + (heading_index - i)
+            if 0 <= beyond_heading < len(lines) and re.fullmatch(r"Table \d+[A-Za-z]?", lines[beyond_heading]):
+                raise Table02Error("Ambiguous table numbers adjacent to the exchange-rate heading")
+            found.append(i)
+        else:
+            raise Table02NotFound("Unsupported Table 02 heading form")
     return found
 
 

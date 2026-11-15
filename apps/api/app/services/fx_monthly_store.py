@@ -12,21 +12,20 @@ from app.services.boz_monthly_table import (
 )
 from app.services.fx_monthly_combine import MonthlyConflictError, MonthlyObservation
 
+# Every stable canonical field participates in equality; retrieval/import time does not.
+_STABLE_COLUMNS = (
+    "base_currency", "quote_currency", "observation_month", "source", "source_series", "buy", "mid", "sell",
+    "source_publication", "source_url", "source_page", "source_table", "published_precision", "currency_regime",
+)
 _INSERT = text(
-    """
-    INSERT INTO fx_monthly_averages
-        (base_currency, quote_currency, observation_month, buy, mid, sell, source, source_series, source_publication,
-         source_url, source_page, source_table, published_precision, currency_regime, imported_at)
-    VALUES ('USD', 'ZMW', :month, :buy, :mid, :sell, :source, :source_series, :publication, :source_url, :page, :table,
-            :precision, :regime, :imported_at)
-    ON CONFLICT (base_currency, quote_currency, observation_month, source_series) DO NOTHING
-    """
+    "INSERT INTO fx_monthly_averages (" + ", ".join((*_STABLE_COLUMNS, "imported_at")) + ") VALUES ("
+    + ", ".join(":" + field for field in (*_STABLE_COLUMNS, "imported_at")) + ") "
+    "ON CONFLICT (base_currency, quote_currency, observation_month, source_series) DO NOTHING"
 )
 _SELECT_ONE = text(
-    """
-    SELECT buy, mid, sell FROM fx_monthly_averages
-    WHERE base_currency = 'USD' AND quote_currency = 'ZMW' AND observation_month = :month AND source_series = :source_series
-    """
+    "SELECT " + ", ".join(_STABLE_COLUMNS) + " FROM fx_monthly_averages "
+    "WHERE base_currency = :base_currency AND quote_currency = :quote_currency "
+    "AND observation_month = :observation_month AND source_series = :source_series"
 )
 
 
@@ -35,24 +34,28 @@ def save_monthly_averages(
 ) -> tuple[int, int]:
     """Atomically insert; returns (inserted, already_present). Never overwrites.
 
-    The same month with numerically equal buy/mid/sell is a no-op; a different value is a conflict and the whole import
-    rolls back (no silent revision).
+    Numerically equal buy/mid/sell AND matching stable canonical provenance are a no-op. Any rate or stable
+    metadata difference is a conflict and rolls back the whole import. imported_at alone never creates a conflict.
     """
     inserted = identical = 0
     conflicts: list[date] = []
     with (engine or get_engine()).begin() as connection:
         for o in observations:
             params = {
-                "month": o.month, "buy": o.buy, "mid": o.mid, "sell": o.sell, "source": SOURCE, "source_series": SOURCE_SERIES,
-                "publication": o.publication_title, "source_url": o.source_url, "page": o.source_page, "table": SOURCE_TABLE,
-                "precision": PUBLISHED_PRECISION, "regime": CURRENCY_REGIME, "imported_at": imported_at,
+                "base_currency": "USD", "quote_currency": "ZMW", "observation_month": o.month,
+                "buy": o.buy, "mid": o.mid, "sell": o.sell, "source": SOURCE, "source_series": SOURCE_SERIES,
+                "source_publication": o.publication_title, "source_url": o.source_url, "source_page": o.source_page,
+                "source_table": SOURCE_TABLE, "published_precision": PUBLISHED_PRECISION,
+                "currency_regime": CURRENCY_REGIME, "imported_at": imported_at,
             }
             if connection.execute(_INSERT, params).rowcount == 1:
                 inserted += 1
-            elif tuple(connection.execute(_SELECT_ONE, params).one()) == (o.buy, o.mid, o.sell):
-                identical += 1
             else:
-                conflicts.append(o.month)
+                stored = connection.execute(_SELECT_ONE, params).mappings().one()
+                if all(stored[field] == params[field] for field in _STABLE_COLUMNS):
+                    identical += 1
+                else:
+                    conflicts.append(o.month)
         if conflicts:  # raising inside begin() rolls the whole import back
             raise MonthlyConflictError(len(conflicts), [f"{m:%Y-%m} (stored)" for m in sorted(conflicts)])
     return inserted, identical

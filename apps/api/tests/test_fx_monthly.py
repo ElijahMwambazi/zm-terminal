@@ -10,7 +10,7 @@ import asyncio
 import importlib
 import inspect
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -28,6 +28,7 @@ from app.services.boz_monthly_table import MonthlyRate, Table02Error, Table02Not
 from app.services.fx_monthly_combine import MonthlyConflictError, MonthlyObservation, combine, find_gaps, month_range
 from app.services.fx_monthly_store import fetch_fx_monthly, save_monthly_averages
 from tests.pdfgen import make_pdf
+from tests.storage_contract import assert_no_derived_storage
 
 router_module = importlib.import_module("app.api.router")
 client = TestClient(app)
@@ -123,6 +124,31 @@ def test_duplicate_table_02_blocks_are_rejected():
         parse_table02(recent() + [recent()[1]])
     with pytest.raises(Table02Error, match="More than one"):
         parse_table02(["\n".join(recent()[1].splitlines() * 2)])
+
+
+@pytest.mark.parametrize("heading", [
+    "KWACHA/US DOLLAR EXCHANGE RATES - RETAIL ONLY Table 02",
+    "RETAIL KWACHA/US DOLLAR EXCHANGE RATES Table 02",
+    "KWACHA/US DOLLAR EXCHANGE RATES Table 03\nTable 02",
+    "Table 02\nKWACHA/US DOLLAR EXCHANGE RATES Table 03",
+    "Table 03\nKWACHA/US DOLLAR EXCHANGE RATES Table 02 EXTRA",
+    "KWACHA/US DOLLAR EXCHANGE RATES\nTable 02\nKWACHA/US DOLLAR EXCHANGE RATES",
+    "Table 02\nKWACHA/US DOLLAR EXCHANGE RATES\nTable 02",
+    "Table 03\nKWACHA/US DOLLAR EXCHANGE RATES\nTable 02",
+    "Table 02\nKWACHA/US DOLLAR EXCHANGE RATES\nTable 03",
+])
+def test_malformed_and_ambiguous_table_headings_fail_closed(heading):
+    with pytest.raises(Table02Error):
+        parse_table02(mutate("KWACHA/US DOLLAR EXCHANGE RATES Table 02", heading))
+
+
+@pytest.mark.parametrize("heading", [
+    "KWACHA/US DOLLAR EXCHANGE RATES Table 02",
+    "Table 02\nKWACHA/US DOLLAR EXCHANGE RATES",
+    "KWACHA/US DOLLAR EXCHANGE RATES\nTable 02",
+])
+def test_exact_supported_heading_forms_remain_supported(heading):
+    assert len(parse_table02(mutate("KWACHA/US DOLLAR EXCHANGE RATES Table 02", heading)).rows) == 5
 
 
 def test_missing_monthly_averages_marker_is_rejected():
@@ -590,6 +616,76 @@ def test_pg_conflict_rolls_back_the_whole_import_and_never_overwrites(engine):
     with engine.connect() as c:
         assert c.execute(text("SELECT count(*) FROM fx_monthly_averages")).scalar() == 2  # 2025-12 and 2026-03 rolled back
         assert c.execute(text("SELECT mid FROM fx_monthly_averages WHERE observation_month = '2026-02-01'")).scalar() == D("20.15")
+
+
+@pytest.mark.parametrize("field,value", [
+    ("source_publication", "Different publication"),
+    ("source_url", "https://www.boz.zm/sites/default/files/different.pdf"),
+    ("source_page", 9),
+    ("source_table", "Table 03"),
+    ("published_precision", 1),
+])
+def test_pg_stable_provenance_conflict_rolls_back_every_insert(engine, field, value):
+    save_monthly_averages([obs((2026, 1))], imported_at=NOW, engine=engine)
+    with engine.begin() as c:
+        c.execute(text(f"UPDATE fx_monthly_averages SET {field} = :value"), {"value": value})
+    with pytest.raises(MonthlyConflictError) as error:
+        save_monthly_averages([obs((2025, 12)), obs((2026, 1)), obs((2026, 2))], imported_at=NOW, engine=engine)
+    assert error.value.count == 1 and "2026-01" in str(error.value)
+    with engine.connect() as c:
+        assert c.execute(text("SELECT count(*) FROM fx_monthly_averages")).scalar() == 1
+        assert c.execute(text(f"SELECT {field} FROM fx_monthly_averages")).scalar() == value
+
+
+def test_pg_import_time_alone_is_not_a_conflict(engine):
+    save_monthly_averages([obs((2026, 1))], imported_at=NOW, engine=engine)
+    assert save_monthly_averages([obs((2026, 1))], imported_at=NOW + timedelta(days=1), engine=engine) == (0, 1)
+    with engine.connect() as c:
+        assert c.execute(text("SELECT imported_at FROM fx_monthly_averages")).scalar() == NOW
+
+
+@pytest.mark.parametrize("field", ["buy", "mid", "sell"])
+@pytest.mark.parametrize("special", ["NaN", "Infinity", "-Infinity"])
+def test_pg_all_rate_columns_reject_nonfinite_numeric(engine, field, special):
+    from sqlalchemy.exc import IntegrityError
+    save_monthly_averages([obs((2026, 1))], imported_at=NOW, engine=engine)
+    with pytest.raises(IntegrityError):
+        with engine.begin() as c:
+            c.execute(text(f"UPDATE fx_monthly_averages SET {field} = CAST(:value AS NUMERIC)"), {"value": special})
+    assert fetch_fx_monthly("ALL", engine=engine).observations[0].mid == D("20.15")
+
+
+def test_pg_finite_exact_numeric_rows_serialize_through_the_monthly_api(engine, monkeypatch):
+    save_monthly_averages([obs((2026, 1), "20.10", "20.15", "20.20")], imported_at=NOW, engine=engine)
+    monkeypatch.setattr(router_module, "fetch_fx_monthly", lambda r: fetch_fx_monthly(r, engine=engine))
+    response = client.get("/api/v1/fx/USDZMW/monthly")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 1 and body["first_month"] == body["last_month"] == "2026-01"
+    point = body["observations"][0]
+    assert (point["buy"], point["mid"], point["sell"]) == ("20.10", "20.15", "20.20")
+    assert not {"stale", "observed_at", "retrieved_at"} & set(point)
+
+
+@pytest.mark.parametrize("ddl", [
+    "CREATE TABLE kwacha_sensitivity (month DATE, beta NUMERIC)",
+    "CREATE MATERIALIZED VIEW kwacha_sensitivity AS SELECT 1 AS beta",
+    "CREATE TABLE public.kwacha_sensitivity (month DATE, beta NUMERIC)",
+    "CREATE VIEW public.kwacha_sensitivity AS SELECT 1 AS beta",
+])
+def test_pg_storage_guard_rejects_unregistered_derived_relations(engine, ddl):
+    with pytest.raises(AssertionError, match="kwacha_sensitivity"):
+        assert_no_derived_storage(engine, Path(__file__).parents[3] / "db/init", extra_sql=[ddl])
+    with engine.connect() as c:
+        assert c.execute(text("SELECT count(*) FROM pg_namespace WHERE nspname LIKE 'storage_contract_%'")).scalar() == 0
+        assert c.execute(text("SELECT to_regclass('public.kwacha_sensitivity')")).scalar() is None
+
+
+def test_pg_storage_guard_allows_future_changes_to_approved_source_tables(engine):
+    assert_no_derived_storage(engine, Path(__file__).parents[3] / "db/init", extra_sql=[
+        "ALTER TABLE fx_rates ADD COLUMN future_source_metadata TEXT",
+        "CREATE INDEX future_source_lookup ON fx_rates (observed_at)",
+    ])
 
 
 def test_pg_month_identity_is_unique_and_constraints_hold(engine):
