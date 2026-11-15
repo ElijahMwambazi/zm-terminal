@@ -6,7 +6,7 @@ Research date: 2026-11-15. Only public, anonymous Bank of Zambia (BoZ) endpoints
 
 ## 1. Verdict
 
-**Every month 2010-01 to 2013-12 (48 months) is published by BoZ in its own Annual Reports, Table 13 "Kwacha/US Dollar Exchange Rates, Monthly Average" (Bank of Zambia rates: buying, selling, mid), and every month appears in at least two independent reports with identical values.** The chain connects to the implemented phase-1 series: the 2014 Annual Report prints 2014-01 to 2014-12 and all 12 match the stored Fortnightly-derived rows exactly (0 differences).
+**Every month 2010-01 to 2013-12 (48 months) is published by BoZ in its own Annual Reports, Table 13 "Kwacha/US Dollar Exchange Rates, Monthly Average" (Bank of Zambia rates: buying, selling, mid), and every month appears in at least two of the five reports reviewed for this research, with identical values.** Scope: the five reports are the selected, reviewed source chain, not an exhaustive list of BoZ publications that print the table (see section 2). The chain connects to the implemented phase-1 series: the 2014 Annual Report prints 2014-01 to 2014-12 and all 12 match the stored Fortnightly-derived rows exactly (0 differences).
 
 Two things must be handled by a phase 2, both already anticipated by the earlier research:
 
@@ -24,9 +24,9 @@ Rights status is unchanged: `review_required`, local/internal use only; no licen
 | Financial and Other Statistics booklets (listing: 2014 to 2025) | Nothing before 2014; 2014 booklet is scanned images (earlier research) | None |
 | `FORTNIGHTLYTIMESERIESending30October2026.xlsx` (series "Monetary and Financial Statistics") | Sheet `K-USD Exchange Rates`: **daily** buy/sell/mid from 2001-01-02, already in rebased units; sheet `Table 02`: weekly averages from 2013; no monthly block | Cross-check only; defective for some months (section 7) |
 | `QuarterlySelectedMacroeconomicIndicators` workbooks | Quarterly indicators, single sheet | None |
-| Annual Reports 2004-2009 and 2015-2025; National Payment Systems reports | Not examined for this window (Dec-only rows earlier; 2025 table is 1 decimal) | Out of scope |
+| Annual Reports 2004-2009 and 2015-2025; National Payment Systems reports | Not reviewed in this pass, except that the 2015 report's Table 13 is known (from review) to repeat the 2013 months; earlier research saw Dec-only rows and a 1-decimal 2025 table | Not part of the selected chain |
 
-The BoZ Annual Report listing has 21 BoZ Annual Reports (2004 to 2025, no 2006) plus 14 National Payment Systems reports, 35 nodes in all; the five used here are the only ones that carry monthly rows for 2010-2013.
+The BoZ Annual Report listing has 21 BoZ Annual Reports (2004 to 2025, no 2006) plus 14 National Payment Systems reports, 35 nodes in all; five of them (2010 to 2014) were reviewed and selected for this chain. The set is **not exhaustive**: a later review found that the 2015 Annual Report, Table 13 (PDF page 144, printed page 136), also publishes all twelve 2013 months (identified in review; not re-extracted or compared in this pass). Other BoZ publications may likewise reproduce the same historical table. The chain below is a deliberately selected earliest-publication chain, not a claim of global source exclusivity, and the 2015 report is not part of the proposed canonical persistence sources.
 
 ## 3. The chain
 
@@ -89,7 +89,7 @@ Both are identical in every report that prints them. A phase 2 would carry a nam
 
 The workbook's daily sheet looks like an easier source and is not one:
 
-- Monthly means of its daily mids agree with the published monthly mid within 0.01 ZMW in 42 of 48 months, but the maximum difference is **0.30 (2011-06)**, and 2012-07 (0.027) and 2012-09 (0.062) are also off.
+- Monthly means of its daily mids agree with the published monthly mid within 0.01 ZMW in 42 of 48 months, but the maximum difference is **0.30 (2011-06)**, and 2012-07 (0.026) and 2012-09 (0.062) are also off.
 - The 2011-06 gap is a **workbook defect**: its 22 daily values for June 2011 are identical, day for day, to June 2010 (first values 5.023, 5.0518, 5.0674, 5.1214, ...).
 - BoZ's monthly-average methodology (trading days, weighting, rate used) is not published, so a computed mean would be a different, unofficial series.
 - The workbook has no unit label and mixes units across sheets.
@@ -101,7 +101,7 @@ Use the workbook only as a sanity check, never as a source of stored months.
 - **The existing parser cannot read these pages.** Table 13 is a rotated landscape page. `pdfplumber` (used in phase 1) returns the text layer as one reversed token per line (for example `rebmeceD` and `61.749`), so the Table 02 line-based approach does not apply.
 - **`pdftotext -layout` (poppler 25.07) reads the pages correctly**: `pdftotext -layout -f <pdf page> -l <pdf page> <file> -`. With a line pattern of `[year] <Month> <six numbers>`, the five pages yielded 49 (2010), 61 (2011), 51 (2012), 47 (2013) and 43 (2014) rows, including December-only rows and 2014 months.
 - Poppler is a system binary, a new runtime dependency. The alternative is rebuilding rows from `pdfplumber` characters using their rotation matrix: pure Python, but more work and untested here. This is a product decision for phase 2.
-- Row shape differs from Table 02: a year label on the first month of each year (or on every December-only row), then `<Month> buy sell mid bureau-buy bureau-sell bureau-mid`. Column order is Buying, Selling, Mid. Thousands separators appear for ZMK rows (`4,504.49`). The 2010 report adds "AND BUREAUX" to the heading.
+- Row shape differs from Table 02: year context is given in one of two vetted ways: an inline year label on the first month row of each year (or on every December-only row), or, as observed in the 2010 report, a standalone year line that sets the year for the month rows that follow; then, per row, `<Month> buy sell mid bureau-buy bureau-sell bureau-mid`. Column order is Buying, Selling, Mid. Thousands separators appear for ZMK rows (`4,504.49`). The 2010 report adds "AND BUREAUX" to the heading. A future extractor must support both year-context forms for these vetted pages only, keep explicit table and page identity checks (heading, `Table 13`, column labels, expected PDF page), and fail closed if the year context is ambiguous (for example a year line with no following month row, two consecutive year lines, or a month row with no year context); it must not guess other layouts.
 - Text-bearing PDFs; no OCR was needed for these five pages.
 
 ## 9. Risks and open items
@@ -111,7 +111,7 @@ Use the workbook only as a sanity check, never as a source of stored months.
 - **Ordering exceptions.** Two accepted violations require named exceptions; any other violation must still fail.
 - **Methodology.** Monthly-average method is not published; mid is stored as published.
 - **Report revisions.** None observed across five reports; not provable for the future. Storage must stay conflict-aware.
-- **Partial verification.** The 2010 and 2011 reports were compared against later reports only; no second source exists for 2013 other than the 2014 report. That second report is a later edition of the same BoZ table, not an independent measurement.
+- **Partial verification.** The 2010 and 2011 reports were compared against later reports only; within the reports reviewed here, the only second print of the 2013 months is the 2014 report (the 2015 report also prints them, per review, but was not compared). Later reports are later editions of the same BoZ table, not independent measurements.
 - **Page drift.** Table 13 moved between reports (printed pages 140, 133, 137, 138, 131); a manifest must pin the PDF page and fail on layout change.
 
 ## 10. Recommended phase 2 (not implemented)
