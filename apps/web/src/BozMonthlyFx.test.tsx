@@ -179,6 +179,52 @@ describe("monthly response validation", () => {
   });
 });
 
+describe("source-series provenance labelling", () => {
+  const annual = (month: string, extra: Partial<FxMonthlyPoint> = {}): FxMonthlyPoint => ({
+    ...row(month, "5.28360", "5.24097", "5.25097"), source_series: "annual_report_table_13_monthly_average",
+    source_publication: `Annual ${month}`, source_url: "https://www.boz.zm/sites/default/files/annual.pdf", source_page: 148, ...extra,
+  });
+  const show = async (obs: FxMonthlyPoint[]) => {
+    fetchMock.mockImplementation(respond(obs));
+    render(<BozMonthlyFx />);
+    await screen.findByText("Latest monthly average");
+    return document.querySelector(".monthly-readout")!;
+  };
+
+  it("labels a pre-2013 Annual Report row as Table 13 / Annual Report and explains the ZMK normalization", async () => {
+    const readout = await show([annual("2012-04")]);
+    expect(screen.getByText("148 (Table 13)")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open Annual Report PDF" })).toBeTruthy();
+    expect(readout.textContent).not.toContain("Table 02");
+    expect(readout.textContent).not.toContain("Fortnightly Statistics PDF");
+    expect(readout.textContent).toContain("Normalized to ZMW from the published ZMK values");
+    expect(readout.textContent).not.toContain("as published");
+  });
+
+  it("keeps 'as published' wording for a 2013 Annual Report row already published in ZMW", async () => {
+    const readout = await show([annual("2013-12")]);
+    expect(screen.getByText("148 (Table 13)")).toBeTruthy();
+    expect(readout.textContent).toContain("2 decimal places, as published");
+    expect(readout.textContent).not.toContain("ZMK");
+  });
+
+  it("keeps Table 02 / Fortnightly wording for a 2014+ row", async () => {
+    const readout = await show([row("2014-01", "5.52", "5.53", "5.53")]);
+    expect(screen.getByText("3 (Table 02)")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open Fortnightly Statistics PDF" })).toBeTruthy();
+    expect(readout.textContent).not.toContain("Table 13");
+    expect(readout.textContent).not.toContain("Normalized");
+  });
+
+  it("uses neutral wording for an unknown source series instead of claiming a table", async () => {
+    const readout = await show([row("2026-09", "19.39", "19.42", "19.44")].map((o) => ({ ...o, source_series: "future_series" })));
+    expect(screen.getByText("3 (official BoZ table)")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open source PDF" })).toBeTruthy();
+    expect(readout.textContent).not.toContain("Table 02");
+    expect(readout.textContent).not.toContain("Table 13");
+  });
+});
+
 describe("range refetch labelling", () => {
   const year = ALL.slice(1);
   const deferred = () => { let resolve!: (r: Response) => void; const promise = new Promise<Response>((r) => { resolve = r; }); return { promise, resolve }; };
