@@ -92,12 +92,41 @@ export type FxMonthlyHistory = {
   observations: FxMonthlyPoint[];
 };
 
-export async function getUsdZmwMonthly(range: MonthlyRange): Promise<FxMonthlyHistory> {
-  const body = await getJson<FxMonthlyHistory>(`/api/v1/fx/USDZMW/monthly?range=${range}`);
-  if (!Array.isArray(body?.observations) || body.count !== body.observations.length) {
-    throw new ApiError("api", "Unexpected monthly response");
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+const DECIMAL_RE = /^\d+(\.\d+)?$/; // plain finite decimal string; NaN, Infinity, signs and exponents do not match
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+const isText = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+const isPositiveDecimal = (value: unknown): value is string => typeof value === "string" && DECIMAL_RE.test(value) && /[1-9]/.test(value);
+const isCount = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
+
+function validMonthlyPoint(value: unknown): value is FxMonthlyPoint {
+  return isRecord(value) && typeof value.month === "string" && MONTH_RE.test(value.month)
+    && isPositiveDecimal(value.buy) && isPositiveDecimal(value.mid) && isPositiveDecimal(value.sell)
+    && value.source === "boz" && isText(value.source_series) && isText(value.source_publication) && isText(value.source_url)
+    && typeof value.source_page === "number" && Number.isInteger(value.source_page) && value.source_page > 0
+    && typeof value.published_precision === "number" && Number.isInteger(value.published_precision) && value.published_precision >= 0;
+}
+
+/** Fails closed: any response that does not match the monthly contract is an ApiError, never a partially trusted value.
+ * Values are checked, not converted: decimals stay the exact strings the API sent. Months must be strictly ascending (unique). */
+export function parseMonthlyHistory(body: unknown, requested: MonthlyRange): FxMonthlyHistory {
+  const fail = (): never => { throw new ApiError("api", "Unexpected monthly response"); };
+  if (!isRecord(body) || body.symbol !== "USDZMW" || body.range !== requested || !isCount(body.count)
+    || !Array.isArray(body.observations) || body.count !== body.observations.length) return fail();
+  const observations = body.observations;
+  if (!observations.every(validMonthlyPoint)) return fail();
+  const points = observations as FxMonthlyPoint[];
+  for (let i = 1; i < points.length; i++) if (points[i].month <= points[i - 1].month) return fail();
+  if (points.length === 0) {
+    if (body.first_month !== null || body.last_month !== null) return fail(); // empty result: both bounds are null
+  } else if (body.first_month !== points[0].month || body.last_month !== points[points.length - 1].month) {
+    return fail();
   }
-  return body;
+  return body as unknown as FxMonthlyHistory;
+}
+
+export async function getUsdZmwMonthly(range: MonthlyRange): Promise<FxMonthlyHistory> {
+  return parseMonthlyHistory(await getJson<unknown>(`/api/v1/fx/USDZMW/monthly?range=${range}`), range);
 }
 
 export const TENORS = ["91D", "182D", "273D", "364D"] as const;

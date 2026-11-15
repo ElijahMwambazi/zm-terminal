@@ -57,6 +57,10 @@ export default function BozMonthlyFx() {
         </div>
       </div>
 
+      <p className="monthly-pending" role="status">
+        {state.status === "loading" && state.previous && `Loading ${range}… showing previous ${state.previous.range} data`}
+      </p>
+
       {state.status === "error" && (
         <p className="notice notice--error" role="alert">Historical BoZ monthly data could not be loaded ({state.message}). The live quote above is unaffected.</p>
       )}
@@ -67,7 +71,7 @@ export default function BozMonthlyFx() {
         <div className={loading ? "monthly-body monthly-body--loading" : "monthly-body"}>
           <dl className="monthly-summary">
             <div><dt>Latest monthly average</dt><dd className="monthly-latest">{latest.mid}</dd><dd className="monthly-dim">{formatYearMonth(data.last_month ?? latest.month)}</dd></div>
-            <div><dt>Selected range</dt><dd>{formatYearMonth(data.first_month ?? observations[0].month)} – {formatYearMonth(data.last_month ?? latest.month)}</dd><dd className="monthly-dim">{data.count} observations</dd></div>
+            <div><dt>Displayed range · {data.range}</dt><dd>{formatYearMonth(data.first_month ?? observations[0].month)} – {formatYearMonth(data.last_month ?? latest.month)}</dd><dd className="monthly-dim">{data.count} observations</dd></div>
           </dl>
 
           <MonthlyFxChart observations={observations} active={active} selectedMonth={selected} onInspect={setSelected} />

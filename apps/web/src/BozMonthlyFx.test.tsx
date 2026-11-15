@@ -112,7 +112,7 @@ describe("BozMonthlyFx", () => {
   it("shows a loading placeholder first", () => {
     fetchMock.mockReturnValue(new Promise(() => {}));
     render(<BozMonthlyFx />);
-    expect(screen.getByRole("status").textContent).toContain("Loading monthly averages");
+    expect(screen.getByText("Loading monthly averages…")).toBeTruthy();
   });
 
   it("shows an independent error state", async () => {
@@ -132,6 +132,93 @@ describe("BozMonthlyFx", () => {
     fetchMock.mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ ...body("1Y", ALL), count: 9 }))));
     render(<BozMonthlyFx />);
     expect((await screen.findByRole("alert")).textContent).toContain("Unexpected monthly response");
+  });
+});
+
+describe("monthly response validation", () => {
+  const good = (o: Partial<FxMonthlyPoint> = {}, i = 1) => ({ ...ALL[i], ...o });
+  const cases: [string, (b: ReturnType<typeof body>) => unknown][] = [
+    ["a null observation", (b) => ({ ...b, count: 1, first_month: "2026-09", last_month: "2026-09", observations: [null] })],
+    ["a malformed decimal string", (b) => ({ ...b, observations: [ALL[0], ALL[1], good({ mid: "19.4x" }, 2)] })],
+    ["NaN as a decimal", (b) => ({ ...b, observations: [ALL[0], ALL[1], good({ buy: "NaN" }, 2)] })],
+    ["Infinity as a decimal", (b) => ({ ...b, observations: [ALL[0], ALL[1], good({ sell: "Infinity" }, 2)] })],
+    ["an empty decimal string", (b) => ({ ...b, observations: [ALL[0], ALL[1], good({ mid: "" }, 2)] })],
+    ["a numeric (non-string) decimal", (b) => ({ ...b, observations: [ALL[0], ALL[1], { ...ALL[2], mid: 19.42 }] })],
+    ["an impossible month 2026-13", (b) => ({ ...b, last_month: "2026-13", observations: [ALL[0], ALL[1], good({ month: "2026-13" }, 2)] })],
+    ["month 2026-00", (b) => ({ ...b, last_month: "2026-00", observations: [ALL[0], ALL[1], good({ month: "2026-00" }, 2)] })],
+    ["a duplicate month", (b) => ({ ...b, observations: [ALL[0], ALL[2], ALL[2]], last_month: "2026-09" })],
+    ["out-of-order months", (b) => ({ ...b, first_month: "2026-09", last_month: "2019-03", observations: [ALL[2], ALL[1], ALL[0]] })],
+    ["an inconsistent count", (b) => ({ ...b, count: 2 })],
+    ["an inconsistent first_month", (b) => ({ ...b, first_month: "2019-04" })],
+    ["an inconsistent last_month", (b) => ({ ...b, last_month: "2026-08" })],
+    ["a null first_month on a non-empty result", (b) => ({ ...b, first_month: null })],
+    ["a non-null bound on an empty result", (b) => ({ ...b, count: 0, observations: [], first_month: "2019-03", last_month: "2026-09" })],
+    ["a mismatched range", (b) => ({ ...b, range: "5Y" })],
+    ["a wrong symbol", (b) => ({ ...b, symbol: "EURZMW" })],
+    ["a missing provenance field", (b) => ({ ...b, observations: [ALL[0], ALL[1], { ...ALL[2], source_url: undefined }] })],
+  ];
+  it.each(cases)("shows the monthly error state for %s and keeps the live and intraday FX UI", async (_name, mutate) => {
+    const quote = { symbol: "USDZMW", base_currency: "USD", quote_currency: "ZMW", buy: "20.4201", mid: "20.4451", sell: "20.4701",
+      observed_at: "2026-11-13T13:30:00Z", retrieved_at: "2026-11-15T07:05:33Z", source: "boz", source_url: "https://www.boz.zm/x", stale: false };
+    const hist = { symbol: "USDZMW", range: "1M", count: 2, observations: [0, 1].map((i) =>
+      ({ observed_at: `2026-11-0${i + 1}T10:00:00Z`, buy: "20.1", mid: "20.2", sell: "20.3", source: "boz" })) };
+    fetchMock.mockImplementation((url: string) => String(url).includes("/monthly")
+      ? Promise.resolve(new Response(JSON.stringify(mutate(body("1Y", ALL)))))
+      : Promise.resolve(new Response(JSON.stringify(String(url).includes("/history") ? hist : quote))));
+    render(<UsdZmwDetail state={{ status: "ready", quote: quote as never }} refreshKey={1} onRefresh={() => {}} />);
+    expect((await screen.findByRole("alert")).textContent).toContain("Historical BoZ monthly data could not be loaded");
+    expect(screen.queryByTestId("chart")).toBeNull();
+    expect(screen.getByText("20.4451")).toBeTruthy();
+    expect(await screen.findByTestId("intraday-chart")).toBeTruthy();
+  });
+
+  it("accepts the backend's empty contract (count 0, null bounds)", async () => {
+    fetchMock.mockImplementation(respond([]));
+    render(<BozMonthlyFx />);
+    expect(await screen.findByText("No monthly observations are available.")).toBeTruthy();
+  });
+});
+
+describe("range refetch labelling", () => {
+  const year = ALL.slice(1);
+  const deferred = () => { let resolve!: (r: Response) => void; const promise = new Promise<Response>((r) => { resolve = r; }); return { promise, resolve }; };
+  const json = (range: string, obs: FxMonthlyPoint[]) => new Response(JSON.stringify(body(range, obs)));
+
+  it("says 5Y is loading while the previous 1Y data stays displayed, then switches together", async () => {
+    const slow = deferred();
+    fetchMock.mockImplementation((url: string) => new URL(url).searchParams.get("range") === "5Y" ? slow.promise : Promise.resolve(json("1Y", year)));
+    render(<BozMonthlyFx />);
+    await screen.findByText("Latest monthly average");
+    expect(screen.getByText("Displayed range · 1Y")).toBeTruthy();
+    expect(screen.queryByText(/Loading 5Y/)).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "5Y" }));
+    expect((await screen.findByText("Loading 5Y… showing previous 1Y data")).textContent).toBeTruthy();
+    expect(screen.getByRole("button", { name: "5Y" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("Displayed range · 1Y")).toBeTruthy(); // old data is never labelled 5Y
+    expect(screen.queryByText("Displayed range · 5Y")).toBeNull();
+    expect(screen.getByTestId("chart").dataset.points).toBe("2");
+    expect(document.querySelector("[aria-busy='true']")).not.toBeNull();
+
+    slow.resolve(json("5Y", ALL));
+    expect(await screen.findByText("Displayed range · 5Y")).toBeTruthy();
+    expect(screen.queryByText(/Loading 5Y/)).toBeNull();
+    expect(screen.getByTestId("chart").dataset.points).toBe("3");
+    expect(screen.getByText("3 observations")).toBeTruthy();
+  });
+
+  it("never presents previous data as the failed range when the delayed request fails", async () => {
+    const slow = deferred();
+    fetchMock.mockImplementation((url: string) => new URL(url).searchParams.get("range") === "5Y" ? slow.promise : Promise.resolve(json("1Y", year)));
+    render(<BozMonthlyFx />);
+    await screen.findByText("Latest monthly average");
+    await userEvent.click(screen.getByRole("button", { name: "5Y" }));
+    await screen.findByText("Loading 5Y… showing previous 1Y data");
+    slow.resolve(new Response("{}", { status: 503 }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Historical BoZ monthly data could not be loaded");
+    expect(screen.queryByText(/showing previous/)).toBeNull();
+    expect(screen.queryByTestId("chart")).toBeNull();
+    expect(screen.queryByText("Displayed range · 1Y")).toBeNull();
   });
 });
 
