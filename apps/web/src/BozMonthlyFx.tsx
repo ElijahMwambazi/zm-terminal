@@ -6,6 +6,17 @@ import { useUsdZmwMonthly } from "./useUsdZmwMonthly";
 
 const RATE_KEYS: RateKey[] = ["mid", "buy", "sell"];
 
+const ANNUAL_SERIES = "annual_report_table_13_monthly_average";
+const FORTNIGHTLY_SERIES = "fortnightly_table_02_monthly_average";
+const FIRST_ZMW_MONTH = "2013-01"; // before this, BoZ printed old kwacha (ZMK); the API sends canonical ZMW (printed / 1000)
+
+/** Source labels follow the stored source series; an unknown series gets neutral wording, never another source's table. */
+function sourceDetails(series: string): { table: string; link: string } {
+  if (series === ANNUAL_SERIES) return { table: "Table 13", link: "Open Annual Report PDF" };
+  if (series === FORTNIGHTLY_SERIES) return { table: "Table 02", link: "Open Fortnightly Statistics PDF" };
+  return { table: "official BoZ table", link: "Open source PDF" };
+}
+
 /** Official BoZ monthly averages: historical, discrete, stored. Independent of the live quote above it; fails on its own. */
 export default function BozMonthlyFx() {
   const [range, setRange] = useState<MonthlyRange>("1Y");
@@ -28,6 +39,7 @@ export default function BozMonthlyFx() {
     return found >= 0 ? found : observations.length - 1;
   }, [observations, selected]);
   const point = observations && index >= 0 ? observations[index] : null;
+  const details = sourceDetails(point?.source_series ?? "");
 
   const toggle = (key: RateKey) =>
     setActive((current) => current.includes(key) ? (current.length > 1 ? current.filter((k) => k !== key) : current) : RATE_KEYS.filter((k) => k === key || current.includes(k)));
@@ -39,7 +51,7 @@ export default function BozMonthlyFx() {
         <h3 id="boz-monthly-heading" className="monthly-title">BoZ Monthly Average</h3>
         <span className="badge badge--monthly">MONTHLY · NOT LIVE</span>
       </div>
-      <p className="monthly-sub">Official Bank of Zambia monthly averages (Fortnightly Statistics), ZMW per USD. Historical, one value per month.</p>
+      <p className="monthly-sub">Official Bank of Zambia monthly averages (Annual Reports for 2010-2013, Fortnightly Statistics from 2014), ZMW per USD. Historical, one value per month.</p>
 
       <div className="range-row" role="group" aria-label="Monthly range">
         {MONTHLY_RANGES.map((item) => (
@@ -92,9 +104,11 @@ export default function BozMonthlyFx() {
                 <ul className="provenance">
                   <li><span>Source</span>Bank of Zambia, official monthly average</li>
                   <li><span>Publication</span>{point.source_publication}</li>
-                  <li><span>Page</span>{point.source_page} (Table 02)</li>
-                  <li><span>Precision</span>{point.published_precision} decimal places, as published</li>
-                  <li><span>Document</span><a href={point.source_url} target="_blank" rel="noopener noreferrer">Open Fortnightly Statistics PDF</a></li>
+                  <li><span>Page</span>{point.source_page} ({details.table})</li>
+                  {point.month < FIRST_ZMW_MONTH
+                    ? <li><span>Values</span>Normalized to ZMW from the published ZMK values (exact division by 1000); published with {point.published_precision} decimal places in ZMK</li>
+                    : <li><span>Precision</span>{point.published_precision} decimal places, as published</li>}
+                  <li><span>Document</span><a href={point.source_url} target="_blank" rel="noopener noreferrer">{details.link}</a></li>
                   <li><span>Series</span>{point.source_series}</li>
                 </ul>
               </details>

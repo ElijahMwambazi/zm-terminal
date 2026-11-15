@@ -1,15 +1,17 @@
-"""Manual import of official BoZ monthly USD/ZMW averages from vetted Fortnightly Statistics PDFs (Table 02, 2014-01 onward).
+"""Manual import of official BoZ monthly USD/ZMW averages, 2010-01 onward, into fx_monthly_averages.
 
     python -m app.jobs.backfill_fx_monthly [--from YYYY-MM] [--to YYYY-MM] [--dry-run]
 
-Only the explicitly vetted publications in app.services.boz_monthly_source.PUBLICATIONS are requested (one sequential GET each,
-2 s apart, no retries, HTTPS BoZ host only, no redirects, size-capped). Every needed PDF is fetched, text-extracted, strictly
-interpreted (Table 02 "Monthly Averages", BoZ columns, buy <= mid <= sell) and cross-checked against the other publications
-BEFORE anything is written; overlapping months must be numerically identical or the import fails. The published mid is stored
-as published. The requested months must be gap-free (nothing is interpolated or forward-filled). Persistence is one atomic,
-conflict-aware transaction (new = insert, identical = already present, different = conflict and nothing is written).
-`--dry-run` never touches PostgreSQL. Only counts and months are printed: no rates, no PDF text. Phase 1 only: no 2010-2013
-Annual Report months and no ZMK conversion.
+Source families are chosen from the requested observation months, one canonical source per month:
+  2010-01..2013-12  BoZ Annual Reports, Table 13 (pinned SHA-256/size/page; old kwacha divided exactly by 1000 before 2013)
+  2014-01..2026-09  BoZ Fortnightly Statistics, Table 02 (the Phase-1 chain)
+Only vetted manifest URLs are requested (one sequential GET each, 2 s apart, no retries, HTTPS BoZ host only, no redirects,
+size-capped); only publications needed for the range are fetched, plus the 2014 Annual Report when the range crosses the
+2013/2014 boundary, where it is used for VALIDATION ONLY (its 2014 months must equal the Fortnightly months exactly; it never
+supplies rows). Everything is parsed, normalized, ordering-checked, cross-checked, assembled (exactly one canonical row per month,
+no cross-series overlap, no gaps, nothing interpolated) BEFORE anything is written. Persistence is one atomic, conflict-aware
+transaction into a database that already has migration 013 (the importer never applies migrations). `--dry-run` never touches
+PostgreSQL and works before migration 013. Only counts and months are printed: no rates, no PDF text.
 """
 
 import argparse
@@ -20,9 +22,17 @@ from datetime import date, datetime, timezone
 
 import httpx
 
+from app.services import boz_annual_source as annual
 from app.services import boz_monthly_source as source
-from app.services.fx_monthly_combine import MonthlyConflictError, combine, find_gaps
+from app.services.fx_monthly_canonical import (
+    CanonicalSetError, assemble, build_annual_observations, check_annual_overlaps,
+)
+from app.services.fx_monthly_combine import MonthlyConflictError, combine
 from app.services.fx_monthly_store import save_monthly_averages
+
+FIRST_MONTH = annual.FIRST_COVERED_MONTH  # 2010-01
+LAST_MONTH = source.LAST_COVERED_MONTH  # latest vetted Fortnightly month
+BOUNDARY = source.FIRST_COVERED_MONTH  # first Fortnightly month (2014-01); the last Annual month is the one before
 
 
 class ImportRequestError(Exception):
@@ -40,10 +50,9 @@ def validate_range(start: date, end: date, *, today: date) -> None:
         raise ImportRequestError("--from must not be after --to")
     if end > today.replace(day=1):
         raise ImportRequestError("--to must not be in the future")
-    if start < source.FIRST_COVERED_MONTH or end > source.LAST_COVERED_MONTH:
+    if start < FIRST_MONTH or end > LAST_MONTH:
         raise ImportRequestError(
-            f"Range must lie within the months covered by the vetted publications "
-            f"({source.FIRST_COVERED_MONTH:%Y-%m} to {source.LAST_COVERED_MONTH:%Y-%m})"
+            f"Range must lie within the months covered by the vetted publications ({FIRST_MONTH:%Y-%m} to {LAST_MONTH:%Y-%m})"
         )
 
 
@@ -56,23 +65,44 @@ async def run_import(
     if client is None:
         async with httpx.AsyncClient() as owned:
             return await run_import(start, end, dry_run=dry_run, client=owned, engine=engine, now=now, pause=pause, sleep=sleep)
-    publications = source.select_publications(start, end)
-    parsed = []
-    for index, publication in enumerate(publications):
+    reports = annual.select_canonical_reports(start, min(end, annual.LAST_COVERED_MONTH)) if start < BOUNDARY else []
+    publications = source.select_publications(max(start, BOUNDARY), end) if end >= BOUNDARY else []
+    crosses = start < BOUNDARY <= end
+    validation = [annual.VALIDATION_REPORTS[0]] if crosses else []
+    fetches = [(r, annual.fetch_report, annual.load_annual_report_async) for r in (*reports, *validation)]
+    fetches += [(p, source.fetch_pdf, source.load_publication_async) for p in publications]
+    loaded: list[tuple[object, object]] = []
+    for index, (item, fetch, load) in enumerate(fetches):
         if index:
-            await sleep(pause)  # sequential and polite
-        pdf = await source.fetch_pdf(publication, client)
-        parsed.append((publication, await source.load_publication_async(publication, pdf)))
-    combined = combine(parsed)
-    gaps = find_gaps(combined.observations, start, end)
-    if gaps:
-        raise ImportRequestError(f"{len(gaps)} calendar month(s) are missing, first {gaps[0]:%Y-%m}; nothing was written")
-    selected = [o for o in combined.observations if start <= o.month <= end]
+            await sleep(pause)  # sequential and polite, across both source families
+        pdf = await fetch(item, client)
+        loaded.append((item, await load(item, pdf)))
+    annual_loaded = [(i, t) for i, t in loaded if isinstance(i, annual.AnnualReport)]
+    canonical_loaded = [(i, t) for i, t in annual_loaded if i.role == "canonical"]
+    fortnightly_loaded = [(i, t) for i, t in loaded if not isinstance(i, annual.AnnualReport)]
+    annual_overlaps = check_annual_overlaps(annual_loaded)
+    combined = combine(fortnightly_loaded)
+    bridge = "not_applicable"
+    if validation:  # validation only: nothing from this report ever enters the persistence set
+        table_2014 = next(t for i, t in annual_loaded if i.role == "validation")
+        annual.validate_2014_bridge(table_2014, combined.observations)
+        bridge = "pass"
+    try:
+        assembled = assemble(build_annual_observations(canonical_loaded), combined.observations, start, end)
+    except CanonicalSetError as exc:
+        raise ImportRequestError(str(exc)) from exc
+    if assembled.gaps:
+        raise ImportRequestError(
+            f"{len(assembled.gaps)} calendar month(s) are missing, first {assembled.gaps[0]:%Y-%m}; nothing was written")
+    selected = list(assembled.observations)
     result: dict[str, object] = {
-        "publications_fetched": len(publications), "publications_parsed": len(parsed),
-        "months_parsed": len(combined.observations), "overlaps_checked": combined.overlaps_checked,
+        "publications_fetched": len(fetches), "publications_parsed": len(loaded),
+        "months_parsed": len(combined.observations), "overlaps_checked": combined.overlaps_checked + annual_overlaps,
         "months_selected": len(selected), "first_month": f"{selected[0].month:%Y-%m}" if selected else "none",
-        "last_month": f"{selected[-1].month:%Y-%m}" if selected else "none", "gaps": 0, "inserted": 0, "already_present": 0,
+        "last_month": f"{selected[-1].month:%Y-%m}" if selected else "none", "gaps": 0,
+        "annual_candidates": assembled.annual_count, "fortnightly_candidates": assembled.fortnightly_count,
+        "source_conflicts": 0, "cross_series_conflicts": 0, "ordering_exceptions_used": assembled.ordering_exceptions_used,
+        "bridge_2014": bridge, "inserted": 0, "already_present": 0,
     }
     if selected and not dry_run:
         # Persist only after every publication parsed and agreed; one transaction, all or nothing.
@@ -83,10 +113,10 @@ async def run_import(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.jobs.backfill_fx_monthly", description=__doc__.split("\n")[0])
-    parser.add_argument("--from", dest="start", type=parse_month, default=source.FIRST_COVERED_MONTH, metavar="YYYY-MM",
-                        help=f"default: {source.FIRST_COVERED_MONTH:%Y-%m}")
-    parser.add_argument("--to", dest="end", type=parse_month, default=source.LAST_COVERED_MONTH, metavar="YYYY-MM",
-                        help=f"default: {source.LAST_COVERED_MONTH:%Y-%m} (latest vetted month)")
+    parser.add_argument("--from", dest="start", type=parse_month, default=FIRST_MONTH, metavar="YYYY-MM",
+                        help=f"default: {FIRST_MONTH:%Y-%m}")
+    parser.add_argument("--to", dest="end", type=parse_month, default=LAST_MONTH, metavar="YYYY-MM",
+                        help=f"default: {LAST_MONTH:%Y-%m} (latest vetted month)")
     parser.add_argument("--dry-run", action="store_true", help="fetch and validate only; never touches PostgreSQL")
     args = parser.parse_args(argv)
     try:
@@ -94,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     except MonthlyConflictError as exc:
         print(f"import failed: {exc}", file=sys.stderr)
         return 1
-    except (ImportRequestError, source.PublicationError) as exc:
+    except (ImportRequestError, source.PublicationError, annual.AnnualSourceError) as exc:
         print(f"import failed: {exc}", file=sys.stderr)
         return 1
     except httpx.HTTPError as exc:
