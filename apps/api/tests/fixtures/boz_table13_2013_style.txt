@@ -1,0 +1,24 @@
+      KWACHA/US DOLLAR EXCHANGE RATES                                                                                                    TABLE 13
+                                                            Bank of Zambia Rates                                        Bureau Rates
+
+
+138
+      Period                                        Buying          Selling             Mid          Buying          Selling             Mid
+      Monthly Average
+      2000                      December              4,000.00        4,020.00        4,010.00        3,990.00        4,070.00        4,030.00
+      2011                      December              4,039.00        4,059.00        4,049.00        4,029.00        4,109.00        4,069.00
+      2012                      December              5,198.47        5,228.97        5,208.46        4,042.00        4,122.00        4,082.00
+      2013                      January                   5.27            5.29            5.28            4.51            4.59            4.55
+                                February                  4.53            4.55            4.54            4.52            4.60            4.56
+                                March                     4.55            4.57            4.56            4.54            4.62            4.58
+                                April                     4.56            4.58            4.57            4.55            4.63            4.59
+                                May                       4.57            4.59            4.58            4.56            4.64            4.60
+                                June                      4.58            4.60            4.59            4.58            4.66            4.62
+                                July                      4.60            4.62            4.61            4.59            4.67            4.63
+                                August                    4.61            4.63            4.62            4.60            4.68            4.64
+                                September                 4.62            4.64            4.63            4.61            4.69            4.65
+                                October                   4.64            4.66            4.65            4.63            4.71            4.67
+                                November                  4.65            4.67            4.66            4.64            4.72            4.68
+                                December                  5.52            5.53            5.54            4.65            4.73            4.69
+      Source: Bank of Zambia
+      Note: Since July 2003, the Bank of Zambia has established a broad-based foreign exchange trading system.

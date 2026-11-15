@@ -39,6 +39,15 @@ class MonthlyObservation:
     publication_title: str
     source_url: str
     source_page: int
+    # Phase 2 provenance (all optional): defaults describe a phase-1 row, whose printed values ARE the canonical ZMW values.
+    source_series: str | None = None  # None = the Fortnightly Table 02 series
+    source_table: str | None = None
+    published_precision: int | None = None
+    published_buy: Decimal | None = None
+    published_mid: Decimal | None = None
+    published_sell: Decimal | None = None
+    published_currency: str | None = None  # 'ZMK' | 'ZMW'
+    normalization_divisor: int | None = None  # 1 | 1000
 
 
 @dataclass(frozen=True)

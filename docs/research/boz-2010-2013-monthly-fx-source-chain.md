@@ -83,7 +83,7 @@ Only ordering violations are validity failures. In this window there are exactly
 | 2012-04 | 2012 (p.145), 2013 (p.146), 2014 (p.139) | 5,283.60 / 5,250.97 / 5,240.97 | selling < buying; mid < selling; mid < buying |
 | 2013-12 | 2013 (p.146), 2014 (p.139) | 5.52 / 5.53 / 5.54 | mid > selling |
 
-Both are identical in every report that prints them. A phase 2 would carry a named exception list (month, rule, exact values, publication, page, reason) exactly as `ORDERING_EXCEPTIONS` in the phase-1 parser anticipates, and store the value as published ("accepted because BoZ published it", not "corrected"). The other 46 months satisfy `buy <= mid <= sell`.
+Both are identical in every report that prints them. Observed while implementing phase 2: the 2010 report's Table 13 also prints 2008-08 with mid above selling (outside the 2010-2013 window, not an approved exception and never persisted), so ordering is enforced from each report's persistence or validation window onward and earlier rows of the page are structure-checked only. A phase 2 would carry a named exception list (month, rule, exact values, publication, page, reason) exactly as `ORDERING_EXCEPTIONS` in the phase-1 parser anticipates, and store the value as published ("accepted because BoZ published it", not "corrected"). The other 46 months satisfy `buy <= mid <= sell`.
 
 ## 7. Why not derive months from daily data
 

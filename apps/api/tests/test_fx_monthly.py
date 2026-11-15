@@ -578,6 +578,7 @@ def engine():
     with eng.begin() as c:
         c.execute(text("DROP TABLE IF EXISTS fx_monthly_averages"))
         c.execute(text((init / "012_fx_monthly_averages.sql").read_text()))
+        c.execute(text((init / "013_fx_monthly_published_values.sql").read_text()))
     yield eng
     eng.dispose()
 
@@ -694,8 +695,10 @@ def test_pg_month_identity_is_unique_and_constraints_hold(engine):
     base = dict(base="USD", quote="ZMW", month="2026-01-01", buy=1, mid=1, sell=1, source="boz", series=table.SOURCE_SERIES, pub="p",
                 url="u", page=3, tbl="Table 02", prec=2, regime="ZMW", at=NOW)
     insert = text("INSERT INTO fx_monthly_averages (base_currency, quote_currency, observation_month, buy, mid, sell, source, source_series, "
-                  "source_publication, source_url, source_page, source_table, published_precision, currency_regime, imported_at) VALUES "
-                  "(:base, :quote, :month, :buy, :mid, :sell, :source, :series, :pub, :url, :page, :tbl, :prec, :regime, :at)")
+                  "source_publication, source_url, source_page, source_table, published_precision, currency_regime, imported_at, "
+                  "published_buy, published_mid, published_sell, published_currency, normalization_divisor) VALUES "
+                  "(:base, :quote, :month, :buy, :mid, :sell, :source, :series, :pub, :url, :page, :tbl, :prec, :regime, :at, "
+                  ":buy, :mid, :sell, 'ZMW', 1)")
     for change in ({}, {"month": "2026-02-02"}, {"buy": 0}, {"mid": -1}, {"base": "EUR"}, {"quote": "USD"}, {"source": "imf"},
                    {"regime": "ZMK"}, {"page": 0}, {"month": None}):
         with pytest.raises(IntegrityError):
