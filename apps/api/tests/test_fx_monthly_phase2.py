@@ -804,7 +804,7 @@ def test_pg_store_persists_printed_and_canonical_values_exactly_and_is_idempoten
     with engine.connect() as c:
         row = c.execute(text("SELECT * FROM fx_monthly_averages WHERE observation_month='2014-01-01'")).mappings().one()
     assert (row["published_buy"], row["published_currency"], row["normalization_divisor"]) == (D("5.52"), "ZMW", 1)
-    assert fetch_fx_monthly("ALL", engine=engine).count == 1  # the API still serves only the Fortnightly series (unchanged contract)
+    assert fetch_fx_monthly("ALL", engine=engine).count == 4  # the read now serves both approved series (one row per month)
 
 
 def insert_row(engine, **override):

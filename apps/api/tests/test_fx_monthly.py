@@ -480,11 +480,12 @@ def test_a_calendar_gap_fails_before_any_write_and_nothing_is_filled(monkeypatch
 
 def test_range_validation():
     today = date(2026, 11, 20)
-    for start, end in ((date(2026, 5, 1), date(2026, 4, 1)), (date(2013, 12, 1), date(2014, 3, 1)),
+    for start, end in ((date(2026, 5, 1), date(2026, 4, 1)), (date(2009, 12, 1), date(2014, 3, 1)),
                        (date(2014, 1, 1), date(2026, 10, 1)), (date(2026, 1, 1), date(2027, 1, 1))):
         with pytest.raises(job.ImportRequestError):
             job.validate_range(start, end, today=today)
     job.validate_range(date(2014, 1, 1), date(2026, 9, 1), today=today)
+    job.validate_range(date(2010, 1, 1), date(2026, 9, 1), today=today)  # Phase 2 widened the vetted coverage
     with pytest.raises(job.ImportRequestError, match="future"):
         job.validate_range(date(2014, 1, 1), date(2026, 12, 1), today=date(2026, 11, 20))
 

@@ -10,6 +10,7 @@ from app.schemas.fx_monthly import FX_MONTHLY_RANGE_MONTHS, FxMonthlyHistory, Fx
 from app.services.boz_monthly_table import (
     CURRENCY_REGIME, PUBLISHED_PRECISION, SOURCE, SOURCE_SERIES, SOURCE_TABLE,
 )
+from app.services.boz_annual_table import ANNUAL_SOURCE_SERIES
 from app.services.fx_monthly_combine import MonthlyConflictError, MonthlyObservation
 
 # Every stable canonical field participates in equality; retrieval/import time does not.
@@ -69,6 +70,16 @@ def row_params(o: MonthlyObservation, imported_at: datetime) -> dict:
     }
 
 
+class SchemaNotMigratedError(Exception):
+    """fx_monthly_averages lacks the publication-normalization columns (migration 013). The importer never applies migrations."""
+
+
+_SCHEMA_CHECK = text(
+    "SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema() "
+    "AND table_name = 'fx_monthly_averages' AND column_name = ANY(:columns)"
+)
+
+
 def save_monthly_averages(
     observations: list[MonthlyObservation], *, imported_at: datetime, engine: Engine | None = None,
 ) -> tuple[int, int]:
@@ -82,6 +93,9 @@ def save_monthly_averages(
     for o in observations:  # reject partial metadata before any connection or write
         has_publication_metadata(o)
     with (engine or get_engine()).begin() as connection:
+        if connection.execute(_SCHEMA_CHECK, {"columns": list(_PUBLICATION_FIELDS)}).scalar() != len(_PUBLICATION_FIELDS):
+            raise SchemaNotMigratedError("fx_monthly_averages is missing migration 013 (publication-normalization columns); "
+                                         "apply it first. Nothing was written")
         for o in observations:
             params = row_params(o, imported_at)
             if connection.execute(_INSERT, params).rowcount == 1:
@@ -97,23 +111,41 @@ def save_monthly_averages(
     return inserted, identical
 
 
+# Canonical history = the approved source series (Annual Report 2010-2013, Fortnightly 2014+) with exactly ONE row per month.
+APPROVED_SERIES = (SOURCE_SERIES, ANNUAL_SOURCE_SERIES)
+_DUPLICATE_MONTHS = text(
+    """
+    SELECT observation_month FROM fx_monthly_averages
+    WHERE base_currency = 'USD' AND quote_currency = 'ZMW' AND source_series = ANY(:series)
+    GROUP BY observation_month HAVING count(*) > 1
+    ORDER BY observation_month LIMIT 1
+    """
+)
 _HISTORY = text(
     """
     SELECT observation_month, buy, mid, sell, source, source_series, source_publication, source_url, source_page,
            published_precision
     FROM fx_monthly_averages
-    WHERE base_currency = 'USD' AND quote_currency = 'ZMW' AND source_series = :source_series
+    WHERE base_currency = 'USD' AND quote_currency = 'ZMW' AND source_series = ANY(:series)
     ORDER BY observation_month DESC
     LIMIT :limit
     """
 )
 
 
+class AmbiguousCanonicalMonthError(Exception):
+    """Storage holds two approved-source rows for one observation month; nothing is returned rather than guessing."""
+
+
 def fetch_fx_monthly(range_: str, *, engine: Engine | None = None) -> FxMonthlyHistory:
-    """The most recent N stored months (1Y=12, 3Y=36, 5Y=60, ALL=all), ascending. Stored rows only; nothing is filled."""
+    """The most recent N stored canonical months (1Y=12, 3Y=36, 5Y=60, ALL=all), ascending. Stored rows only; nothing is filled.
+    Fails closed if any month is stored under more than one approved source series."""
     limit = FX_MONTHLY_RANGE_MONTHS[range_]
     with (engine or get_engine()).connect() as connection:
-        rows = connection.execute(_HISTORY, {"source_series": SOURCE_SERIES, "limit": limit}).mappings().all()
+        duplicate = connection.execute(_DUPLICATE_MONTHS, {"series": list(APPROVED_SERIES)}).scalar()
+        if duplicate is not None:
+            raise AmbiguousCanonicalMonthError(f"{duplicate:%Y-%m} is stored under more than one approved source series")
+        rows = connection.execute(_HISTORY, {"series": list(APPROVED_SERIES), "limit": limit}).mappings().all()
     points = [
         FxMonthlyPoint(month=f"{row['observation_month']:%Y-%m}", **{k: v for k, v in row.items() if k != "observation_month"})
         for row in reversed(rows)

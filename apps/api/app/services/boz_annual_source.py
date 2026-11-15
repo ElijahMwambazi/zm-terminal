@@ -10,19 +10,24 @@ CANONICAL_REPORTS are the earliest report per year and the only persistence sour
 report is VALIDATION ONLY: it bridges to the stored phase-1 months (validate_2014_bridge) and must never supply or change
 stored rows or provenance. The 2015 report, which also repeats the 2013 months, is deliberately not part of the manifest.
 
-This module only verifies and parses bytes the caller already holds. Downloading (HTTPS www.boz.zm, one GET per file,
-sequential, no redirects) belongs to the later backfill task; `is_vetted_url` is the guard it will use.
+`fetch_report` is the only network entry: one GET of a vetted URL (HTTPS www.boz.zm, no redirects, size-capped, no retries);
+the caller sequences and spaces requests. Bytes are verified against the manifest pins before anything is parsed, and neither
+raw bytes nor page text is ever stored.
 """
 
+import asyncio
 import hashlib
 from dataclasses import dataclass
 from datetime import date
 from typing import Callable, Sequence
 from urllib.parse import urlsplit
 
+import httpx
+
 from app.services.boz_annual_table import (
     AnnualTableError, ParsedAnnualTable, PublishedRate, parse_table13,
 )
+from app.services.boz_monthly_source import TIMEOUT_SECONDS, USER_AGENT
 from app.services.pdf_layout_text import LayoutExtractionError, extract_page_layout
 
 BOZ_HOST = "www.boz.zm"
@@ -98,6 +103,39 @@ def is_vetted_url(url: object) -> bool:
     parts = urlsplit(url) if isinstance(url, str) else None
     return bool(parts and parts.scheme == "https" and parts.netloc == BOZ_HOST and not parts.query and not parts.fragment
                 and url in {r.url for r in ALL_REPORTS})
+
+
+def select_canonical_reports(first: date, last: date) -> list[AnnualReport]:
+    """Canonical reports whose persistence window intersects first..last, in manifest (chronological) order."""
+    return [r for r in CANONICAL_REPORTS if r.persist_first <= last and r.persist_last >= first]  # type: ignore[operator]
+
+
+async def fetch_report(report: AnnualReport, client: httpx.AsyncClient) -> bytes:
+    """One GET of a vetted URL: HTTPS BoZ host only, no redirects, size-capped, content checked. No retries."""
+    if not is_vetted_url(report.url):
+        raise AnnualSourceError("Report URL is not on the vetted manifest")
+    data = bytearray()
+    async with client.stream(
+        "GET", report.url, timeout=TIMEOUT_SECONDS, follow_redirects=False,
+        headers={"User-Agent": USER_AGENT, "Accept": "application/pdf"},
+    ) as response:
+        if response.status_code != 200:
+            raise AnnualSourceError(f"{report.filename}: unexpected HTTP status {response.status_code}")
+        content_type = response.headers.get("content-type", "").lower()
+        if "pdf" not in content_type and "octet-stream" not in content_type:
+            raise AnnualSourceError(f"{report.filename}: unexpected content type")
+        declared = response.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > MAX_ANNUAL_PDF_BYTES:
+            raise AnnualSourceError(f"{report.filename}: file is larger than expected")
+        async for chunk in response.aiter_bytes():
+            data += chunk
+            if len(data) > MAX_ANNUAL_PDF_BYTES:
+                raise AnnualSourceError(f"{report.filename}: file is larger than expected")
+    return bytes(data)
+
+
+async def load_annual_report_async(report: AnnualReport, pdf_bytes: bytes) -> ParsedAnnualTable:
+    return await asyncio.to_thread(load_annual_report, report, pdf_bytes)
 
 
 def verify_pdf(report: AnnualReport, pdf_bytes: bytes) -> None:
