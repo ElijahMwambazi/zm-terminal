@@ -60,7 +60,7 @@ Listing: `GET /jsonapi/node/statistics?filter[field_series.id]=<Fortnightly Stat
 - **Coverage wording.** The reconstructed series from the selected publications contains every calendar month from 2014-01 through 2026-09 (153 months). This does not mean every fortnightly issue in the period was individually parsed: 13 of the 254 listed issues were parsed (the 14th downloaded file, 2026 issue 22, has no table).
 - **Precision: 2 decimals** in every period (Table 02 and 01A).
 - Same-definition check: Table 02 monthly mid equals Table 01A `Period Average`.
-- Published anomalies are listed with exact values and page references in section 6.2 (2012-04, 2013-12 and 2022-11); 2019-03 is only a research observation, not an exception.
+- Confirmed published ordering exceptions (2012-04, 2013-12) and separate midpoint diagnostics (2019-03, 2022-11) are listed with exact values and page references in section 6.2. Only ordering violations are validity conditions; midpoint diagnostics are not.
 - A note printed under the neighbouring real-effective-exchange-rate table in the 2025 issue says revisions were made to 2016 figures in March 2017 and to figures from 18 to 29 December 2023 on 19 January 2024; its scope is not stated, and no monthly change was observed (section 12).
 - The `Volume` label scheme and file names are irregular (`Vol25No6`, `IssueNo_26`, `IssueNo_13_1`, `_0` suffixes), so discovery must go through the JSON:API list, not constructed URLs.
 
@@ -96,22 +96,36 @@ Representative values (all on PDF page 3 of the named file):
 | 2022-11 | 16.16 | 16.57 | 16.55 | 2022 Vol 29 No 26 (also 2023 and 2024 issues) |
 | 2025-08 | 23.22 | 23.27 | 23.25 | 2026 Vol 33 No 21 (also issues 8 and 14, and 2025 No 26) |
 
-### 6.2 Published anomalies (exact values)
+### 6.2 Published ordering exceptions and midpoint diagnostics
 
-These are values as published; none is repaired, recomputed or swapped.
+**Methodology statement.** BoZ's monthly-average and monthly-mid calculation methodology was not established during this research. Midpoint arithmetic therefore cannot currently be a source-validity rule.
 
-| Month | Publication | Page / table | Buying | Selling | Mid | Observation |
+Three concepts are kept separate in this document and in the proposed validation policy:
+
+- **Confirmed published ordering exceptions:** rows that violate `buy <= mid <= sell`. Confirmed: 2012-04 and 2013-12. These are the only rows that would need a named exception to be ingested.
+- **Midpoint diagnostics:** rows where the published mid differs notably from `(buy + sell) / 2`. Examples: 2019-03 and 2022-11. These are research diagnostics, not validity failures, and need no exception.
+- **Published values:** every value is preserved exactly as published, whatever its diagnostic status. Nothing is repaired, recomputed or swapped.
+
+**Confirmed ordering exceptions (exact values):**
+
+| Month | Publication | Page / table | Buying | Selling | Mid | Violated rule |
 |---|---|---|---|---|---|---|
-| 2012-04 | `BOZANNUALREPORT2012.pdf`, `/sites/default/files/migrated/annual-reports/2012/BOZANNUALREPORT2012.pdf` | PDF p. 145 (printed 137), Table 13 | 5,283.60 | 5,250.97 | 5,240.97 | selling is below buying; the printed mid is also below both |
-| 2012-04 | `BOZANNUALREPORT2013.pdf`, `/sites/default/files/migrated/annual-reports/2013/BOZANNUALREPORT2013.pdf` | PDF p. 146 (printed 138), Table 13 | 5,283.60 | 5,250.97 | 5,240.97 | identical to the 2012 report |
-| 2013-12 | `BOZANNUALREPORT2013.pdf` (URL above) | PDF p. 146 (printed 138), Table 13 | 5.52 | 5.53 | 5.54 | printed mid is above selling |
-| 2022-11 | `StatisticsFortnightly2022Vol29IssueNo26.pdf` (also `2023Vol30IssueNo26`, `2024Vol31IssueNo26`) | PDF p. 3, Table 02 `Monthly Averages` | 16.16 | 16.57 | 16.55 | ordering `buy <= mid <= sell` holds; the violated rule is the midpoint check: printed mid differs from `(buy + sell) / 2` (16.365) by 0.185, far beyond printing allowance (about 0.01), and sits 0.02 below selling; neighbouring spreads are about 0.05 |
+| 2012-04 | `BOZANNUALREPORT2012.pdf`, `/sites/default/files/migrated/annual-reports/2012/BOZANNUALREPORT2012.pdf` | PDF p. 145 (printed 137), Table 13 | 5,283.60 | 5,250.97 | 5,240.97 | `buy <= mid <= sell`: selling < buying, mid < selling and mid < buying |
+| 2012-04 | `BOZANNUALREPORT2013.pdf`, `/sites/default/files/migrated/annual-reports/2013/BOZANNUALREPORT2013.pdf` | PDF p. 146 (printed 138), Table 13 | 5,283.60 | 5,250.97 | 5,240.97 | same row, identical to the 2012 report |
+| 2013-12 | `BOZANNUALREPORT2013.pdf` (URL above) | PDF p. 146 (printed 138), Table 13 | 5.52 | 5.53 | 5.54 | `buy <= mid <= sell`: mid > selling |
 
-Rule violations, kept distinct: 2012-04 violates ordering (selling below buying; mid below both); 2013-12 violates ordering (mid above selling); 2022-11 passes ordering and violates only the midpoint check. These were found by checking the 201-month chain for `buy <= mid <= sell` and for the mid being within printing resolution of `(buy + sell) / 2`. The check is a research arithmetic test, not a BoZ-defined rule, and the list is the result of one pass over the sampled issues, so it must not be treated as exhaustive.
+Both rows are in annual-report tables, so they matter only if the annual-report extension (phase 2) is implemented. No ordering violation was found in the Fortnightly Table 02 rows of the 153-month chain. This was one research pass over the sampled issues and must not be treated as exhaustive.
 
-**2019-03 (research observation, not an exception).** Fortnightly Table 02 (PDF p. 3 of `StatisticsFortnightly2019Vol26No26.pdf`, also `2020Vol28No02` and `2021Vol28No27`) prints buying 12.01, selling 12.04, mid 12.04. Ordering holds (`12.01 <= 12.04 <= 12.04`), so this is not an ordering exception. Its published mid differs from the simple buy/sell midpoint (12.025) beyond the expected printing allowance, but because BoZ's mid calculation methodology is not established, this remains a research observation rather than a validation exception. It is not part of the exception list in Gate 5.
+**Midpoint diagnostics (not validity failures):**
 
-PDF parsing is **not** implemented; this is a viability finding only. Viability: viable, with a fail-loud parser pinned to Table 02, because Table 02 was on PDF page 3 in all 13 issues and one regex recovered all 153 months, although the heading and column-label layout differs by era (section 6.1), so one layout cannot be assumed; the risks are layout changes and the published anomalies (section 18).
+| Month | Publication | Page / table | Buying | Selling | Mid | Simple midpoint | Published mid minus midpoint |
+|---|---|---|---|---|---|---|---|
+| 2022-11 | `StatisticsFortnightly2022Vol29IssueNo26.pdf` (also `2023Vol30IssueNo26`, `2024Vol31IssueNo26`) | PDF p. 3, Table 02 `Monthly Averages` | 16.16 | 16.57 | 16.55 | 16.365 | +0.185 |
+| 2019-03 | `StatisticsFortnightly2019Vol26No26.pdf` (also `2020Vol28No02`, `2021Vol28No27`) | PDF p. 3, Table 02 `Monthly Averages` | 12.01 | 12.04 | 12.04 | 12.025 | +0.015 |
+
+Ordering passes for both (`16.16 <= 16.55 <= 16.57`; `12.01 <= 12.04 <= 12.04`), so neither needs an ordering exception. This does not establish source invalidity because BoZ's monthly-mid calculation methodology is not documented. The importer may report the difference between the published mid and the simple arithmetic midpoint as a diagnostic, but this difference is not a validation failure. The published mid is stored as published in every case.
+
+PDF parsing is **not** implemented; this is a viability finding only. Viability: viable, with a fail-loud parser pinned to Table 02, because Table 02 was on PDF page 3 in all 13 issues and one regex recovered all 153 months, although the heading and column-label layout differs by era (section 6.1), so one layout cannot be assumed; the risks are layout changes and the published ordering exceptions (section 6.2 and Gate 5).
 
 ## 7. Annual reports and statistical booklets
 
@@ -237,10 +251,10 @@ Keep `fx_rates` and the live adapter exactly as they are. If implemented, add a 
 - Published values as printed, never recomputed: `published_buy`, `published_sell`, `published_mid` (each a decimal string kept at printed precision), `published_precision`.
 - Normalized values (only where a documented conversion applies; equal to the published values in the rebased regime): `normalized_buy`, `normalized_sell`, `normalized_mid`, plus `original_currency_regime` (`ZMW` or `ZMK`), `conversion_rule` (null or an identifier of the documented rule) and the evidence reference for it.
 - Provenance: `source_publication_title` or filename, `source_url`, `source_pdf_page`, `source_table_id` (`Table 02`), `retrieved_at`/`imported_at`.
-- `anomaly_exception_id` (null unless a named exception applies, section 19 Gate 5) and `rights_status`.
+- `ordering_exception_id` (null unless a named ordering exception applies, section 19 Gate 5) and `rights_status`.
 - The published mid is stored directly. It is not derived from buy and sell.
 - Unique key `(pair, observation_month, source_series)`; differing re-import values abort (conflict-aware), matching the backfill behaviour. Because overlapping issues repeat the same months, record the first and latest issue that confirmed a value as compatible provenance, and surface a differing repeat as a revision/conflict for explicit handling rather than overwriting it.
-- Importer: manual job like `backfill_usdzmw`, pinned to Table 02, fail loudly on layout or arithmetic anomalies (`buy <= mid <= sell` and `mid` within rounding of `(buy + sell) / 2`), with an explicit, named exception list for published anomalies.
+- Importer: manual job like `backfill_usdzmw`, pinned to Table 02, fail loudly on layout errors and on `buy <= mid <= sell` violations, with an explicit, named exception list for confirmed published ordering exceptions only. The importer may report the difference between the published mid and the simple arithmetic midpoint as a diagnostic, but this difference is not a validation failure because BoZ's monthly mid-rate methodology has not been established.
 - Phase 2 (optional, gated): 2013 months from the 2013 Annual Report (already rebased) and 2010 to 2012 months from the 2012 Annual Report (old units, with a stored ÷1,000 policy and per-row `source_unit`).
 
 ## 16. Copper analytical impact (research-only)
@@ -263,7 +277,7 @@ Transition pairs are not computed as "matched months minus one" in general. For 
 **Research-only analytics preview** (not for the UI or production API). Status: re-run in this pass with `pearson` and `sensitivity_beta` from `apps/api/app/services/copper_kwacha.py` over the inputs below, reproducing the values shown. The inputs were assembled in a session scratch area and are **not committed**, so the coefficients are reconstructable (from the IMF Copper rows in the local store and the cited publications) but not reproducible from this repository alone; treat them as indicative.
 
 - Copper: IMF monthly copper series from the local store (418 months, 1992-01 to 2026-10); change = `level_t / level_(t-1) - 1`.
-- FX: the published BoZ mid-rate (not a derived mid), at its printed 2-decimal precision, for each month in the sample: fortnightly Table 02 (153 months); 2013 rows from the 2013 Annual Report Table 13 (rebased regime); 2010 to 2012 rows from the 2012 Annual Report Table 13 divided by 1,000 under a **research-only** conversion rule (the production rule would need Gate 4 per-publication grounding); change defined the same way. Published anomaly months (2012-04, 2013-12, 2019-03, 2022-11) were used as published.
+- FX: the published BoZ mid-rate (not a derived mid), at its printed 2-decimal precision, for each month in the sample: fortnightly Table 02 (153 months); 2013 rows from the 2013 Annual Report Table 13 (rebased regime); 2010 to 2012 rows from the 2012 Annual Report Table 13 divided by 1,000 under a **research-only** conversion rule (the production rule would need Gate 4 per-publication grounding); change defined the same way. All published values were used as published. Midpoint-diagnostic months (2019-03, 2022-11) are included because they pass the ordering rule that determines eligibility; the confirmed ordering-exception months (2012-04, 2013-12) are annual-report rows and are included only in the 2010-to-2012 and 2013 samples, as published and unrepaired, by explicit source acceptance for this research calculation.
 - Pairs are consecutive-month pairs with positive levels. The last row uses the project's observed-days monthly averages (stored intraday rows) rather than the published mid.
 
 | Sample | Changes | Pearson r | Beta (Sxy/Sxx) |
@@ -293,7 +307,7 @@ Reading: the longer-history estimate differs materially from the current eight-c
 
 The verdict is retained because the corrected evidence (section 6.1 to 6.2, 7, 9, 12) supports a local, separate monthly series from Table 02 **provided all nine gates in section 19 are satisfied**.
 
-It means: local implementation of a separate official monthly FX series may proceed; the preferred source is BoZ Fortnightly Statistics Table 02; the implementation must satisfy the discovery, table-identification, column/year, rebasing, anomaly, provenance and fixture gates; redistribution and commercial-use rights remain unresolved.
+It means: local implementation of a separate official monthly FX series may proceed; the preferred source is BoZ Fortnightly Statistics Table 02; the implementation must satisfy the discovery, table-identification, column/year, rebasing, ordering-exception, provenance and fixture gates; redistribution and commercial-use rights remain unresolved.
 
 It does **not** mean: public redistribution is approved; commercial use is approved; a parser already exists; or monthly data belongs in `fx_rates`.
 
@@ -309,13 +323,13 @@ Approval in section 18 is conditional: implementation may start only when **ever
 
 **Gate 4: redenomination and rebasing.** Any conversion of pre-2013 values must rest on explicit official publication evidence (section 9: ÷1,000, effective 1 January 2013, launch 31 December 2012). No magnitude heuristic such as `value > 1000`. Publication and table eras are treated explicitly: old-kwacha published values are distinguished from rebased values, the regime is fixed by an explicit publication/table/month rule and never by report preparation or approval timing, and financial-statement restatement wording is not applied to statistical tables automatically. Where a value is converted for a normalized ZMW series, store the original published value, the original unit/regime, the conversion rule, the normalized value and the source publication and page. Fail closed if the regime cannot be determined from documented rules.
 
-**Gate 5: named anomaly exceptions.** Default parsing and validation stay strict. Each known source-published exception is a narrow, explicit entry with: month; affected field or validation rule; exact published buy/sell/mid; publication title or filename; source URL; PDF page and table; and the reason it is accepted. Known cases: 2012-04 (selling below buying, mid below both), 2013-12 (mid above selling), 2022-11 (printed mid differs from the buy/sell midpoint by 0.185; ordering holds). 2019-03 is deliberately not in this list (section 6.2). The exception means "accepted because this is the value BoZ actually published", not "the value has been mathematically corrected". Do not recompute the mid, swap buying and selling, silently repair a value, or disable validation globally.
+**Gate 5: named ordering exceptions.** Default parsing and validation stay strict. The hard cross-field rule is `buy <= mid <= sell`; a row that violates it is rejected unless a named, source-proven exception exists. Exceptions correspond only to actual hard parser validation rules. Each entry retains: month; violated rule; exact published buy/sell/mid; publication title or filename; source URL; PDF page and table; and the reason accepted. Known confirmed cases: 2012-04 (selling < buying; mid < selling; mid < buying) and 2013-12 (mid > selling), both annual-report rows relevant only to the phase-2 extension. Midpoint diagnostics (2019-03, 2022-11) require no exception and are not on this list, because midpoint arithmetic is not a validity rule (BoZ's monthly-mid methodology is not established). The exception means "accepted because this is the value BoZ actually published", not "the value has been mathematically corrected". Do not recompute the mid, swap buying and selling, silently repair a value, or disable validation globally.
 
 **Gate 6: provenance, revision and conflict handling.** Every monthly row retains: pair; observation month; published buying, selling and mid; normalized values if converted; original currency/unit regime; published precision; publication title or filename; source URL; PDF page; table identifier; retrieved/imported timestamp; and provider identifier. A later publication repeating identical values is compatible provenance (idempotent). A later publication with different values is never silently overwritten; it is surfaced as a revision/conflict for explicit handling. The research finding is only that no revisions were observed in the sampled overlaps; no assumption that revisions cannot occur is encoded.
 
-**Gate 7: preserve the published mid.** Table 02 publishes a mid-rate; the implementation stores it directly. It must not compute `(buy + sell) / 2` and must not replace an inconsistent published mid with a derived one. A derived mid would be a different methodology and is not needed for this source.
+**Gate 7: preserve the published mid.** Table 02 publishes a mid-rate; the implementation stores it directly. It must not compute `(buy + sell) / 2` and must not replace a published mid with a derived one, even when its difference from the simple midpoint is large. A derived mid would be a different methodology and is not needed for this source.
 
-**Gate 8: parser fixtures across publication eras.** The parser needs small committed fixtures covering at least: an early fortnightly publication, a middle-period publication, a recent publication, an issue with repeated historical months, an issue without Table 02, a malformed or shifted table, a known published anomaly, and, if the annual-report extension is implemented, an annual-report rebasing-era table. Fixtures must test: Table 02 identification, column mapping, year/month handling, exact decimals, rejection of ambiguous layout, anomaly exceptions, and duplicate/revision behaviour. A parser validated against a single PDF layout is not approved (the heading and column layout differ between 2016, 2017 to 2023 and 2024 to 2026 issues, section 6.1).
+**Gate 8: parser fixtures across publication eras.** The parser needs small committed fixtures covering at least: an early fortnightly publication, a middle-period publication, a recent publication, an issue with repeated historical months, an issue without Table 02, a malformed or shifted table, a known published ordering exception, a midpoint-diagnostic row that must still be accepted, and, if the annual-report extension is implemented, an annual-report rebasing-era table. Fixtures must test: Table 02 identification, column mapping, year/month handling, exact decimals, rejection of ambiguous layout, ordering exceptions and rejection of unlisted ordering violations, and duplicate/revision behaviour. A parser validated against a single PDF layout is not approved (the heading and column layout differ between 2016, 2017 to 2023 and 2024 to 2026 issues, section 6.1).
 
 **Gate 9: completeness and a deterministic import boundary.** A production import defines exactly which publication range is ingested: deterministic discovery, deterministic chronological ordering, an explicit earliest and latest requested publication. Before committing any data it reports missing publications, missing Table 02 blocks, duplicate months, conflicts, and the final coverage and gaps. It does not infer missing months, interpolate or forward-fill, and it does not treat the reconstructed 2014-01 to 2026-09 coverage as proof that every fortnightly issue exists or was parsed.
 
