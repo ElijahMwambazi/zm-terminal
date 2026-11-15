@@ -147,6 +147,8 @@ Keep installed capacity, actual generation, consumption, demand, contracted impo
 
 Existing ERB petroleum coverage forms part of this broader energy domain.
 
+Energy Phase 1 (research complete, nothing implemented): `docs/research/zambia-energy-data-sources.md` recommends the ERB Statistical Bulletin and Energy Sector Report as canonical annual sources (generation by station 2013-2025, station capacity register, imports/exports, peak demand), with no reliable load-shedding history. First implementation slice: an annual station-generation parser with pinned ERB files; rights remain `review_required`.
+
 #### Mining and mineral economy
 Potential coverage:
 - copper
