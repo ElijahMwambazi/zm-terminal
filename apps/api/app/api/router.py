@@ -13,6 +13,7 @@ from app.schemas.copper import CopperHistory, CopperLatest, CopperRange
 from app.schemas.copper_kwacha import CopperKwachaCorrelation, CopperKwachaSensitivity, CorrelationWindow
 from app.schemas.copper_zm import CopperZmHistory, CopperZmMonth
 from app.schemas.fx import FxHistory, FxQuote
+from app.schemas.fx_monthly import FxMonthlyHistory, FxMonthlyRange
 from app.schemas.agriculture import (
     AGRICULTURE_COMMODITIES, AgricultureCommodity, AgricultureHistory, AgricultureLatest, AgriculturePrice, AgricultureRange,
 )
@@ -40,6 +41,7 @@ from app.services.boz_bonds import get_boz_bonds, latest_per_tenor as latest_bon
 from app.services.boz_treasury import LUSAKA, get_boz_tbills, latest_per_tenor
 from app.services.fuel_buildup_store import fetch_build_up
 from app.services.fuel_store import fetch_fuel_history, fetch_latest_fuel
+from app.services.fx_monthly_store import fetch_fx_monthly
 from app.services.fx_store import FxConflictError, HistoryRange, fetch_fx_history, fetch_latest_fx_mid, save_fx_quote
 from app.services.tbill_store import TbillConflictError, fetch_tbill_history, save_tbill_auctions
 from app.services.copper_store import fetch_copper_history, fetch_latest_copper
@@ -99,6 +101,19 @@ async def _load_tbills() -> tuple[list[TreasuryBillAuction], list[RejectedTender
     except Exception as exc:
         logger.warning("T-bill persistence failed (%s); live data returned unsaved", type(exc).__name__)
     return rows, skipped
+
+
+@router.get("/fx/USDZMW/monthly", response_model=FxMonthlyHistory)
+async def fx_usdzmw_monthly(range: FxMonthlyRange = "ALL") -> FxMonthlyHistory:
+    """Official BoZ monthly averages (Fortnightly Statistics Table 02, ZMW per USD) from PostgreSQL only; BoZ is never called here.
+
+    Ranges are counts of the most recent stored months: 1Y=12, 3Y=36, 5Y=60, ALL=all. Months are YYYY-MM, not timestamps.
+    """
+    try:
+        return await asyncio.to_thread(fetch_fx_monthly, range)
+    except Exception as exc:
+        logger.warning("Monthly FX read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored monthly USD/ZMW averages unavailable") from exc
 
 
 @router.get("/treasury-bills/latest", response_model=TreasuryBillsLatest)

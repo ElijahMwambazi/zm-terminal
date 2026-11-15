@@ -1,6 +1,8 @@
 # BoZ deeper USD/ZMW history: source discovery
 
-Status: **research only**. Nothing in this document is implemented. No provider, migration, schema, route or Copper methodology change was made, and Bank of Zambia (BoZ) was not contacted. Research dates: retrieved 2026-11-14/15 from public, anonymous BoZ endpoints; every candidate file was downloaded once with a descriptive `User-Agent`, requests were spaced at least 2 s apart and the whole investigation was about 40 requests.
+> **Implementation status (added after this research was merged):** phase 1 of this report (Fortnightly Statistics Table 02, 2014-01 onward) is now implemented as a local/internal slice: see `docs/CURRENT_STATE.md`, section "Official BoZ monthly USD/ZMW averages". The research findings below are unchanged and describe the state at research time. The 2010-2013 Annual Report extension, `copper_zm_v2` and any frontend remain unimplemented.
+
+Status at research time: **research only**. Nothing in this document was implemented when it was written. No provider, migration, schema, route or Copper methodology change was made, and Bank of Zambia (BoZ) was not contacted. Research dates: retrieved 2026-11-14/15 from public, anonymous BoZ endpoints; every candidate file was downloaded once with a descriptive `User-Agent`, requests were spaced at least 2 s apart and the whole investigation was about 40 requests.
 
 ## 1. Objective
 

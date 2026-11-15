@@ -1,0 +1,27 @@
+Fortnightly Statistics (SANITIZED TEST FIXTURE)
+This file mimics the extracted-text structure of a BoZ Fortnightly Statistics page; every number is synthetic.
+Table 01A BANK OF ZAMBIA MID-RATES
+End of Period 9.90 Period Average 9.95Table 01 SOMETHING ELSE
+Table 02
+KWACHA/US DOLLAR EXCHANGE RATES
+Bank of Zambia Rates Bureau Rates
+Buying Selling Mid-rate Buying Selling Mid-rate
+Monthly
+Averages
+2018
+November 12.00 12.05 12.03 11.97 12.07 12.03
+December 12.07 12.12 12.10 12.04 12.14 12.10
+2019
+January 12.14 12.19 12.17 12.11 12.21 12.17
+February 12.21 12.26 12.24 12.18 12.28 12.24
+March 12.01 12.04 12.04 11.98 12.06 12.04
+April 12.35 12.40 12.38 12.32 12.42 12.38
+Weekly
+Average
+2019
+May 07 10.00 10.05 10.02 9.97 10.07 10.02
+14 11.00 11.05 11.02 10.97 11.07 11.02
+21 12.00 12.05 12.02 11.97 12.07 12.02
+Daily
+May 01 10.00 10.05 10.02 9.97 10.07 10.02
+02 10.10 10.15 10.12 10.07 10.17 10.12

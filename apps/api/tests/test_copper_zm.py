@@ -343,4 +343,4 @@ def test_pg_derivation_is_read_only_and_persists_nothing(engine):
     copper_zm.fetch_copper_zm("ALL", today=TODAY, engine=engine); copper_zm.fetch_copper_zm("1Y", today=TODAY, engine=engine)
     assert snapshot() == before
     assert not [t for t in before[0] if "zm" in t and "copper" in t]  # no derived table exists
-    assert not list(Path(__file__).parents[3].joinpath("db/init").glob("012*"))  # no migration 012
+    assert not [f for f in Path(__file__).parents[3].joinpath("db/init").glob("*.sql") if int(f.name[:3]) > 11 and "copper" in f.read_text().lower()]  # no copper-derivation migration after 011

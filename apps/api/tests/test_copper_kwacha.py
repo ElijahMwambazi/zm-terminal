@@ -390,7 +390,7 @@ def test_pg_nothing_is_persisted(engine):
             return names, [c.execute(text(f'SELECT count(*) FROM "{n}"')).scalar() for n in names]
     before = snap()
     copper_kwacha.fetch_copper_kwacha_correlation("ALL", "6M", today=TODAY, engine=engine)
-    assert snap() == before and not list(Path(__file__).parents[3].joinpath("db/init").glob("012*"))
+    assert snap() == before and not [f for f in Path(__file__).parents[3].joinpath("db/init").glob("*.sql") if int(f.name[:3]) > 11 and "copper" in f.read_text().lower()]
 
 
 # ======================= historical sensitivity (beta) =======================

@@ -92,6 +92,7 @@ GET /api/v1/providers
 
 GET /api/v1/fx/USDZMW
 GET /api/v1/fx/USDZMW/history?range=1D|1W|1M|3M|1Y|ALL
+GET /api/v1/fx/USDZMW/monthly?range=1Y|3Y|5Y|ALL
 
 GET /api/v1/treasury-bills/latest
 GET /api/v1/treasury-bills/{91D|182D|273D|364D}
@@ -133,6 +134,21 @@ Each successful quote is persisted (exact `NUMERIC` values, `observed_at`, `retr
 **Existing databases:** `db/init` scripts only run on a fresh volume. Apply the provenance columns with
 `docker compose exec -T postgres psql -U zm_terminal -d zm_terminal < db/init/002_fx_rates_provenance.sql`.
 After adding the `lightweight-charts` dependency, recreate the web `node_modules` volume (`docker compose down && docker volume rm zm-terminal_web_node_modules`).
+
+### Official BoZ monthly USD/ZMW averages (phase 1, local/internal)
+
+A **separate dataset** from the intraday history above: official Bank of Zambia **monthly average** buy / sell / **published mid** rates (ZMW per USD), from Table 02 `KWACHA/US DOLLAR EXCHANGE RATES`, "Monthly Averages" (Bank of Zambia Rates columns) of the BoZ **Fortnightly Statistics** PDFs. Phase-1 coverage is **2014-01 to 2026-09** (153 months, rebased kwacha, 2 published decimals). It lives in its own table `fx_monthly_averages` (migration `012_fx_monthly_averages.sql`), never in `fx_rates`: a row is a calendar month, has no `observed_at`, and the API shows `month` as `YYYY-MM`. The published mid is stored exactly; it is never computed from buy and sell. BoZ's monthly-average methodology is not documented, so the existing observed-days method (used by `OIL ZM` and `COPPER ZM`) is a different series and nothing in those views changed.
+
+```bash
+docker compose exec api python -m app.jobs.backfill_fx_monthly [--from YYYY-MM] [--to YYYY-MM] [--dry-run]
+# or, locally: cd apps/api && python -m app.jobs.backfill_fx_monthly --dry-run
+```
+
+The importer requests only the 13 vetted publications listed in `app/services/boz_monthly_source.py` (derived from `docs/research/boz-deeper-fx-history.md` section 6.1; no URL is guessed and the archive is not crawled): one sequential GET each, 2 s apart, no retries, HTTPS `www.boz.zm` only, no redirects, 5 MB cap. It extracts the PDF text layer (no OCR), requires exactly one `Table 02` / `KWACHA/US DOLLAR EXCHANGE RATES` / `Monthly Averages` block with the BoZ columns first and consecutive months under explicit year labels, enforces `buy <= mid <= sell` (the named exception list is empty in phase 1) and does **not** treat a mid that differs from `(buy + sell) / 2` as invalid (2019-03 and 2022-11 are published that way). Every overlapping month across publications must be numerically identical or the whole import fails; the stored row's provenance is the **earliest** vetted publication containing that month. Missing months fail the import (nothing is interpolated). Persistence is one atomic conflict-aware transaction (new = insert, identical = already present, different = conflict, nothing written); `--dry-run` never touches PostgreSQL. Output is counts and months only. A full run takes about 3 minutes (13 downloads plus whole-PDF text extraction).
+
+`GET /api/v1/fx/USDZMW/monthly?range=1Y|3Y|5Y|ALL` (default `ALL`; invalid range `422`; database failure a safe `503`) reads PostgreSQL only and never contacts BoZ or parses a PDF. Ranges are **counts of stored months** (`1Y` = the latest 12, `3Y` = 36, `5Y` = 60, `ALL` = all), returned ascending as `{symbol, range, count, first_month, last_month, observations[{month, buy, mid, sell, source, source_series, source_publication, source_url, source_page, published_precision}]}` with decimal strings. There is no stale flag and no timestamp.
+
+Apply the migration to an existing database volume (idempotent; it only creates the new table): `docker compose exec -T postgres psql -U zm_terminal -d zm_terminal < db/init/012_fx_monthly_averages.sql`. **Not implemented in this slice:** the 2010-2013 Annual Report months and any ZMK normalization, ordering exceptions from 2012/2013, a frontend view, `copper_zm_v2` and any Copper methodology change. **Rights are `review_required`: local/internal use only**; public redistribution and commercial use are not approved and Bank of Zambia has not been contacted.
 
 ### Historical backfill (manual job)
 
