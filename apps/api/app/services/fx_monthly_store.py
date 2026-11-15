@@ -30,10 +30,30 @@ _SELECT_ONE = text(
 )
 
 
+class PublicationMetadataError(ValueError):
+    """The publication-normalization fields were only partly supplied."""
+
+
+_PUBLICATION_FIELDS = ("published_buy", "published_mid", "published_sell", "published_currency", "normalization_divisor")
+
+
+def has_publication_metadata(o: MonthlyObservation) -> bool:
+    """All-or-none: True when all five publication-normalization fields are supplied, False when none are (legacy Phase 1).
+    Any mixture raises before anything is built or written."""
+    present = [name for name in _PUBLICATION_FIELDS if getattr(o, name) is not None]
+    if not present:
+        return False
+    if len(present) != len(_PUBLICATION_FIELDS):
+        missing = [name for name in _PUBLICATION_FIELDS if name not in present]
+        raise PublicationMetadataError(
+            f"Partial publication metadata for {o.month:%Y-%m}: missing {', '.join(missing)} (supply all five or none)")
+    return True
+
+
 def row_params(o: MonthlyObservation, imported_at: datetime) -> dict:
     """All stored columns for one observation. A phase-1 observation (no published_* fields) is rebased ZMW: printed = canonical,
     divisor 1. Phase-2 rows carry their printed values, currency and divisor; the database re-checks canonical = printed / divisor."""
-    phase1 = o.published_buy is None
+    phase1 = not has_publication_metadata(o)
     return {
         "base_currency": "USD", "quote_currency": "ZMW", "observation_month": o.month,
         "buy": o.buy, "mid": o.mid, "sell": o.sell, "source": SOURCE, "source_series": o.source_series or SOURCE_SERIES,
@@ -59,6 +79,8 @@ def save_monthly_averages(
     """
     inserted = identical = 0
     conflicts: list[date] = []
+    for o in observations:  # reject partial metadata before any connection or write
+        has_publication_metadata(o)
     with (engine or get_engine()).begin() as connection:
         for o in observations:
             params = row_params(o, imported_at)

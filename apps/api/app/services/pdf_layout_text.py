@@ -2,16 +2,26 @@
 
 The caller (the source layer) supplies bytes it has already fetched and hash-checked; this module never fetches anything.
 The executable is invoked with an argument list (no shell, no interpolation), under a timeout, on a private temporary file
-that is always removed. Only the single pinned page is extracted. Errors never carry PDF text or values.
+that is always removed. stdout and stderr go to temporary files (never in-memory pipes) that are size-monitored while the child runs
+(and hard-capped by RLIMIT_FSIZE where available); the child is killed and reaped on overflow or timeout. Only the single pinned page is extracted. Errors never carry PDF text or values.
 """
 
 import subprocess
 import tempfile
+import time
 from pathlib import Path
+
+try:  # POSIX only; the polling monitor below is the portable bound
+    import resource
+except ImportError:  # pragma: no cover
+    resource = None  # type: ignore[assignment]
 
 EXECUTABLE = "pdftotext"
 TIMEOUT_SECONDS = 60.0
-MAX_OUTPUT_CHARS = 200_000  # one table page is a few kB
+MAX_OUTPUT_BYTES = 200_000  # one table page is a few kB
+MAX_OUTPUT_CHARS = MAX_OUTPUT_BYTES
+MAX_STDERR_BYTES = 64_000
+POLL_SECONDS = 0.02
 
 
 class LayoutExtractionError(Exception):
@@ -25,30 +35,62 @@ def pdftotext_command(pdf_path: str, page: int, executable: str = EXECUTABLE) ->
     return [executable, "-layout", "-f", str(page), "-l", str(page), "-enc", "UTF-8", pdf_path, "-"]
 
 
+def _limit_file_sizes() -> None:  # runs in the child between fork and exec: no file it writes may exceed the cap + 1 byte
+    resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT_BYTES + 1, MAX_OUTPUT_BYTES + 1))
+
+
+def _size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except FileNotFoundError:
+        return 0
+
+
+def _stop(process: subprocess.Popen) -> None:
+    process.kill()
+    process.wait()  # always reap
+
+
 def extract_page_layout(
     pdf_bytes: bytes, page: int, *, executable: str = EXECUTABLE, timeout: float = TIMEOUT_SECONDS,
 ) -> str:
     """Layout-preserving text of one PDF page (1-based)."""
     with tempfile.TemporaryDirectory(prefix="zmt-pdf-") as directory:
-        path = Path(directory) / "input.pdf"
+        base = Path(directory)
+        path, out_path, err_path = base / "input.pdf", base / "stdout.txt", base / "stderr.txt"
         path.write_bytes(pdf_bytes)
         command = pdftotext_command(str(path), page, executable)
         try:
-            completed = subprocess.run(  # noqa: S603 - fixed argument list, shell=False
-                command, capture_output=True, timeout=timeout, shell=False, check=False,
-            )
+            with out_path.open("wb") as out, err_path.open("wb") as err:
+                process = subprocess.Popen(  # noqa: S603 - fixed argument list, shell=False
+                    command, stdin=subprocess.DEVNULL, stdout=out, stderr=err, shell=False,
+                    preexec_fn=_limit_file_sizes if resource is not None else None,
+                )
+                deadline = time.monotonic() + timeout
+                try:
+                    while process.poll() is None:
+                        if _size(out_path) > MAX_OUTPUT_BYTES or _size(err_path) > MAX_STDERR_BYTES:
+                            _stop(process)
+                            raise LayoutExtractionError("pdftotext output is larger than expected for one page")
+                        if time.monotonic() >= deadline:
+                            _stop(process)
+                            raise LayoutExtractionError(f"pdftotext timed out after {timeout:g} s")
+                        time.sleep(POLL_SECONDS)
+                except BaseException:
+                    if process.poll() is None:
+                        _stop(process)
+                    raise
         except FileNotFoundError as exc:
             raise LayoutExtractionError(
                 "pdftotext was not found; install Poppler (for example the poppler-utils package)") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise LayoutExtractionError(f"pdftotext timed out after {timeout:g} s") from exc
         except OSError as exc:
             raise LayoutExtractionError(f"pdftotext could not be run ({type(exc).__name__})") from exc
-    if completed.returncode != 0:
-        raise LayoutExtractionError(f"pdftotext failed (exit status {completed.returncode})")
-    text = completed.stdout.decode("utf-8", errors="strict") if completed.stdout else ""
+        if _size(out_path) > MAX_OUTPUT_BYTES or _size(err_path) > MAX_STDERR_BYTES:  # fast writers between polls
+            raise LayoutExtractionError("pdftotext output is larger than expected for one page")
+        if process.returncode != 0:
+            raise LayoutExtractionError(f"pdftotext failed (exit status {process.returncode})")
+        data = out_path.read_bytes()  # size already confirmed within the cap
+    text = data.decode("utf-8", errors="strict") if data else ""
     if not text.strip():
         raise LayoutExtractionError("pdftotext produced no text for the pinned page")
-    if len(text) > MAX_OUTPUT_CHARS:
-        raise LayoutExtractionError("pdftotext output is larger than expected for one page")
     return text

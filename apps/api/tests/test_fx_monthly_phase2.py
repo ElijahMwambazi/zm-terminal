@@ -11,6 +11,7 @@ import hashlib
 import os
 import shutil
 import subprocess
+import sys
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -59,49 +60,123 @@ def test_command_is_a_fixed_argument_list():
             layout.pdftotext_command("/x/input.pdf", bad)  # type: ignore[arg-type]
 
 
-def test_extractor_runs_without_a_shell_under_a_timeout_and_cleans_up(monkeypatch):
+def fake_tool(tmp_path, body: str) -> str:
+    """A real executable (python script) standing in for pdftotext; argv[-2] is the input file, argv[-1] is '-'."""
+    script = tmp_path / "fake_pdftotext"
+    script.write_text(f"#!{sys.executable}\nimport sys, os, time\n{body}\n")
+    script.chmod(0o755)
+    return str(script)
+
+
+def temp_dirs_left(tmp_path_factory=None) -> list:
+    import glob, tempfile
+    return glob.glob(os.path.join(tempfile.gettempdir(), "zmt-pdf-*"))
+
+
+def test_extractor_uses_popen_without_a_shell_with_file_sinks(monkeypatch):
     seen = {}
+    real = subprocess.Popen
 
-    def fake_run(command, **kwargs):
-        seen.update(command=command, kwargs=kwargs, exists=Path(command[-2]).read_bytes())
-        seen["dir"] = Path(command[-2]).parent
-        return subprocess.CompletedProcess(command, 0, stdout=b"page text\n", stderr=b"")
+    def spy(command, **kwargs):
+        seen.update(command=command, kwargs=kwargs, dir=Path(command[-2]).parent, input=Path(command[-2]).read_bytes())
+        return real(["/bin/sh", "-c", "printf 'page text\\n'"], **kwargs)
 
-    monkeypatch.setattr(layout.subprocess, "run", fake_run)
+    monkeypatch.setattr(layout.subprocess, "Popen", spy)
     assert layout.extract_page_layout(b"%PDF-1.4 data", 7, timeout=12.5) == "page text\n"
-    assert seen["command"][:7] == ["pdftotext", "-layout", "-f", "7", "-l", "7", "-enc"]
-    assert seen["kwargs"]["shell"] is False and seen["kwargs"]["timeout"] == 12.5 and seen["exists"] == b"%PDF-1.4 data"
-    assert not seen["dir"].exists()  # temporary directory removed
+    assert seen["command"][:7] == ["pdftotext", "-layout", "-f", "7", "-l", "7", "-enc"] and seen["command"][-1] == "-"
+    kw = seen["kwargs"]
+    assert kw["shell"] is False and kw["stdin"] == subprocess.DEVNULL
+    assert kw["stdout"] is not subprocess.PIPE and kw["stderr"] is not subprocess.PIPE  # file sinks, never in-memory pipes
+    assert seen["input"] == b"%PDF-1.4 data" and not seen["dir"].exists()
 
 
-def test_extractor_failures_are_clear_and_still_clean_up(monkeypatch):
-    dirs = []
+def test_normal_extraction_succeeds_with_a_real_child(tmp_path):
+    tool = fake_tool(tmp_path, "sys.stdout.write('hello page\\n'); sys.stderr.write('warn')")
+    assert layout.extract_page_layout(b"%PDF-", 3, executable=tool) == "hello page\n"
 
-    def raiser(exc):
-        def run(command, **kwargs):
-            dirs.append(Path(command[-2]).parent)
-            raise exc
-        return run
 
-    monkeypatch.setattr(layout.subprocess, "run", raiser(FileNotFoundError()))
+def test_nonzero_exit_fails_cleanly_without_echoing_stderr(tmp_path):
+    tool = fake_tool(tmp_path, "sys.stderr.write('secret detail'); sys.exit(3)")
+    with pytest.raises(layout.LayoutExtractionError, match="exit status 3") as info:
+        layout.extract_page_layout(b"%PDF-", 1, executable=tool)
+    assert "secret" not in str(info.value)
+
+
+def test_empty_output_is_rejected(tmp_path):
+    with pytest.raises(layout.LayoutExtractionError, match="no text"):
+        layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, "sys.stdout.write('  \\n')"))
+
+
+def test_missing_executable_is_a_clear_error(tmp_path):
     with pytest.raises(layout.LayoutExtractionError, match="not found.*poppler"):
-        layout.extract_page_layout(b"%PDF-", 1)
-    monkeypatch.setattr(layout.subprocess, "run", raiser(subprocess.TimeoutExpired("pdftotext", 1)))
-    with pytest.raises(layout.LayoutExtractionError, match="timed out"):
-        layout.extract_page_layout(b"%PDF-", 1, timeout=1)
-    monkeypatch.setattr(layout.subprocess, "run", raiser(PermissionError()))
+        layout.extract_page_layout(b"%PDF-", 1, executable=str(tmp_path / "nope"))
+
+
+def test_unrunnable_executable_is_reported_by_class_only(tmp_path):
+    not_exec = tmp_path / "plain"
+    not_exec.write_text("x")
     with pytest.raises(layout.LayoutExtractionError, match="could not be run"):
-        layout.extract_page_layout(b"%PDF-", 1)
-    assert dirs and not any(d.exists() for d in dirs)
-    for completed, match in (
-        (subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"secret"), "exit status 1"),
-        (subprocess.CompletedProcess([], 0, stdout=b"  \n", stderr=b""), "no text"),
-        (subprocess.CompletedProcess([], 0, stdout=b"x" * (layout.MAX_OUTPUT_CHARS + 1), stderr=b""), "larger"),
-    ):
-        monkeypatch.setattr(layout.subprocess, "run", lambda c, completed=completed, **k: completed)
-        with pytest.raises(layout.LayoutExtractionError, match=match) as info:
-            layout.extract_page_layout(b"%PDF-", 1)
-        assert "secret" not in str(info.value)  # stderr is never echoed
+        layout.extract_page_layout(b"%PDF-", 1, executable=str(not_exec))
+
+
+FLOOD = "chunk = b'x' * 65536\nwhile True:\n    os.write({fd}, chunk)\n"
+
+
+def test_oversized_stdout_kills_the_child_before_unbounded_buffering(tmp_path, monkeypatch):
+    sizes, pids = [], []
+    real_stat = layout._size
+
+    def watching(path):
+        n = real_stat(path)
+        sizes.append(n)
+        return n
+
+    real_popen = subprocess.Popen
+
+    def spy(*a, **k):
+        p = real_popen(*a, **k)
+        pids.append(p)
+        return p
+
+    monkeypatch.setattr(layout, "_size", watching)
+    monkeypatch.setattr(layout.subprocess, "Popen", spy)
+    with pytest.raises(layout.LayoutExtractionError, match="larger than expected"):
+        layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, FLOOD.format(fd=1)), timeout=20)
+    assert pids[0].returncode is not None  # reaped (killed by the monitor or by the RLIMIT_FSIZE hard cap)
+    assert max(sizes) <= layout.MAX_OUTPUT_BYTES + 1  # on-disk output never grew past the cap (+1 detection byte)
+
+
+def test_oversized_stderr_is_bounded_too(tmp_path, monkeypatch):
+    pids = []
+    real_popen = subprocess.Popen
+    monkeypatch.setattr(layout.subprocess, "Popen", lambda *a, **k: pids.append(real_popen(*a, **k)) or pids[-1])
+    body = "chunk = b'e' * 4096\nwhile True:\n    os.write(2, chunk)\n    time.sleep(0.001)\n"
+    with pytest.raises(layout.LayoutExtractionError, match="larger than expected"):
+        layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, body), timeout=20)
+    assert pids[0].returncode is not None
+
+
+def test_timeout_kills_and_reaps_the_child(tmp_path, monkeypatch):
+    pids = []
+    real_popen = subprocess.Popen
+    monkeypatch.setattr(layout.subprocess, "Popen", lambda *a, **k: pids.append(real_popen(*a, **k)) or pids[-1])
+    with pytest.raises(layout.LayoutExtractionError, match="timed out"):
+        layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, "time.sleep(60)"), timeout=0.3)
+    assert pids[0].returncode is not None and pids[0].poll() is not None
+
+
+@pytest.mark.parametrize("body,exc", [
+    ("sys.stdout.write('ok\\n')", None), (FLOOD.format(fd=1), "larger"), ("time.sleep(60)", "timed out"),
+    ("sys.exit(2)", "exit status"),
+])
+def test_temporary_files_are_removed_after_success_overflow_timeout_and_failure(tmp_path, body, exc):
+    before = set(temp_dirs_left())
+    if exc is None:
+        layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, body), timeout=0.5)
+    else:
+        with pytest.raises(layout.LayoutExtractionError, match=exc):
+            layout.extract_page_layout(b"%PDF-", 1, executable=fake_tool(tmp_path, body), timeout=0.5)
+    assert set(temp_dirs_left()) == before
 
 
 def two_page_pdf() -> bytes:
@@ -223,6 +298,50 @@ def test_inline_year_conflicts_and_bad_sequences_are_rejected():
 ])
 def test_unexpected_table_identity_or_layout_is_rejected(old, new, match):
     fails(mutate("boz_table13_2012_style.txt", old, new), 137, match)
+
+
+@pytest.mark.parametrize("name,page", [
+    ("boz_table13_2010_style.txt", 140), ("boz_table13_2012_style.txt", 137),
+    ("boz_table13_2013_style.txt", 138), ("boz_table13_2014_style.txt", 131),
+])
+def test_each_vetted_real_layout_heading_is_still_accepted(name, page):
+    assert parse(name, page).rows
+
+
+def test_2011_heading_form_is_accepted():  # the 2011 report prints the same heading line as 2012
+    assert parse("boz_table13_2012_style.txt", 137).rows
+
+
+def test_probe_retail_only_suffix_before_table_13_is_rejected():
+    page = fixture("boz_table13_2012_style.txt")
+    assert "EXCHANGE RATES      " in page
+    fails(page.replace("EXCHANGE RATES      ", "EXCHANGE RATES - RETAIL ONLY", 1), 137, "table identity")
+
+
+def test_probe_table_14_heading_with_nearby_table_13_is_rejected():
+    page = fixture("boz_table13_2012_style.txt")
+    page = page.replace("TABLE 13", "TABLE 14 ... TABLE 13", 1)
+    fails(page, 137, "table identity")
+    # a Table 14 heading plus a separate unrelated "TABLE 13" line
+    page = fixture("boz_table13_2012_style.txt").replace("TABLE 13", "TABLE 14", 1)
+    fails("      SOMETHING ELSE                    TABLE 13\n" + page, 137, "table identity")
+
+
+def test_probe_duplicate_candidate_headings_are_rejected():
+    page = fixture("boz_table13_2012_style.txt")
+    first = page.splitlines()[0]
+    fails(first + "\n" + page, 137, "table identity")
+
+
+@pytest.mark.parametrize("heading", [
+    "KWACHA/US DOLLAR EXCHANGE RATES TABLE 130", "KWACHA/US DOLLAR EXCHANGE RATES TABLE 13 (REVISED)",
+    "NEW KWACHA/US DOLLAR EXCHANGE RATES TABLE 13", "KWACHA/US DOLLAR EXCHANGE RATES TABLE 3",
+    "KWACHA/US DOLLAR EXCHANGE RATES", "TABLE 13",
+])
+def test_other_inserted_prefix_suffix_or_missing_parts_are_rejected(heading):
+    page = fixture("boz_table13_2012_style.txt").splitlines()
+    page[0] = "      " + heading
+    fails("\n".join(page) + "\n", 137, "table identity")
 
 
 def test_wrong_printed_page_is_rejected():
@@ -603,3 +722,52 @@ def test_pg_numeric_equality_ignores_scale_and_no_ordering_constraint_exists(eng
     assert not any("order" in n for n in names)
     assert {"fx_monthly_published_values_finite_positive", "fx_monthly_normalization_regime",
             "fx_monthly_canonical_equals_published_over_divisor"} <= set(names)
+
+
+# ---------------------------------------------------------------- all-or-none publication metadata
+from app.services.fx_monthly_store import PublicationMetadataError, has_publication_metadata, row_params  # noqa: E402
+
+PUB = dict(published_buy=D("5283.60"), published_mid=D("5240.97"), published_sell=D("5250.97"),
+           published_currency="ZMK", normalization_divisor=1000)
+
+
+def obs(**extra):
+    return MonthlyObservation(date(2012, 4, 1), D("5.28360"), D("5.24097"), D("5.25097"), "t", "u", 1,
+                              source_series=tab.ANNUAL_SOURCE_SERIES, source_table=tab.ANNUAL_SOURCE_TABLE, **extra)
+
+
+@pytest.mark.parametrize("keep", [
+    ["published_mid"], ["published_sell"], ["published_currency"], ["normalization_divisor"], ["published_buy"],
+    ["published_buy", "published_mid", "published_sell"],  # missing currency and divisor
+    ["published_buy", "published_mid", "published_sell", "published_currency"],  # missing divisor
+    ["published_currency", "normalization_divisor"],  # both present, no rates
+    ["published_currency", "normalization_divisor", "published_buy", "published_mid"],  # one rate missing
+    ["published_currency", "normalization_divisor", "published_buy", "published_sell"],
+    ["published_currency", "normalization_divisor", "published_mid", "published_sell"],
+])
+def test_partial_publication_metadata_is_rejected_before_params_or_writes(keep):
+    o = obs(**{k: PUB[k] for k in keep})
+    with pytest.raises(PublicationMetadataError, match="Partial publication metadata"):
+        has_publication_metadata(o)
+    with pytest.raises(PublicationMetadataError):
+        row_params(o, T0)
+    boom = type("E", (), {"begin": lambda self: (_ for _ in ()).throw(AssertionError("database touched"))})()
+    with pytest.raises(PublicationMetadataError):  # rejected before any connection is opened
+        save_monthly_averages([obs(**PUB), o], imported_at=T0, engine=boom)
+
+
+def test_absent_metadata_defaults_to_phase1_and_complete_metadata_is_preserved_exactly():
+    legacy = MonthlyObservation(date(2014, 1, 1), D("6.10"), D("6.15"), D("6.20"), "t", "u", 1)
+    assert has_publication_metadata(legacy) is False
+    p = row_params(legacy, T0)
+    assert (p["published_buy"], p["published_mid"], p["published_sell"]) == (D("6.10"), D("6.15"), D("6.20"))
+    assert (p["published_currency"], p["normalization_divisor"]) == ("ZMW", 1)
+    full = obs(**PUB)
+    assert has_publication_metadata(full) is True
+    p = row_params(full, T0)
+    assert {k: p[k] for k in PUB} == PUB
+
+
+def test_imported_at_is_irrelevant_to_metadata_equality():
+    a, b = row_params(obs(**PUB), T0), row_params(obs(**PUB), datetime(2031, 1, 1, tzinfo=timezone.utc))
+    assert {k: v for k, v in a.items() if k != "imported_at"} == {k: v for k, v in b.items() if k != "imported_at"}

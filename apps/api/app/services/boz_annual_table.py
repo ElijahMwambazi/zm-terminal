@@ -82,8 +82,23 @@ _NUMBER = r"\d{1,3}(?:,\d{3})*\.\d{2}"
 _ROW = re.compile(r"^(?:(\d{4}) )?(%s) ((?:%s ){5}%s)$" % ("|".join(MONTHS), _NUMBER, _NUMBER))
 _YEAR = re.compile(r"^(\d{4})$")
 _PAGE_NUMBER = re.compile(r"^\d{1,3}$")
-_HEADING = re.compile(r"KWACHA/US DOLLAR EXCHANGE RATES", re.IGNORECASE)
-_TABLE_13 = re.compile(r"\bTABLE 13$", re.IGNORECASE)
+# The only heading lines accepted (whole line, whitespace-collapsed, case-insensitive): the exchange-rate title immediately
+# followed by "TABLE 13" on the same line. 2010 prefixes "BANK OF ZAMBIA AND BUREAUX"; 2011-2013 and 2014 (mixed case) do not.
+_VETTED_HEADINGS = frozenset({
+    "KWACHA/US DOLLAR EXCHANGE RATES TABLE 13",
+    "BANK OF ZAMBIA AND BUREAUX KWACHA/US DOLLAR EXCHANGE RATES TABLE 13",
+})
+_ANY_TABLE_REF = re.compile(r"\bTABLE\s*\d+\b", re.IGNORECASE)
+_TITLE_WORDS = re.compile(r"EXCHANGE RATES", re.IGNORECASE)
+
+
+def _check_identity(header: list[str]) -> None:
+    """Exactly one header line is a vetted heading; no other line may carry a table reference or the title (so a Table 14
+    heading, an inserted suffix/prefix, or a duplicate/competing candidate all fail closed)."""
+    matches = [line for line in header if line.upper() in _VETTED_HEADINGS]
+    others = [line for line in header if line.upper() not in _VETTED_HEADINGS and (_ANY_TABLE_REF.search(line) or _TITLE_WORDS.search(line))]
+    if len(matches) != 1 or others:
+        raise AnnualTableError("Unexpected table identity (heading / Table 13)")
 _GROUPS = re.compile(r"Bank of Zambia Rates ?Bureau Rates", re.IGNORECASE)
 _LABELS = "Buying Selling Mid Buying Selling Mid"
 _END = re.compile(r"^Source: Bank of Zambia")
@@ -123,8 +138,7 @@ def parse_table13(page_text: str, *, printed_page: int, ordering_from: date) -> 
     if first_data is None:
         raise AnnualTableError("No Table 13 rows were found on the page")
     header = lines[:first_data]
-    if not any(_HEADING.search(line) and _TABLE_13.search(line) for line in header):
-        raise AnnualTableError("Unexpected table identity (heading / Table 13)")
+    _check_identity(header)
     joined = " ".join(header)
     if not _GROUPS.search(joined):
         raise AnnualTableError("Unexpected Table 13 column groups")
