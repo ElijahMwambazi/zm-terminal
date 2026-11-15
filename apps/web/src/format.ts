@@ -37,3 +37,9 @@ export function formatFixed(value: string, places: number, group = false): strin
   if (group) integer = integer.replace(/\B(?=([0-9]{3})+(?![0-9]))/g, ",");
   return `${sign === "-" && scaled !== 0n ? "-" : ""}${integer}${places > 0 ? `.${decimals}` : ""}`;
 }
+
+/** A calendar month (YYYY-MM), e.g. "Sep 2026". */
+export function formatYearMonth(month: string): string {
+  const [year, mm] = month.split("-");
+  return `${MONTHS[Number(mm) - 1]} ${year}`;
+}

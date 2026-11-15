@@ -4,6 +4,7 @@ import {
   type FxHistoryPoint, type FxQuote, type HistoryRange,
 } from "./api";
 import { formatLusaka } from "./format";
+import BozMonthlyFx from "./BozMonthlyFx";
 import PriceChart from "./PriceChart";
 import type { QuoteState } from "./useUsdZmwQuote";
 
@@ -92,6 +93,8 @@ const UsdZmwDetail = forwardRef<HTMLElement, { state: QuoteState; refreshKey: nu
             <p className="notice">Insufficient history: only one stored observation ({history.points[0].mid} at {formatLusaka(history.points[0].observed_at)}).</p>
           )}
           {history.status === "ready" && history.points.length > 1 && <PriceChart points={history.points} />}
+
+          <BozMonthlyFx />
         </div>
       </article>
     );

@@ -246,3 +246,40 @@ th { text-align: left; color: #8c8c8c; font-weight: normal; padding: 6px 4px; }
 .btc-result strong { color: #ffb000; }
 .btc-op { align-self: center; color: #8c8c8c; font-size: 1.2rem; }
 @media (max-width: 480px) { .btc-op { flex: 0 0 100%; text-align: center; line-height: 1; } }
+
+/* BoZ monthly average (official, historical) */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.monthly-fx { padding-bottom: 6px; }
+.monthly-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 16px 0; }
+.monthly-title { margin: 0; font-size: 0.76rem; font-weight: normal; color: #ffb000; letter-spacing: 0.04em; text-transform: uppercase; }
+.badge--monthly { margin: 0; color: #7cc4ff; letter-spacing: 0.08em; }
+.monthly-sub { margin: 0; padding: 6px 16px 4px; color: #8c8c8c; font-size: 0.72rem; line-height: 1.5; }
+.range-gap { flex: 1 1 8px; }
+.rate-toggles { display: flex; gap: 6px; flex-wrap: wrap; }
+.range--series { color: #8c8c8c; }
+.range--series .swatch { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border: 1px solid transparent; }
+.range--series:not(.range--active) .swatch { background: transparent !important; border-color: #606060; }
+.range--series.range--active { background: transparent; color: #f2f2f2; border-color: #8c8c8c; }
+.range:focus-visible, .link-button:focus-visible, .monthly-fx summary:focus-visible, .monthly-fx a:focus-visible { outline: 2px solid #7cc4ff; outline-offset: 2px; }
+.monthly-body { transition: opacity 0.15s; }
+.monthly-body--loading { opacity: 0.55; }
+.monthly-skeleton { height: 320px; margin: 8px 16px; display: flex; align-items: center; justify-content: center; border: 1px dashed #292929; color: #606060; font-size: 0.78rem; }
+.monthly-summary { display: flex; flex-wrap: wrap; gap: 8px 32px; margin: 0; padding: 8px 16px; }
+.monthly-summary dt { color: #606060; font-size: 0.68rem; }
+.monthly-summary dd { margin: 3px 0 0; font-size: 0.85rem; }
+.monthly-summary .monthly-latest { font-size: 1.6rem; color: #f2f2f2; }
+.monthly-dim { color: #8c8c8c; }
+.monthly-chart { margin-top: 4px; }
+.monthly-readout { padding: 6px 16px; font-size: 0.78rem; }
+.monthly-readout-main { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-height: 30px; }
+.monthly-readout-main b { font-weight: 500; color: #f2f2f2; }
+.monthly-source summary, .monthly-table summary { cursor: pointer; color: #8c8c8c; font-size: 0.72rem; padding: 6px 0; }
+.monthly-source .provenance { padding: 4px 0 6px; }
+.monthly-source .provenance li { overflow-wrap: anywhere; }
+.monthly-table { padding: 0 16px; }
+.monthly-table-scroll { max-height: 260px; overflow: auto; }
+.monthly-table th[scope="row"] { font-weight: normal; padding: 2px 4px 2px 0; }
+.monthly-table td { padding: 6px 12px 6px 0; }
+.monthly-table td:last-child { text-align: left; }
+.monthly-table td:first-child { color: inherit; }
+@media (max-width: 640px) { .monthly-skeleton { height: 240px; } .rate-toggles { width: 100%; } }

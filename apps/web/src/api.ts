@@ -65,6 +65,41 @@ export async function getUsdZmwHistory(range: HistoryRange): Promise<FxHistoryPo
   return body.observations;
 }
 
+/** Official BoZ monthly averages (Fortnightly Statistics Table 02). Discrete historical observations: no timestamp, no stale flag.
+ * Rates are decimal strings exactly as published; `mid` is the published mid, never derived. */
+export const MONTHLY_RANGES = ["1Y", "3Y", "5Y", "ALL"] as const;
+export type MonthlyRange = (typeof MONTHLY_RANGES)[number];
+
+export type FxMonthlyPoint = {
+  month: string; // YYYY-MM
+  buy: string;
+  mid: string;
+  sell: string;
+  source: "boz";
+  source_series: string;
+  source_publication: string;
+  source_url: string;
+  source_page: number;
+  published_precision: number;
+};
+
+export type FxMonthlyHistory = {
+  symbol: "USDZMW";
+  range: MonthlyRange;
+  count: number;
+  first_month: string | null;
+  last_month: string | null;
+  observations: FxMonthlyPoint[];
+};
+
+export async function getUsdZmwMonthly(range: MonthlyRange): Promise<FxMonthlyHistory> {
+  const body = await getJson<FxMonthlyHistory>(`/api/v1/fx/USDZMW/monthly?range=${range}`);
+  if (!Array.isArray(body?.observations) || body.count !== body.observations.length) {
+    throw new ApiError("api", "Unexpected monthly response");
+  }
+  return body;
+}
+
 export const TENORS = ["91D", "182D", "273D", "364D"] as const;
 export type Tenor = (typeof TENORS)[number];
 

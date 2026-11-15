@@ -13,7 +13,7 @@ Zambia-first market intelligence terminal: React/Vite web, FastAPI API, PostgreS
 ## Commands
 Run only the checks for the side you touched; pipe long output through `tail -30`.
 - API: `cd apps/api && python -m pytest -q` (offline: needs no Postgres, OpenBB or BoZ)
-- Web: `cd apps/web && npm install && npm run build` (runs `tsc -b`, then `vite build`)
+- Web: `cd apps/web && npm install && npm run build` (runs `tsc -b`, then `vite build`), then `npm test` (vitest, jsdom)
 - CI (`.github/workflows/ci.yml`) runs exactly these two.
 - Don't run `docker compose up`, `make up` or `make api-test` unless asked: the OpenBB image build is slow, and `api-test` starts Postgres and OpenBB first.
 
