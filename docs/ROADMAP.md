@@ -147,7 +147,7 @@ Keep installed capacity, actual generation, consumption, demand, contracted impo
 
 Existing ERB petroleum coverage forms part of this broader energy domain.
 
-Energy Phase 1 (research complete, nothing implemented): `docs/research/zambia-energy-data-sources.md` recommends the ERB Statistical Bulletin and Energy Sector Report as canonical annual sources (generation by station 2013-2025, station capacity register, imports/exports, peak demand), with no reliable load-shedding history. First implementation slice: an annual station-generation parser with pinned ERB files; rights remain `review_required`.
+Energy Phase 1 (source research and first-slice specification; nothing implemented, pending source re-review): `docs/research/zambia-energy-data-sources.md` assesses the ERB Statistical Bulletin and Energy Sector Report as the strongest canonical-source candidates (annual only; SAPP, Ministry of Energy, ZESCO and the Zambia Statistics Agency not yet assessed in depth) and specifies a pinned parser for annual generation by station, 2013-2025, from the ERB 2025 Statistical Bulletin Tables 13-16. The parser is the next milestone only after source review approval. Peak-demand canonicalization is deferred (annual-peak and all-time-peak definitions differ), there is no reliable load-shedding history, and no parser, storage or API exists. Rights remain `review_required`.
 
 #### Mining and mineral economy
 Potential coverage:
