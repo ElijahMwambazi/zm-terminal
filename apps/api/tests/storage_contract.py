@@ -27,6 +27,14 @@ APPROVED_STORAGE = {
     "btc_usd_daily": "source Bitstamp candles",
     "global_copper_prices": "source IMF Copper observations, not derived analytics",
     "fx_monthly_averages": "source BoZ published monthly observations, not derived analytics",
+    "energy_publication_candidates": "administrative source-review log, no observations",
+    "energy_publications": "source ERB accepted publication revisions",
+    "energy_generation_imports": "local import revisions of accepted publications",
+    "energy_source_stations": "source ERB station identities as printed",
+    "energy_generation_observations": "source ERB station/year observations, not derived analytics",
+    "energy_generation_group_totals": "source ERB published group totals, not derived analytics",
+    "energy_publication_current_imports": "read-only view mapping publications to current imports, stores nothing",
+    "energy_generation_canonical": "read-only selection view over source observations, stores nothing",
 }
 
 

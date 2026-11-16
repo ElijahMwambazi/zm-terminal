@@ -1,6 +1,6 @@
 # Energy generation: storage and publication-vintage design
 
-Status: **design only** (revision 3, 2026-11-16, branch `design/energy-generation-storage-vintages`, parser base `953f5e9`). Nothing here is implemented: no migration, SQL, store function, API route, frontend or backfill job exists, and the design is under review. Rights for all ERB data remain `review_required` (local/internal use only). Revision 3 separates three lifecycles that earlier revisions fused into one state machine: what ERB published, which source candidates were reviewed, and what ZM Terminal imported (section 5).
+Status: **design approved; schema implemented as `db/init/014_energy_generation_vintages.sql`** (revision 3, 2026-11-16, parser base `953f5e9`). The migration, its views and synthetic PostgreSQL lifecycle tests (`apps/api/tests/test_energy_vintage_schema.py`) exist; no importer, store function, API route, frontend or backfill job exists and no ERB data is stored. Rights for all ERB data remain `review_required` (local/internal use only). Revision 3 separates three lifecycles that earlier revisions fused into one state machine: what ERB published, which source candidates were reviewed, and what ZM Terminal imported (section 5).
 
 ## 1. Goals
 
@@ -426,7 +426,7 @@ Forbidden: a fake ERB r2, a different SHA, updating import 1 observations, delet
 
 ### 13.6 Import history versus official history
 
-The corrected import changes no official ordering and no restatement classification (section 11). A reader who sees `import_sequence = 2` knows only that ZM Terminal re-interpreted the same document.
+A local import correction creates no new official publication revision and changes no official ordering. Because corrected parsed values may differ, classifications derived from the publication data (section 11) may change when recomputed from the corrected current import. A local import correction is still not an ERB restatement event, and a derived analytical classification may nevertheless change. A reader who sees `import_sequence = 2` knows only that ZM Terminal re-interpreted the same document.
 
 ### 13.7 Source mutation policy (final)
 
