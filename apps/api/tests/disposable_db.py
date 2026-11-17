@@ -79,3 +79,34 @@ def isolated_schema(url: URL, prefix: str = "t"):
         with admin.begin() as connection:
             connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
         admin.dispose()
+
+
+@contextmanager
+def isolated_database(url: URL, prefix: str = "t"):
+    """A uniquely named, empty database created from template0 on the guarded disposable server, dropped (WITH FORCE) afterwards.
+    Migrations install into its `public` schema exactly as in production, so objects that are bound to `public` are tested as
+    deployed, and dropping the database removes tables, views, trigger/helper functions, stored role settings and everything else.
+    Yields (database_name, url_for_it, engine). The derived name is itself checked by the same fail-closed guard."""
+    name = f"zm_{prefix}_{uuid4().hex[:12]}_test"
+    derived = parse_disposable_database_url(url.set(database=name))
+    admin = create_engine(url, isolation_level="AUTOCOMMIT")
+    with admin.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{name}" TEMPLATE template0'))
+    engine = create_engine(derived)
+    try:
+        yield name, derived, engine
+    finally:
+        engine.dispose()
+        with admin.connect() as connection:
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        admin.dispose()
+
+
+def reset_public(engine) -> None:
+    """Return a disposable database's `public` schema to a pristine state: every table, view, sequence, trigger and helper function in
+    it is removed, and the schema is recreated as PostgreSQL's template provides it (owned by pg_database_owner, USAGE for PUBLIC)."""
+    with engine.begin() as connection:
+        connection.execute(text("DROP SCHEMA public CASCADE"))
+        connection.execute(text("CREATE SCHEMA public"))
+        connection.execute(text("ALTER SCHEMA public OWNER TO pg_database_owner"))
+        connection.execute(text("GRANT USAGE ON SCHEMA public TO PUBLIC"))

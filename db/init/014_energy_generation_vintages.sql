@@ -11,6 +11,13 @@
 -- sets, parser diagnostics and identical-versus-conflicting dataset comparison remain future application responsibilities.
 -- Stored values are exact NUMERIC with the printed scale kept in published_precision (393.40 and 393.4 stay distinguishable).
 -- No data is inserted. Rights for all ERB data remain review_required (local/internal use only): no status here means reuse is allowed.
+-- SCHEMA BINDING: the objects live in `public` and every runtime relation lookup inside a trigger/helper function is schema-qualified
+-- (public.energy_*), so neither a caller's search_path nor a TEMP table with an Energy name (pg_temp is otherwise searched first) can
+-- redirect a lifecycle check to spoofed rows. Each function also pins SET search_path = pg_catalog, pg_temp (pg_temp last) as defence
+-- in depth; they remain SECURITY INVOKER. TEMP privilege is left as PostgreSQL's PUBLIC default: correctness does not depend on it.
+-- Code that writes Energy tables (the future importer) must also qualify them. Because this migration is unreleased it is edited in
+-- place: re-running it on a database that applied an earlier draft replaces the function bodies (CREATE OR REPLACE), rebinds the
+-- triggers and changes no data. It must be installed in `public`.
 -- Additive and idempotent; run in a single transaction so a failure changes nothing:
 --   docker compose exec -T postgres psql -U zm_terminal -d zm_terminal -v ON_ERROR_STOP=1 --single-transaction < db/init/014_energy_generation_vintages.sql
 
@@ -146,14 +153,14 @@ BEGIN
     RAISE EXCEPTION '% on % is not allowed: Energy source-derived data is insert-only', TG_OP, TG_TABLE_NAME
         USING ERRCODE = 'integrity_constraint_violation';
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 CREATE OR REPLACE FUNCTION energy_reject_delete() RETURNS trigger AS $$
 BEGIN
     RAISE EXCEPTION 'DELETE on % is not allowed: historical Energy records are never deleted', TG_TABLE_NAME
         USING ERRCODE = 'integrity_constraint_violation';
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 -- Candidates: identity columns are immutable; review fields move only along pending -> rejected|accepted, rejected -> accepted.
 CREATE OR REPLACE FUNCTION energy_candidates_before_update() RETURNS trigger AS $$
@@ -173,14 +180,14 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 -- Publications: consecutive same-scope predecessor on insert; only approved -> superseded afterwards.
 CREATE OR REPLACE FUNCTION energy_publications_before_insert() RETURNS trigger AS $$
 DECLARE pred_revision INTEGER;
 BEGIN
     IF NEW.revision_sequence > 1 THEN
-        SELECT revision_sequence INTO pred_revision FROM energy_publications
+        SELECT revision_sequence INTO pred_revision FROM public.energy_publications
         WHERE id = NEW.supersedes_publication_id AND source_series = NEW.source_series AND publication_year = NEW.publication_year;
         IF pred_revision IS NULL OR pred_revision <> NEW.revision_sequence - 1 THEN
             RAISE EXCEPTION 'energy_publications: revision % must supersede revision % of the same series and publication year',
@@ -189,7 +196,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 CREATE OR REPLACE FUNCTION energy_publications_before_update() RETURNS trigger AS $$
 BEGIN
@@ -212,20 +219,20 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 -- Imports: consecutive import_sequence per publication; only current -> superseded afterwards.
 CREATE OR REPLACE FUNCTION energy_imports_before_insert() RETURNS trigger AS $$
 DECLARE previous INTEGER;
 BEGIN
-    SELECT COALESCE(MAX(import_sequence), 0) INTO previous FROM energy_generation_imports WHERE publication_id = NEW.publication_id;
+    SELECT COALESCE(MAX(import_sequence), 0) INTO previous FROM public.energy_generation_imports WHERE publication_id = NEW.publication_id;
     IF NEW.import_sequence <> previous + 1 THEN
         RAISE EXCEPTION 'energy_generation_imports: import_sequence must be % for this publication, got %', previous + 1, NEW.import_sequence
             USING ERRCODE = 'integrity_constraint_violation';
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 CREATE OR REPLACE FUNCTION energy_imports_before_update() RETURNS trigger AS $$
 BEGIN
@@ -246,22 +253,22 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 -- Observations may only reference a station of the publication's own source series.
 CREATE OR REPLACE FUNCTION energy_observations_before_insert() RETURNS trigger AS $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM energy_generation_imports i
-        JOIN energy_publications p ON p.id = i.publication_id
-        JOIN energy_source_stations s ON s.id = NEW.source_station_id AND s.source_series = p.source_series
+        SELECT 1 FROM public.energy_generation_imports i
+        JOIN public.energy_publications p ON p.id = i.publication_id
+        JOIN public.energy_source_stations s ON s.id = NEW.source_station_id AND s.source_series = p.source_series
         WHERE i.id = NEW.import_id) THEN
         RAISE EXCEPTION 'energy_generation_observations: station belongs to a different source series than the import''s publication'
             USING ERRCODE = 'integrity_constraint_violation';
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 -- ============================================================================== commit-time (deferred constraint trigger) checks
 -- Exactly one current import per publication, evaluated at COMMIT.
@@ -269,30 +276,30 @@ CREATE OR REPLACE FUNCTION energy_check_one_current_import() RETURNS trigger AS 
 DECLARE pid BIGINT; n INTEGER;
 BEGIN
     IF TG_TABLE_NAME = 'energy_publications' THEN pid := NEW.id; ELSE pid := NEW.publication_id; END IF;
-    SELECT COUNT(*) INTO n FROM energy_generation_imports WHERE publication_id = pid AND import_status = 'current';
+    SELECT COUNT(*) INTO n FROM public.energy_generation_imports WHERE publication_id = pid AND import_status = 'current';
     IF n <> 1 THEN
         RAISE EXCEPTION 'energy publication % must have exactly one current import at commit, found %', pid, n
             USING ERRCODE = 'integrity_constraint_violation';
     END IF;
     RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 -- Actual child cardinalities equal the import's stored expectations at COMMIT (no global 390/52: counts are per import).
 CREATE OR REPLACE FUNCTION energy_check_import_counts() RETURNS trigger AS $$
 DECLARE iid BIGINT; exp_obs INTEGER; exp_tot INTEGER; act_obs INTEGER; act_tot INTEGER;
 BEGIN
     IF TG_TABLE_NAME = 'energy_generation_imports' THEN iid := NEW.id; ELSE iid := NEW.import_id; END IF;
-    SELECT expected_observation_count, expected_group_total_count INTO exp_obs, exp_tot FROM energy_generation_imports WHERE id = iid;
-    SELECT COUNT(*) INTO act_obs FROM energy_generation_observations WHERE import_id = iid;
-    SELECT COUNT(*) INTO act_tot FROM energy_generation_group_totals WHERE import_id = iid;
+    SELECT expected_observation_count, expected_group_total_count INTO exp_obs, exp_tot FROM public.energy_generation_imports WHERE id = iid;
+    SELECT COUNT(*) INTO act_obs FROM public.energy_generation_observations WHERE import_id = iid;
+    SELECT COUNT(*) INTO act_tot FROM public.energy_generation_group_totals WHERE import_id = iid;
     IF act_obs <> exp_obs OR act_tot <> exp_tot THEN
         RAISE EXCEPTION 'energy import % has % observations / % group totals at commit, expected % / %', iid, act_obs, act_tot, exp_obs, exp_tot
             USING ERRCODE = 'integrity_constraint_violation';
     END IF;
     RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 -- Per (source_series, publication_year): revisions are 1..max with no gaps, the highest is approved and all lower ones are
 -- superseded. Different publication years are independent (2023 r1, 2024 r1 and 2025 r1 are all approved together).
@@ -302,15 +309,15 @@ DECLARE max_rev INTEGER; n_rev INTEGER; top_status TEXT; n_approved INTEGER;
 BEGIN
     SELECT MAX(revision_sequence), COUNT(*), COUNT(*) FILTER (WHERE publication_status = 'approved')
       INTO max_rev, n_rev, n_approved
-      FROM energy_publications WHERE source_series = NEW.source_series AND publication_year = NEW.publication_year;
-    SELECT publication_status INTO top_status FROM energy_publications
+      FROM public.energy_publications WHERE source_series = NEW.source_series AND publication_year = NEW.publication_year;
+    SELECT publication_status INTO top_status FROM public.energy_publications
       WHERE source_series = NEW.source_series AND publication_year = NEW.publication_year AND revision_sequence = max_rev;
     IF n_rev <> max_rev OR top_status <> 'approved' OR n_approved <> 1 THEN
         RAISE EXCEPTION 'energy publication chain for % / % is inconsistent at commit: the highest revision (%) must be the only approved one and revisions must have no gaps',
             NEW.source_series, NEW.publication_year, max_rev USING ERRCODE = 'integrity_constraint_violation';
     END IF;
     IF TG_OP = 'INSERT' AND NOT EXISTS (
-        SELECT 1 FROM energy_publication_candidates c
+        SELECT 1 FROM public.energy_publication_candidates c
         WHERE c.accepted_publication_id = NEW.id AND c.review_status = 'accepted' AND c.source_series = NEW.source_series
           AND c.nominal_publication_year = NEW.publication_year AND c.source_url = NEW.source_url
           AND c.source_sha256 = NEW.source_sha256 AND c.source_size_bytes = NEW.source_size_bytes) THEN
@@ -319,13 +326,13 @@ BEGIN
     END IF;
     RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 -- An accepted candidate must correspond to its resulting publication (series, year, URL, SHA, size).
 CREATE OR REPLACE FUNCTION energy_check_candidate_link() RETURNS trigger AS $$
 BEGIN
     IF NEW.review_status = 'accepted' AND NOT EXISTS (
-        SELECT 1 FROM energy_publications p
+        SELECT 1 FROM public.energy_publications p
         WHERE p.id = NEW.accepted_publication_id AND p.source_series = NEW.source_series
           AND p.publication_year = NEW.nominal_publication_year AND p.source_url = NEW.source_url
           AND p.source_sha256 = NEW.source_sha256 AND p.source_size_bytes = NEW.source_size_bytes) THEN
@@ -333,7 +340,7 @@ BEGIN
     END IF;
     RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 -- ------------------------------------------------------------------------------------------------------------------- bindings
 DROP TRIGGER IF EXISTS energy_publication_candidates_before_update ON energy_publication_candidates;

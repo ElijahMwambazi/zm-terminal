@@ -6,6 +6,7 @@ The application engine logs in as that role over a real connection; a superuser 
 """
 
 import secrets
+import time
 from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
@@ -15,7 +16,7 @@ from psycopg import sql
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 
-from disposable_db import isolated_schema, require_test_database_url
+from disposable_db import reset_public
 from test_energy_vintage_schema import (NOW, SERIES, add_import, add_obs, add_total, candidate, link_candidate, one, publish, sha,
                                         station, supersede_import)
 from app.schemas.fx import FxQuote
@@ -33,46 +34,61 @@ class Env:
         self.schema, self.admin, self.app, self.role, self.admin_user, self.mid, self.other = schema, admin, app, role, admin_user, mid, other
 
 
+def drop_role(admin, r):
+    """End the role's sessions, then drop it. A just-closed session's TEMP tables disappear asynchronously as its backend exits, and DROP
+    ROLE refuses while they still exist, so retry briefly."""
+    for attempt in range(100):
+        try:
+            with admin.begin() as c:
+                if not one(c, "SELECT COUNT(*) FROM pg_roles WHERE rolname=:r", r=r):
+                    return
+                c.execute(text("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename=:r"), {"r": r})
+                c.execute(text(f"DROP OWNED BY {r}"))
+                c.execute(text(f"DROP ROLE {r}"))
+            return
+        except DBAPIError:
+            time.sleep(0.1)
+    raise AssertionError(f"could not drop test role {r}")
+
+
 @contextmanager
-def make_env(prepare=None):
-    """Schema with 001-014, then `prepare(admin_connection, env_info)` (to pre-create an unsafe role), then 015, then a login engine."""
-    url = require_test_database_url()
+def make_env(database, prepare=None):
+    """A reset `public` schema with 001-014, then `prepare(admin_connection, info)` (to pre-create an unsafe role), then 015, then a real
+    login engine for the application role. Installed in `public` as deployed. Afterwards the throwaway roles and everything granted to
+    them in the database are removed (the database itself is dropped at the end of the session)."""
+    url, admin = database
     role = "zm_t_app_" + secrets.token_hex(4)
     mid = "zm_t_mid_" + secrets.token_hex(4)
     other = "zm_t_other_" + secrets.token_hex(4)
     # quote, apostrophe, space, #, /, :, @, $, backslash: the engine URL is built with URL.set(), so nothing is escaped by hand
     password = secrets.token_hex(8) + ' "q\' #/:@$\\x'
-    with isolated_schema(url, "role_t") as (schema, admin):
+    reset_public(admin)
+    try:
+        with admin.begin() as c:
+            admin_user = one(c, "SELECT current_user")
+            for migration in sorted(INIT.glob("0[01][0-9]_*.sql")):
+                if migration.name.startswith("015"):
+                    if prepare:
+                        prepare(c, {"schema": "public", "role": role, "mid": mid, "other": other, "admin_user": admin_user,
+                                    "db": one(c, "SELECT current_database()")})
+                    c.execute(text(f"SET LOCAL zm.app_role = '{role}'"))
+                c.execute(text(migration.read_text()))
+            # what 016 does in production, with the value quoted by the driver (never string-formatted into SQL)
+            c.connection.driver_connection.execute(sql.SQL("ALTER ROLE {} PASSWORD {}").format(sql.Identifier(role), sql.Literal(password)))
+        app = create_engine(url.set(username=role, password=password))
         try:
-            with admin.begin() as c:
-                admin_user = one(c, "SELECT current_user")
-                for migration in sorted(INIT.glob("0[01][0-9]_*.sql")):
-                    if migration.name.startswith("015"):
-                        if prepare:
-                            prepare(c, {"schema": schema, "role": role, "mid": mid, "other": other, "admin_user": admin_user,
-                                        "db": one(c, "SELECT current_database()")})
-                        c.execute(text(f"SET LOCAL zm.app_role = '{role}'"))
-                    c.execute(text(migration.read_text()))
-                # what 016 does in production, with the value quoted by the driver (never string-formatted into SQL)
-                c.connection.driver_connection.execute(sql.SQL("ALTER ROLE {} PASSWORD {}").format(sql.Identifier(role), sql.Literal(password)))
-            app = create_engine(url.set(username=role, password=password), connect_args={"options": f"-csearch_path={schema}"})
-            try:
-                yield Env(schema, admin, app, role, admin_user, mid if prepare else None, other)
-            finally:
-                app.dispose()
+            yield Env("public", admin, app, role, admin_user, mid if prepare else None, other)
         finally:
-            with admin.begin() as c:  # the cluster-wide roles are ours alone to remove
-                c.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
-                for r in (role, mid, other):
-                    if one(c, "SELECT COUNT(*) FROM pg_roles WHERE rolname=:r", r=r):
-                        c.execute(text(f"DROP OWNED BY {r}"))
-                        c.execute(text(f"DROP ROLE {r}"))
-                c.execute(text(f'CREATE SCHEMA "{schema}"'))  # recreated empty so isolated_schema's own DROP succeeds
+            app.dispose()
+    finally:
+        reset_public(admin)  # removes the objects the roles own/see; then their database-level grants and settings, then the roles
+        for r in (role, mid, other):
+            drop_role(admin, r)
 
 
 @pytest.fixture
-def env():
-    with make_env() as e:
+def env(disposable_database):
+    with make_env(disposable_database) as e:
         yield e
 
 
@@ -133,8 +149,8 @@ def make_login_less_and_set(c, i):
 
 
 @pytest.fixture
-def unsafe_env():
-    with make_env(make_unsafe) as e:
+def unsafe_env(disposable_database):
+    with make_env(disposable_database, make_unsafe) as e:
         yield e
 
 
@@ -364,8 +380,8 @@ def assert_fresh_login_is_safe(e):
                            "WHERE id=(SELECT MIN(id) FROM energy_generation_imports WHERE import_status='superseded')"))
 
 
-def test_nologin_role_converges_to_login_and_a_fresh_tcp_login_works():
-    with make_env(make_nologin) as e:  # created NOLOGIN; 015 + the password step must make it a usable application identity
+def test_nologin_role_converges_to_login_and_a_fresh_tcp_login_works(disposable_database):
+    with make_env(disposable_database, make_nologin) as e:  # created NOLOGIN; 015 + the password step must make it a usable application identity
         with e.admin.connect() as c:
             assert one(c, "SELECT rolcanlogin FROM pg_roles WHERE rolname=:r", r=e.role) is True
             db = one(c, "SELECT current_database()")
@@ -378,8 +394,8 @@ def test_nologin_role_converges_to_login_and_a_fresh_tcp_login_works():
         denied(e.app, "TRUNCATE energy_generation_observations")
 
 
-def test_database_specific_role_settings_are_cleared_and_a_fresh_login_is_safe():
-    with make_env(make_login_less_and_set) as e:
+def test_database_specific_role_settings_are_cleared_and_a_fresh_login_is_safe(disposable_database):
+    with make_env(disposable_database, make_login_less_and_set) as e:
         with e.admin.connect() as c:
             db = one(c, "SELECT current_database()")
             assert stored_settings(c, e.role, db) == set()  # the app role's global and per-database settings are gone

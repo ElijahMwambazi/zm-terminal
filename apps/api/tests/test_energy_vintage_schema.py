@@ -2,8 +2,8 @@
 
 Opt-in like the other PostgreSQL tests: set TEST_DATABASE_URL to a DISPOSABLE database. The URL is parsed and checked by
 disposable_db.parse_disposable_database_url (actual database name, never the normal `zm_terminal`) before any engine exists.
-Each test runs in its own freshly created schema holding only migration 014, and DROP SCHEMA ... CASCADE removes tables, views and
-trigger/helper functions together, so repeated runs always start from a clean migration state.
+Tests run in a database created for the session (dropped at the end) and each starts from a reset `public` schema holding only migration 014,
+as deployed (the lifecycle functions are bound to `public`); the reset removes tables, views and trigger/helper functions together.
 Deferred (commit-time) invariants surface when the `with engine.begin()` block exits, so the failing statement is the commit.
 """
 
@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from disposable_db import isolated_schema, require_test_database_url
+from disposable_db import reset_public
 
 M014 = Path(__file__).parents[3] / "db/init/014_energy_generation_vintages.sql"
 SERIES = "erb_statistical_bulletin"
@@ -26,11 +26,12 @@ ENERGY_TABLES = ("energy_generation_group_totals", "energy_generation_observatio
 
 
 @pytest.fixture
-def engine():
-    with isolated_schema(require_test_database_url(), "energy_t") as (_schema, eng):
-        with eng.begin() as c:
-            c.execute(text(M014.read_text()))
-        yield eng
+def engine(disposable_database):
+    _url, eng = disposable_database
+    reset_public(eng)
+    with eng.begin() as c:
+        c.execute(text(M014.read_text()))
+    yield eng
 
 
 # ------------------------------------------------------------------------------------------------------------------ helpers
@@ -791,3 +792,29 @@ def test_superseded_import_remains_complete_valid_and_immutable(engine):
     fails(engine, lambda c: add_obs(c, i1, station(c, "S9"), 2020, "9.00"), "at commit")  # and still guarded by the count invariant
     fails(engine, lambda c: c.execute(text("UPDATE energy_generation_observations SET generation_gwh=9 WHERE import_id=:i"), {"i": i1}))
     fails(engine, lambda c: c.execute(text("DELETE FROM energy_generation_group_totals WHERE import_id=:i"), {"i": i1}))
+
+
+def test_reapplying_014_converges_an_earlier_unhardened_draft_without_duplicating_objects(engine):
+    import re
+    draft = re.sub(r"\bpublic\.(energy_)", r"\1", M014.read_text()).replace(" SET search_path = pg_catalog, pg_temp;", ";")
+    assert draft != M014.read_text()
+
+    def state(c):
+        funcs = c.execute(text("SELECT proname, prosrc, proconfig FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname LIKE 'energy\\_%' "
+                               "ORDER BY 1")).all()
+        trig = one(c, "SELECT COUNT(*) FROM pg_trigger WHERE NOT tgisinternal")
+        objs = one(c, "SELECT COUNT(*) FROM pg_class WHERE relnamespace='public'::regnamespace")
+        return funcs, trig, objs
+    with engine.begin() as c:  # reproduce a database that applied the earlier, shadowable definitions
+        c.execute(text(draft))
+        before_funcs, before_trig, before_objs = state(c)
+        assert all(cfg is None for _, _, cfg in before_funcs)
+        c.execute(text(M014.read_text()))  # the hardened migration, applied over it
+        funcs, trig, objs = state(c)
+        c.execute(text(M014.read_text()))  # and once more: stable
+        assert state(c) == (funcs, trig, objs)
+    assert (trig, objs) == (before_trig, before_objs)  # no duplicated triggers, tables, views or indexes
+    assert len(funcs) == 12
+    for name, src, cfg in funcs:
+        assert cfg == ["search_path=pg_catalog, pg_temp"], name
+        assert not re.search(r"\b(FROM|JOIN)\s+energy_", src), name
