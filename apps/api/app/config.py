@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "ZM Terminal API"
-    database_url: str = "postgresql+psycopg://zm_terminal:zm_terminal_dev@postgres:5432/zm_terminal"
+    database_url: str = "postgresql+psycopg://zm_terminal_app:zm_terminal_app_dev@postgres:5432/zm_terminal"
     openbb_url: str = "http://openbb:6900"
     boz_usd_rates_url: str = "https://www.boz.zm/api/v1/views/boz_zmw_usd_daily_exchange_rates"
     boz_treasury_bills_url: str = "https://www.boz.zm/jsonapi/node/tbills_auction_results"

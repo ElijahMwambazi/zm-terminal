@@ -5,6 +5,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-zm_terminal}
       POSTGRES_USER: ${POSTGRES_USER:-zm_terminal}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zm_terminal_dev}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-zm_terminal_app_dev}
     ports:
       - "5432:5432"
     volumes:
@@ -34,7 +35,7 @@ services:
     build:
       context: ./apps/api
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://zm_terminal:zm_terminal_dev@postgres:5432/zm_terminal}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://zm_terminal_app:zm_terminal_app_dev@postgres:5432/zm_terminal}
       OPENBB_URL: ${OPENBB_URL:-http://openbb:6900}
       BOZ_USD_RATES_URL: ${BOZ_USD_RATES_URL:-https://www.boz.zm/api/v1/views/boz_zmw_usd_daily_exchange_rates}
       MOA_MEDIA_URL: ${MOA_MEDIA_URL:-https://www.agriculture.gov.zm/wp-json/wp/v2/media}

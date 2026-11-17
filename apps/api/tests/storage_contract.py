@@ -61,6 +61,8 @@ def assert_no_derived_storage(engine, init: Path, *, extra_sql=()):
             before = set(connection.execute(catalog).all())
             connection.execute(text(f'CREATE SCHEMA "{schema}"'))
             connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+            # 015 creates/grants an application role: use a throwaway name (rolled back) so the real one is never touched.
+            connection.execute(text(f"SET LOCAL zm.app_role = 'zm_contract_{uuid4().hex[:12]}'"))
             for migration in sorted(init.glob("*.sql")):
                 connection.execute(text(migration.read_text()))
             for statement in extra_sql:

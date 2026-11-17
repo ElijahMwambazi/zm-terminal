@@ -1,18 +1,21 @@
 """Migration 014 (Energy generation vintages): PostgreSQL lifecycle tests. All data is SYNTHETIC; no ERB value is used.
 
-Opt-in like the other PostgreSQL tests: set TEST_DATABASE_URL to a DISPOSABLE database whose name ends in `_test`. The fixture drops
-every energy_* object it owns and re-applies db/init/014_energy_generation_vintages.sql, so the normal database is never touched.
+Opt-in like the other PostgreSQL tests: set TEST_DATABASE_URL to a DISPOSABLE database. The URL is parsed and checked by
+disposable_db.parse_disposable_database_url (actual database name, never the normal `zm_terminal`) before any engine exists.
+Each test runs in its own freshly created schema holding only migration 014, and DROP SCHEMA ... CASCADE removes tables, views and
+trigger/helper functions together, so repeated runs always start from a clean migration state.
 Deferred (commit-time) invariants surface when the `with engine.begin()` block exits, so the failing statement is the commit.
 """
 
-import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+
+from disposable_db import isolated_schema, require_test_database_url
 
 M014 = Path(__file__).parents[3] / "db/init/014_energy_generation_vintages.sql"
 SERIES = "erb_statistical_bulletin"
@@ -22,30 +25,12 @@ ENERGY_TABLES = ("energy_generation_group_totals", "energy_generation_observatio
                  "energy_publication_candidates", "energy_publications", "energy_source_stations")
 
 
-def make_engine():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set")
-    if not url.rsplit("/", 1)[-1].endswith("_test"):
-        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test")
-    return create_engine(url)
-
-
-def drop_energy(c):
-    c.execute(text("DROP VIEW IF EXISTS energy_generation_canonical, energy_publication_current_imports"))
-    c.execute(text("DROP TABLE IF EXISTS " + ", ".join(ENERGY_TABLES) + " CASCADE"))
-
-
 @pytest.fixture
 def engine():
-    eng = make_engine()
-    with eng.begin() as c:
-        drop_energy(c)
-        c.execute(text(M014.read_text()))
-    yield eng
-    with eng.begin() as c:
-        drop_energy(c)
-    eng.dispose()
+    with isolated_schema(require_test_database_url(), "energy_t") as (_schema, eng):
+        with eng.begin() as c:
+            c.execute(text(M014.read_text()))
+        yield eng
 
 
 # ------------------------------------------------------------------------------------------------------------------ helpers
@@ -111,13 +96,15 @@ def link_candidate(c, cand_id, pub_id):
 
 
 def publish(c, n, year, rev, obs, total="100.00", series=SERIES, prev=None, cand=None):
-    """Whole first-import transaction body. obs = [(station_id, observation_year, value-or-None)]. Returns (pub, import)."""
+    """Whole first-import transaction body. obs = [(station_id, observation_year, value-or-None)]; total=None stores no group total.
+    Returns (pub, import)."""
     cand = cand or candidate(c, n, year, series)
     pub = add_publication(c, n, year, rev, series, prev)
-    imp = add_import(c, pub, 1, len(obs), 1)
+    imp = add_import(c, pub, 1, len(obs), 0 if total is None else 1)
     for station_id, y, value in obs:
         add_obs(c, imp, station_id, y, value)
-    add_total(c, imp, 2020, total)
+    if total is not None:
+        add_total(c, imp, 2020, total)
     link_candidate(c, cand, pub)
     if prev:
         c.execute(text("UPDATE energy_publications SET publication_status='superseded', status_changed_at=:t, status_note='replaced' "
@@ -145,8 +132,8 @@ def test_migration_is_idempotent_creates_the_approved_objects_and_inserts_no_row
     with engine.begin() as c:
         c.execute(text(M014.read_text()))  # second application is a no-op
     with engine.connect() as c:
-        tables = {r[0] for r in c.execute(text("SELECT tablename FROM pg_tables WHERE tablename LIKE 'energy_%'"))}
-        views = {r[0] for r in c.execute(text("SELECT viewname FROM pg_views WHERE viewname LIKE 'energy_%'"))}
+        tables = {r[0] for r in c.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = current_schema()"))}
+        views = {r[0] for r in c.execute(text("SELECT viewname FROM pg_views WHERE schemaname = current_schema()"))}
         counts = [one(c, f"SELECT COUNT(*) FROM {t}") for t in ENERGY_TABLES]
     assert tables == set(ENERGY_TABLES)
     assert views == {"energy_publication_current_imports", "energy_generation_canonical"}
@@ -483,30 +470,80 @@ def test_a_station_of_another_series_cannot_be_used_by_an_import(engine):
 
 
 # ---------------------------------------------------------------------------------------------------------------- observations
-def test_observation_state_value_precision_rules(engine):
-    with engine.begin() as c:
-        st = station(c, "S")
-        pub, imp = publish(c, 1, 2025, 1, [(st, 2020, "1.00")])
-        st2 = station(c, "S2")
+def violation(engine, body, sqlstate, constraint):
+    """The body must fail with exactly this SQLSTATE and this named constraint (not merely 'some IntegrityError')."""
+    with pytest.raises(IntegrityError) as err:
+        with engine.begin() as c:
+            body(c)
+    assert (err.value.orig.sqlstate, err.value.orig.diag.constraint_name) == (sqlstate, constraint)
 
-    def raw(c, state, value, prec, year=2021, station_id=None):
-        c.execute(text("INSERT INTO energy_generation_observations (import_id, source_station_id, observation_year, value_state, generation_gwh, "
-                       "published_precision, source_table, source_pdf_page, source_printed_page) "
-                       "VALUES (:i,:s,:y,:st,:v,:p,'T',1,1)"), {"i": imp, "s": station_id or st2, "y": year, "st": state, "v": value, "p": prec})
-    fails(engine, lambda c: raw(c, "reported", None, None))
-    fails(engine, lambda c: raw(c, "reported", Decimal("1.5"), None))
-    fails(engine, lambda c: raw(c, "reported", None, 1))
-    fails(engine, lambda c: raw(c, "not_reported", Decimal("0"), 0))
-    fails(engine, lambda c: raw(c, "not_reported", None, 1))
-    fails(engine, lambda c: raw(c, "not_reported", Decimal("1.0"), None))
-    fails(engine, lambda c: raw(c, "reported", Decimal("-1.0"), 1))  # negative
-    fails(engine, lambda c: raw(c, "reported", Decimal("1.50"), 1))  # printed precision must equal the stored scale
-    fails(engine, lambda c: raw(c, "reported", Decimal("NaN"), 0))
-    fails(engine, lambda c: raw(c, "reported", Decimal("Infinity"), 0))
-    fails(engine, lambda c: raw(c, "reported", Decimal("1000000"), 0))
-    fails(engine, lambda c: raw(c, "unknown", None, None))
-    fails(engine, lambda c: raw(c, "reported", Decimal("1.00"), 2, year=1989))
-    fails(engine, lambda c: raw(c, "reported", Decimal("1.00"), 2, year=2020, station_id=st))  # (import, station, year) is unique
+
+def side_import(c, pub_id, n_obs, n_tot):
+    """A superseded correction import whose stored expectations match what the test inserts. Its deferred count and current-import
+    checks therefore pass, so ONLY the row-level constraint under test can fail, and it fails at the INSERT statement itself."""
+    seq = one(c, "SELECT MAX(import_sequence) + 1 FROM energy_generation_imports WHERE publication_id=:p", p=pub_id)
+    return add_import(c, pub_id, seq, n_obs, n_tot, status="superseded", reason="constraint probe")
+
+
+def raw_obs(c, imp, st, state, value, prec, year=2021):
+    c.execute(text("INSERT INTO energy_generation_observations (import_id, source_station_id, observation_year, value_state, generation_gwh, "
+                   "published_precision, source_table, source_pdf_page, source_printed_page) "
+                   "VALUES (:i,:s,:y,:st,:v,:p,'T',1,1)"), {"i": imp, "s": st, "y": year, "st": state, "v": value, "p": prec})
+
+
+STATE_VALUE = "energy_generation_observations_state_value"
+
+
+@pytest.fixture
+def probe(engine):
+    """An accepted publication (its own import is complete) plus helpers for isolated single-row probes."""
+    with engine.begin() as c:
+        st, st2 = station(c, "S"), station(c, "S2")
+        pub, imp = publish(c, 1, 2025, 1, [(st, 2020, "1.00")])
+    return engine, pub, imp, st, st2
+
+
+def test_probe_harness_accepts_a_valid_row_so_the_negative_cases_isolate_their_constraint(probe):
+    engine, pub, imp, st, st2 = probe
+    with engine.begin() as c:  # the same harness with a VALID row commits: deferred count checks do not mask anything
+        raw_obs(c, side_import(c, pub, 1, 0), st2, "reported", Decimal("1.5"), 1)
+    with engine.connect() as c:
+        assert one(c, "SELECT COUNT(*) FROM energy_generation_observations") == 2
+
+
+@pytest.mark.parametrize("state,value,prec,label", [
+    ("reported", None, None, "reported without a value"),
+    ("reported", Decimal("1.5"), None, "reported without precision"),
+    ("reported", None, 1, "reported with NULL value"),
+    ("not_reported", Decimal("0"), 0, "not_reported with numeric zero"),
+    ("not_reported", Decimal("1.0"), None, "not_reported with a numeric value"),
+    ("not_reported", None, 1, "not_reported with a precision"),
+    ("reported", Decimal("-1.0"), 1, "negative value"),
+    ("reported", Decimal("1.50"), 1, "precision different from the stored scale"),
+    ("reported", Decimal("1.5"), 2, "invalid scale (printed precision larger than the scale)"),
+    ("reported", Decimal("1.5"), -1, "negative precision"),
+    ("reported", Decimal("NaN"), 0, "NaN"),
+    ("reported", Decimal("Infinity"), 0, "Infinity"),
+    ("reported", Decimal("-Infinity"), 0, "-Infinity"),
+    ("reported", Decimal("1000000"), 0, "value at or above the upper bound"),
+])
+def test_observation_value_rules_each_fail_on_the_state_value_constraint(probe, state, value, prec, label):
+    engine, pub, imp, st, st2 = probe
+    violation(engine, lambda c: raw_obs(c, side_import(c, pub, 1, 0), st2, state, value, prec), "23514", STATE_VALUE)
+
+
+def test_observation_state_year_and_uniqueness_each_fail_on_their_own_constraint(probe):
+    engine, pub, imp, st, st2 = probe
+    violation(engine, lambda c: raw_obs(c, side_import(c, pub, 1, 0), st2, "unknown", None, None), "23514",
+              STATE_VALUE)  # an unknown state also violates the vocabulary CHECK; PostgreSQL reports the first failing one by name
+    violation(engine, lambda c: raw_obs(c, side_import(c, pub, 1, 0), st2, "reported", Decimal("1.00"), 2, year=1989), "23514",
+              "energy_generation_observations_observation_year_check")
+
+    def duplicate(c):  # the second identical (import, station, year) row; expected count 2 so only uniqueness can fail
+        side = side_import(c, pub, 2, 0)
+        raw_obs(c, side, st2, "reported", Decimal("1.00"), 2)
+        raw_obs(c, side, st2, "reported", Decimal("2.00"), 2)
+    violation(engine, duplicate, "23505", "energy_generation_observations_identity")
 
 
 def test_observation_and_total_immutability_uniqueness_and_zero_is_distinct_from_not_reported(engine):
@@ -548,12 +585,34 @@ def test_group_total_precision_provenance_and_scale(engine):
         row = c.execute(text("SELECT total_gwh, published_precision, source_table, source_pdf_page, source_printed_page "
                              "FROM energy_generation_group_totals")).one()
     assert row == (Decimal("5848.01"), 2, "Table 16", 23, 16)
-    fails(engine, lambda c: c.execute(text("INSERT INTO energy_generation_group_totals (import_id, station_group, observation_year, total_gwh, "
-                                           "published_precision, source_table, source_pdf_page, source_printed_page) "
-                                           "VALUES (:i,'zesco_diesel',2020,1.50,1,'T',1,1)"), {"i": imp}))
-    fails(engine, lambda c: c.execute(text("INSERT INTO energy_generation_group_totals (import_id, station_group, observation_year, total_gwh, "
-                                           "published_precision, source_table, source_pdf_page, source_printed_page) "
-                                           "VALUES (:i,'zesco_diesel',2020,-1.5,1,'T',1,1)"), {"i": imp}))
+
+
+def raw_total(c, imp, value, prec, group="zesco_diesel", year=2020):
+    c.execute(text("INSERT INTO energy_generation_group_totals (import_id, station_group, observation_year, total_gwh, published_precision, "
+                   "source_table, source_pdf_page, source_printed_page) VALUES (:i,:g,:y,:v,:p,'T',1,1)"),
+              {"i": imp, "g": group, "y": year, "v": value, "p": prec})
+
+
+@pytest.mark.parametrize("value,prec,constraint,label", [
+    (Decimal("1.50"), 1, "energy_generation_group_totals_scale", "precision different from the stored scale"),
+    (Decimal("1.5"), 2, "energy_generation_group_totals_scale", "invalid scale"),
+    (Decimal("-1.5"), 1, "energy_generation_group_totals_total_gwh_check", "negative total"),
+    (Decimal("NaN"), 0, "energy_generation_group_totals_total_gwh_check", "NaN total"),
+    (Decimal("Infinity"), 0, "energy_generation_group_totals_total_gwh_check", "Infinity total"),
+    (Decimal("1000000"), 0, "energy_generation_group_totals_total_gwh_check", "total at or above the upper bound"),
+    (Decimal("1.5"), -1, "energy_generation_group_totals_published_precision_check", "negative precision"),
+])
+def test_group_total_value_and_precision_rules_each_fail_on_their_own_constraint(probe, value, prec, constraint, label):
+    engine, pub, imp, st, st2 = probe
+    violation(engine, lambda c: raw_total(c, side_import(c, pub, 0, 1), value, prec), "23514", constraint)
+
+
+def test_group_total_probe_harness_accepts_a_valid_row(probe):
+    engine, pub, imp, st, st2 = probe
+    with engine.begin() as c:
+        raw_total(c, side_import(c, pub, 0, 1), Decimal("1.5"), 1)
+    with engine.connect() as c:
+        assert one(c, "SELECT COUNT(*) FROM energy_generation_group_totals") == 2
 
 
 # ------------------------------------------------------------------------------------------------------------------------ views
@@ -637,7 +696,7 @@ def test_precision_only_difference_between_vintages_is_kept_exactly(engine):
     assert rows[0][1] == rows[1][1] and rows[0][2] != rows[1][2]
     assert canonical(engine, x, 2020)[:2] == (2025, 1)  # the newer official row is selected normally
     with engine.connect() as c:  # no restatement classification is stored anywhere
-        cols = {r[0] for r in c.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name LIKE 'energy_%'"))}
+        cols = {r[0] for r in c.execute(text("SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema()"))}
     assert not {c for c in cols if "restatement" in c or c == "change"}
 
 
@@ -648,3 +707,87 @@ def test_canonical_views_exclude_nothing_but_superseded_publications_and_noncurr
         publish(c, 2, 2025, 2, [(x, 2020, "2.00")], prev=p1)  # r2 omits Y; r1 is superseded, so Y is NOT canonical
     assert canonical(engine, y, 2020) is None  # superseded r1 is not canonical-eligible, so omission does not resurrect it
     assert canonical(engine, x, 2020)[:2] == (2025, 2)
+
+
+# --------------------------------------------------------------------------------------------------------- added lifecycle coverage
+def supersede_import(c, import_id):
+    c.execute(text("UPDATE energy_generation_imports SET import_status='superseded', status_changed_at=:t, status_note='replaced' "
+                   "WHERE id=:i"), {"t": NOW, "i": import_id})
+
+
+def test_successful_third_revision_supersedes_r2_and_becomes_canonical(engine):
+    with engine.begin() as c:
+        st = station(c, "S")
+        p1, _ = publish(c, 1, 2025, 1, [(st, 2020, "1.00")])
+        p2, _ = publish(c, 2, 2025, 2, [(st, 2020, "2.00")], prev=p1)
+    with engine.begin() as c:
+        publish(c, 3, 2025, 3, [(st, 2020, "3.00")], prev=p2)
+    with engine.connect() as c:
+        rows = c.execute(text("SELECT revision_sequence, publication_status, supersedes_publication_id IS NOT NULL "
+                              "FROM energy_publications ORDER BY 1")).all()
+        assert one(c, "SELECT COUNT(*) FROM energy_generation_imports WHERE import_status='current'") == 3
+    assert rows == [(1, "superseded", False), (2, "superseded", True), (3, "approved", True)]
+    row = canonical(engine, st, 2020)
+    assert row[:2] == (2025, 3) and row[4] == Decimal("3.00") and row[6] is True
+
+
+def test_correction_swap_works_in_the_opposite_statement_order(engine):
+    with engine.begin() as c:
+        st = station(c, "S")
+        p1, i1 = publish(c, 1, 2025, 1, [(st, 2020, "1.00")])
+    with engine.begin() as c:  # demote first, then insert the replacement: still consistent at COMMIT
+        supersede_import(c, i1)
+        i2 = add_import(c, p1, 2, 1, 1, reason="parser fix")
+        add_obs(c, i2, st, 2020, "1.25")
+        add_total(c, i2, 2020, "100.00")
+    with engine.connect() as c:
+        assert c.execute(text("SELECT import_sequence, import_status FROM energy_generation_imports ORDER BY 1")).all() == [(1, "superseded"), (2, "current")]
+    assert canonical(engine, st, 2020)[2] == 2 and canonical(engine, st, 2020)[4] == Decimal("1.25")
+
+
+def test_import_with_zero_expected_observations_and_totals_commits(engine):
+    with engine.begin() as c:
+        st = station(c, "S")
+        pub, imp = publish(c, 1, 2025, 1, [], total=None)
+    with engine.connect() as c:
+        assert one(c, "SELECT expected_observation_count + expected_group_total_count FROM energy_generation_imports WHERE id=:i", i=imp) == 0
+        assert one(c, "SELECT COUNT(*) FROM energy_generation_observations") == 0
+        assert one(c, "SELECT COUNT(*) FROM energy_generation_group_totals") == 0
+        assert one(c, "SELECT COUNT(*) FROM energy_publication_current_imports") == 1
+    assert canonical(engine, st, 2020) is None
+    fails(engine, lambda c: add_obs(c, imp, st, 2020, "1.00"), "at commit")  # a late row contradicts the stored zero expectation
+
+
+def test_correction_may_carry_different_reviewed_expected_counts(engine):
+    with engine.begin() as c:
+        s1, s2 = station(c, "S1"), station(c, "S2")
+        p1, i1 = publish(c, 1, 2025, 1, [(s1, 2020, "1.00")])  # import 1: 1 observation, 1 group total
+    with engine.begin() as c:
+        i2 = add_import(c, p1, 2, 2, 0, reason="reviewed: parser now also reads S2, no group totals")
+        add_obs(c, i2, s1, 2020, "1.00")
+        add_obs(c, i2, s2, 2020, "2.00")
+        supersede_import(c, i1)
+    with engine.connect() as c:
+        counts = c.execute(text("SELECT import_sequence, expected_observation_count, expected_group_total_count, import_status "
+                                "FROM energy_generation_imports ORDER BY 1")).all()
+    assert counts == [(1, 1, 1, "superseded"), (2, 2, 0, "current")]
+    assert canonical(engine, s2, 2020)[2] == 2 and canonical(engine, s1, 2020)[2] == 2
+
+
+def test_superseded_import_remains_complete_valid_and_immutable(engine):
+    with engine.begin() as c:
+        st = station(c, "S")
+        p1, i1 = publish(c, 1, 2025, 1, [(st, 2020, "1.00")])
+        i2 = add_import(c, p1, 2, 1, 1, reason="fix")
+        add_obs(c, i2, st, 2020, "1.10")
+        add_total(c, i2, 2020, "1.00")
+        supersede_import(c, i1)
+    with engine.connect() as c:
+        row = c.execute(text("SELECT i.import_status, i.expected_observation_count, i.expected_group_total_count, "
+                             "(SELECT COUNT(*) FROM energy_generation_observations WHERE import_id=i.id), "
+                             "(SELECT COUNT(*) FROM energy_generation_group_totals WHERE import_id=i.id) "
+                             "FROM energy_generation_imports i WHERE i.id=:i"), {"i": i1}).one()
+    assert row == ("superseded", 1, 1, 1, 1)  # still complete: stored expectations equal the actual children
+    fails(engine, lambda c: add_obs(c, i1, station(c, "S9"), 2020, "9.00"), "at commit")  # and still guarded by the count invariant
+    fails(engine, lambda c: c.execute(text("UPDATE energy_generation_observations SET generation_gwh=9 WHERE import_id=:i"), {"i": i1}))
+    fails(engine, lambda c: c.execute(text("DELETE FROM energy_generation_group_totals WHERE import_id=:i"), {"i": i1}))
