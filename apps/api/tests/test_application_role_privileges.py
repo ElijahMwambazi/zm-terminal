@@ -11,6 +11,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from psycopg import sql
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 
@@ -28,8 +29,8 @@ INSUFFICIENT_PRIVILEGE = "42501"
 
 
 class Env:
-    def __init__(self, schema, admin, app, role, admin_user, mid=None):
-        self.schema, self.admin, self.app, self.role, self.admin_user, self.mid = schema, admin, app, role, admin_user, mid
+    def __init__(self, schema, admin, app, role, admin_user, mid=None, other=None):
+        self.schema, self.admin, self.app, self.role, self.admin_user, self.mid, self.other = schema, admin, app, role, admin_user, mid, other
 
 
 @contextmanager
@@ -38,7 +39,9 @@ def make_env(prepare=None):
     url = require_test_database_url()
     role = "zm_t_app_" + secrets.token_hex(4)
     mid = "zm_t_mid_" + secrets.token_hex(4)
-    password = secrets.token_hex(16)
+    other = "zm_t_other_" + secrets.token_hex(4)
+    # quote, apostrophe, space, #, /, :, @, $, backslash: the engine URL is built with URL.set(), so nothing is escaped by hand
+    password = secrets.token_hex(8) + ' "q\' #/:@$\\x'
     with isolated_schema(url, "role_t") as (schema, admin):
         try:
             with admin.begin() as c:
@@ -46,19 +49,21 @@ def make_env(prepare=None):
                 for migration in sorted(INIT.glob("0[01][0-9]_*.sql")):
                     if migration.name.startswith("015"):
                         if prepare:
-                            prepare(c, {"schema": schema, "role": role, "mid": mid, "admin_user": admin_user})
+                            prepare(c, {"schema": schema, "role": role, "mid": mid, "other": other, "admin_user": admin_user,
+                                        "db": one(c, "SELECT current_database()")})
                         c.execute(text(f"SET LOCAL zm.app_role = '{role}'"))
                     c.execute(text(migration.read_text()))
-                c.execute(text(f"ALTER ROLE {role} PASSWORD '{password}'"))
+                # what 016 does in production, with the value quoted by the driver (never string-formatted into SQL)
+                c.connection.driver_connection.execute(sql.SQL("ALTER ROLE {} PASSWORD {}").format(sql.Identifier(role), sql.Literal(password)))
             app = create_engine(url.set(username=role, password=password), connect_args={"options": f"-csearch_path={schema}"})
             try:
-                yield Env(schema, admin, app, role, admin_user, mid if prepare else None)
+                yield Env(schema, admin, app, role, admin_user, mid if prepare else None, other)
             finally:
                 app.dispose()
         finally:
             with admin.begin() as c:  # the cluster-wide roles are ours alone to remove
                 c.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
-                for r in (role, mid):
+                for r in (role, mid, other):
                     if one(c, "SELECT COUNT(*) FROM pg_roles WHERE rolname=:r", r=r):
                         c.execute(text(f"DROP OWNED BY {r}"))
                         c.execute(text(f"DROP ROLE {r}"))
@@ -74,22 +79,57 @@ def env():
 def make_unsafe(c, i):
     """A role as an earlier, over-privileged deployment might have left it: superuser-ish attributes, direct and indirect membership
     of the admin role, CREATE on the schema, TRUNCATE/DELETE on Energy tables and a hijacking search_path."""
-    c.execute(text(f"CREATE ROLE {i['role']} LOGIN SUPERUSER CREATEDB CREATEROLE REPLICATION BYPASSRLS INHERIT"))
+    c.execute(text(f"CREATE ROLE {i['role']} NOLOGIN SUPERUSER CREATEDB CREATEROLE REPLICATION BYPASSRLS INHERIT"))
     c.execute(text(f"CREATE ROLE {i['mid']} NOLOGIN INHERIT"))
     c.execute(text(f"GRANT {i['admin_user']} TO {i['mid']}"))  # indirect: role -> mid -> admin
     c.execute(text(f"GRANT {i['mid']} TO {i['role']}"))
     c.execute(text(f"GRANT {i['admin_user']} TO {i['role']}"))  # direct membership of the admin role
     c.execute(text(f'GRANT CREATE ON SCHEMA "{i["schema"]}" TO {i["role"]}'))
     c.execute(text(f"GRANT CREATE ON DATABASE {one(c, 'SELECT current_database()')} TO {i['role']}"))
-    c.execute(text(f"ALTER ROLE {i['role']} SET search_path = pg_temp"))
+    c.execute(text(f"ALTER ROLE {i['role']} SET search_path = pg_temp"))  # global role setting
+    set_database_settings(c, i)
     for table in ENERGY:
         c.execute(text(f'GRANT ALL ON "{i["schema"]}".{table} TO {i["role"]}'))
     # the starting point really is unsafe (so the convergence test proves a change, not a no-op)
+    assert not one(c, "SELECT rolcanlogin FROM pg_roles WHERE rolname=:r", r=i["role"])
+    assert stored_settings(c, i["role"], i["db"]) >= {"search_path=pg_temp", "session_replication_role=replica", "application_name=hostile_setting"}
     assert one(c, "SELECT rolsuper AND rolcreaterole AND rolcreatedb FROM pg_roles WHERE rolname=:r", r=i["role"])
     assert one(c, "SELECT pg_has_role(:r, :a, 'MEMBER') AND pg_has_role(:r, :a, 'USAGE')", r=i["role"], a=i["admin_user"])
     assert one(c, "SELECT pg_has_role(:r, :m, 'MEMBER')", r=i["role"], m=i["mid"])
     assert one(c, "SELECT has_schema_privilege(:r, :s, 'CREATE')", r=i["role"], s=i["schema"])
     assert one(c, "SELECT has_table_privilege(:r, :t, 'TRUNCATE')", r=i["role"], t=f'{i["schema"]}.energy_generation_imports')
+
+
+OTHER_ROLE_SETTINGS = {"application_name=other_role_setting", "statement_timeout=12345"}
+
+
+def make_nologin(c, i):
+    c.execute(text(f"CREATE ROLE {i['role']} NOLOGIN"))
+    assert not one(c, "SELECT rolcanlogin FROM pg_roles WHERE rolname=:r", r=i["role"])
+
+
+def set_database_settings(c, i):
+    """Settings stored for (role, THIS database): not cleared by a plain ALTER ROLE ... RESET ALL. session_replication_role = replica
+    would disable every ordinary trigger from the first statement of each login."""
+    c.execute(text(f"ALTER ROLE {i['role']} IN DATABASE {i['db']} SET session_replication_role = replica"))
+    c.execute(text(f"ALTER ROLE {i['role']} IN DATABASE {i['db']} SET application_name = 'hostile_setting'"))  # a second, arbitrary GUC
+
+
+def stored_settings(c, role, db):
+    """Every stored setting that applies to (role, database): the role's global entry and its entry for this database."""
+    rows = c.execute(text("SELECT unnest(s.setconfig) FROM pg_db_role_setting s JOIN pg_roles r ON r.oid=s.setrole "
+                          "WHERE r.rolname=:r AND s.setdatabase IN (0, (SELECT oid FROM pg_database WHERE datname=:d))"), {"r": role, "d": db}).all()
+    return {r[0] for r in rows}
+
+
+def make_login_less_and_set(c, i):
+    """A role as above but otherwise tame: only NOLOGIN, stored settings, and an unrelated role whose settings must survive."""
+    c.execute(text(f"CREATE ROLE {i['role']} NOLOGIN"))
+    set_database_settings(c, i)
+    c.execute(text(f"CREATE ROLE {i['other']} NOLOGIN"))
+    c.execute(text(f"ALTER ROLE {i['other']} IN DATABASE {i['db']} SET application_name = 'other_role_setting'"))
+    c.execute(text(f"ALTER ROLE {i['other']} SET statement_timeout = '12345'"))
+    assert stored_settings(c, i["other"], i["db"]) == OTHER_ROLE_SETTINGS
 
 
 @pytest.fixture
@@ -278,6 +318,7 @@ def assert_app_role_is_converged(e):
                               "FROM pg_roles WHERE rolname=:r"), {"r": e.role}).one() == (False, False, False, False, False, False, True, -1)
         assert one(c, "SELECT COUNT(*) FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.member WHERE r.rolname=:r", r=e.role) == 0
         assert one(c, "SELECT COUNT(*) FROM pg_db_role_setting s JOIN pg_roles r ON r.oid=s.setrole WHERE r.rolname=:r", r=e.role) == 0
+        assert stored_settings(c, e.role, one(c, "SELECT current_database()")) == set()  # global AND this database
         for target in (e.admin_user, e.mid):
             if target:
                 assert not one(c, "SELECT pg_has_role(:r, :t, 'MEMBER')", r=e.role, t=target)
@@ -306,18 +347,58 @@ def assert_application_cannot_escalate_or_create(e):
         denied(e.app, f"DELETE FROM {table}")
 
 
+def assert_fresh_login_is_safe(e):
+    """A NEW real connection as the application role (the pool is discarded first): no stored setting reaches the session, and the
+    ordinary Energy triggers still fire for it. With session_replication_role = replica the illegal update below would succeed."""
+    e.app.dispose()
+    with e.app.connect() as c:
+        assert one(c, "SELECT current_user") == e.role and one(c, "SELECT session_user") == e.role
+        assert c.execute(text("SHOW session_replication_role")).scalar() == "origin"
+        assert c.execute(text("SHOW application_name")).scalar() != "hostile_setting"
+        assert c.execute(text("SHOW statement_timeout")).scalar() == "0"
+        assert not one(c, "SELECT rolsuper FROM pg_roles WHERE rolname=current_user")
+    run_importer_lifecycle(e.app)  # leaves a superseded import behind
+    with pytest.raises(IntegrityError, match="illegal transition"):  # the BEFORE UPDATE trigger, not a CHECK, rejects this
+        with e.app.begin() as c:
+            c.execute(text("UPDATE energy_generation_imports SET import_status='current', status_note='n' "
+                           "WHERE id=(SELECT MIN(id) FROM energy_generation_imports WHERE import_status='superseded')"))
+
+
+def test_nologin_role_converges_to_login_and_a_fresh_tcp_login_works():
+    with make_env(make_nologin) as e:  # created NOLOGIN; 015 + the password step must make it a usable application identity
+        with e.admin.connect() as c:
+            assert one(c, "SELECT rolcanlogin FROM pg_roles WHERE rolname=:r", r=e.role) is True
+            db = one(c, "SELECT current_database()")
+        e.app.dispose()
+        with e.app.connect() as c:  # real authentication with the special-character password
+            assert (one(c, "SELECT current_user"), one(c, "SELECT current_database()")) == (e.role, db)
+            assert one(c, "SELECT COUNT(*) >= 0 FROM fx_rates") is True
+            assert not one(c, "SELECT has_table_privilege(current_user, 'fx_rates', 'TRUNCATE')")
+        denied(e.app, "TRUNCATE fx_rates")
+        denied(e.app, "TRUNCATE energy_generation_observations")
+
+
+def test_database_specific_role_settings_are_cleared_and_a_fresh_login_is_safe():
+    with make_env(make_login_less_and_set) as e:
+        with e.admin.connect() as c:
+            db = one(c, "SELECT current_database()")
+            assert stored_settings(c, e.role, db) == set()  # the app role's global and per-database settings are gone
+            assert stored_settings(c, e.other, db) == OTHER_ROLE_SETTINGS  # another role's entries (global and per-database) are untouched
+            assert one(c, "SELECT COUNT(*) FROM pg_db_role_setting s JOIN pg_roles r ON r.oid=s.setrole WHERE r.rolname=:r", r=e.other) == 2
+        assert_fresh_login_is_safe(e)
+
+
 def test_application_role_can_never_create_or_replace_objects_in_the_schema(env):
     assert_app_role_is_converged(env)
     assert_application_cannot_escalate_or_create(env)
 
 
 def test_015_converges_an_existing_over_privileged_role(unsafe_env):
-    e = unsafe_env  # created SUPERUSER, member of the admin role (directly and through an intermediate role), CREATE on schema/db, TRUNCATE on Energy
+    e = unsafe_env  # created NOLOGIN and SUPERUSER, with global + per-database stored settings (session_replication_role = replica), member of the admin role (directly and through an intermediate role), CREATE on schema/db, TRUNCATE on Energy
     assert_app_role_is_converged(e)  # attributes, memberships, role settings, schema/database CREATE and direct Energy grants all reset
     assert_application_cannot_escalate_or_create(e)  # SET ROLE admin / intermediate refused, no CREATE, no TRUNCATE/DROP/ALTER/DELETE
-    with e.app.connect() as c:  # a real login: the identity is the application role, not the admin it used to inherit
-        assert one(c, "SELECT current_user") == e.role and one(c, "SELECT session_user") == e.role
-    run_importer_lifecycle(e.app)  # and the intended SELECT / INSERT / status-update path still works
+    assert_fresh_login_is_safe(e)  # a new login as the (formerly NOLOGIN) role: origin replication mode, no stored settings, triggers fire
+    # (assert_fresh_login_is_safe also ran the intended SELECT / INSERT / status-update lifecycle as the application role)
 
 
 def test_015_fails_closed_when_public_can_create_in_the_schema(env):

@@ -17,7 +17,8 @@
 -- Tests override it with SET zm.app_role = '<disposable role>' so they never touch the real application role.
 -- CONVERGENCE: this script does not only add grants, it establishes the whole boundary, so an existing or previously over-privileged
 -- role is corrected: every role membership is revoked (an inherited or SET ROLE-reachable admin role would defeat all grants), role
--- attributes and role-level settings are reset, CREATE on the schema and database is revoked, and it fails closed if the role still
+-- attributes (including LOGIN) are re-established, every stored role setting (global and for this database) is cleared, CREATE on
+-- the schema and database is revoked, and it fails closed if the role still
 -- has CREATE on the schema (for example through a PUBLIC grant on a pre-PG15 public schema) or owns anything.
 
 DO $$
@@ -32,8 +33,18 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = app_role) THEN
         EXECUTE format('CREATE ROLE %I LOGIN', app_role);
     END IF;
-    EXECUTE format('ALTER ROLE %I NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT CONNECTION LIMIT -1', app_role);
-    EXECUTE format('ALTER ROLE %I RESET ALL', app_role);  -- drop role-level settings (e.g. a hijacking search_path)
+    -- Establish the whole identity explicitly instead of assuming an existing role's attributes (an old role may be NOLOGIN or SUPERUSER).
+    EXECUTE format('ALTER ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT CONNECTION LIMIT -1', app_role);
+    -- Stored role settings: PostgreSQL keeps them per (role, database) in pg_db_role_setting, and a role applies the global entry and the
+    -- one for the database it logs into. RESET ALL clears every stored GUC of each entry (no blacklist), so something like
+    -- ALTER ROLE ... IN DATABASE ... SET session_replication_role = replica cannot survive and silently disable the triggers at login.
+    -- Entries for the same role in OTHER databases, and every other role's settings, are deliberately left alone.
+    EXECUTE format('ALTER ROLE %I RESET ALL', app_role);
+    EXECUTE format('ALTER ROLE %I IN DATABASE %I RESET ALL', app_role, current_database());
+    IF EXISTS (SELECT 1 FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole
+               WHERE r.rolname = app_role AND s.setdatabase IN (0, (SELECT oid FROM pg_database WHERE datname = current_database()))) THEN
+        RAISE EXCEPTION 'application role % still has stored role settings for database % after RESET ALL', app_role, current_database();
+    END IF;
 
     -- Revoke EVERY membership of the application role, whoever granted it (PG16+ tracks one row per grantor). Revoking the direct
     -- membership also removes indirect paths (app -> intermediate -> admin). The application needs no inherited role.
