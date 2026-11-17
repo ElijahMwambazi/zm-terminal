@@ -1,3 +1,9 @@
+# One authoritative source for the application role's credentials: the Postgres container creates the role from these values and the
+# API container connects with the same ones. The admin POSTGRES_PASSWORD is never given to the API container.
+x-app-db: &app-db
+  APP_DB_USER: ${APP_DB_USER:-zm_terminal_app}
+  APP_DB_PASSWORD: ${APP_DB_PASSWORD:-zm_terminal_app_dev}
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -5,7 +11,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-zm_terminal}
       POSTGRES_USER: ${POSTGRES_USER:-zm_terminal}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zm_terminal_dev}
-      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-zm_terminal_app_dev}
+      <<: *app-db
+      PGOPTIONS: -c zm.app_role=${APP_DB_USER:-zm_terminal_app}  # tells db/init/015_application_role.sql which role to create
     ports:
       - "5432:5432"
     volumes:
@@ -35,7 +42,11 @@ services:
     build:
       context: ./apps/api
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://zm_terminal_app:zm_terminal_app_dev@postgres:5432/zm_terminal}
+      <<: *app-db
+      APP_DB_HOST: postgres
+      APP_DB_NAME: ${POSTGRES_DB:-zm_terminal}
+      POSTGRES_USER: ${POSTGRES_USER:-zm_terminal}  # the admin role NAME only (not its password): the API refuses to connect as it
+      DATABASE_URL: ${DATABASE_URL:-}  # optional override of the APP_DB_* settings; must not name the admin role
       OPENBB_URL: ${OPENBB_URL:-http://openbb:6900}
       BOZ_USD_RATES_URL: ${BOZ_USD_RATES_URL:-https://www.boz.zm/api/v1/views/boz_zmw_usd_daily_exchange_rates}
       MOA_MEDIA_URL: ${MOA_MEDIA_URL:-https://www.agriculture.gov.zm/wp-json/wp/v2/media}

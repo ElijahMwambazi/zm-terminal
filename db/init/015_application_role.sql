@@ -12,7 +12,13 @@
 -- The role is created with LOGIN but no password, so it cannot authenticate over password auth until one is set.
 -- Idempotent. Re-run it after applying a later migration (e.g. 014 on an existing database) so the new objects are granted:
 --   docker compose exec -T postgres psql -U zm_terminal -d zm_terminal -v ON_ERROR_STOP=1 --single-transaction < db/init/015_application_role.sql
--- Tests override the role name with SET zm.app_role = '<disposable role>' so they never touch the real application role.
+-- The role name comes from the zm.app_role setting (default zm_terminal_app). compose.yml sets it for every psql in the Postgres
+-- container from APP_DB_USER through PGOPTIONS, so the role, its password (016) and the API all use the same APP_DB_* values.
+-- Tests override it with SET zm.app_role = '<disposable role>' so they never touch the real application role.
+-- CONVERGENCE: this script does not only add grants, it establishes the whole boundary, so an existing or previously over-privileged
+-- role is corrected: every role membership is revoked (an inherited or SET ROLE-reachable admin role would defeat all grants), role
+-- attributes and role-level settings are reset, CREATE on the schema and database is revoked, and it fails closed if the role still
+-- has CREATE on the schema (for example through a PUBLIC grant on a pre-PG15 public schema) or owns anything.
 
 DO $$
 DECLARE
@@ -26,18 +32,40 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = app_role) THEN
         EXECUTE format('CREATE ROLE %I LOGIN', app_role);
     END IF;
-    EXECUTE format('ALTER ROLE %I NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT', app_role);
+    EXECUTE format('ALTER ROLE %I NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT CONNECTION LIMIT -1', app_role);
+    EXECUTE format('ALTER ROLE %I RESET ALL', app_role);  -- drop role-level settings (e.g. a hijacking search_path)
+
+    -- Revoke EVERY membership of the application role, whoever granted it (PG16+ tracks one row per grantor). Revoking the direct
+    -- membership also removes indirect paths (app -> intermediate -> admin). The application needs no inherited role.
+    FOR rel IN SELECT r.rolname AS granted, g.rolname AS grantor
+               FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid JOIN pg_roles g ON g.oid = m.grantor
+               WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = app_role) LOOP
+        EXECUTE format('REVOKE %I FROM %I GRANTED BY %I', rel.granted, app_role, rel.grantor);
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = app_role)) THEN
+        RAISE EXCEPTION 'application role % still belongs to another role after revocation', app_role;
+    END IF;
 
     -- Refuse to continue if the application role owns anything here: ownership would defeat every grant below.
     IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                WHERE n.nspname = sch AND pg_get_userbyid(c.relowner) = app_role)
        OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                   WHERE n.nspname = sch AND pg_get_userbyid(p.proowner) = app_role)
-       OR EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname = sch AND pg_get_userbyid(n.nspowner) = app_role) THEN
-        RAISE EXCEPTION 'application role % owns objects in schema %; ownership must stay with the admin role', app_role, sch;
+       OR EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname = sch AND pg_get_userbyid(n.nspowner) = app_role)
+       OR EXISTS (SELECT 1 FROM pg_database d WHERE d.datname = current_database() AND pg_get_userbyid(d.datdba) = app_role) THEN
+        RAISE EXCEPTION 'application role % owns the database, the schema % or objects in it; ownership must stay with the admin role', app_role, sch;
     END IF;
 
+    -- Schema: USAGE only. CREATE would let the role add or shadow objects. TEMP on the database is left as PostgreSQL's default.
+    EXECUTE format('REVOKE ALL ON SCHEMA %I FROM %I', sch, app_role);
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', sch, app_role);
+    EXECUTE format('REVOKE CREATE ON DATABASE %I FROM %I', current_database(), app_role);
+    IF has_schema_privilege(app_role, sch, 'CREATE') THEN  -- only reachable through PUBLIC (pre-PG15 public schema): do not guess
+        RAISE EXCEPTION 'application role % can still CREATE in schema % (granted to PUBLIC?): run REVOKE CREATE ON SCHEMA % FROM PUBLIC', app_role, sch, sch;
+    END IF;
+    IF has_database_privilege(app_role, current_database(), 'CREATE') THEN
+        RAISE EXCEPTION 'application role % can still CREATE schemas in database %', app_role, current_database();
+    END IF;
 
     FOR rel IN SELECT c.relname, c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                WHERE n.nspname = sch AND c.relkind IN ('r', 'p', 'v', 'S') LOOP

@@ -6,6 +6,7 @@ The application engine logs in as that role over a real connection; a superuser 
 """
 
 import secrets
+from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
 
@@ -27,33 +28,74 @@ INSUFFICIENT_PRIVILEGE = "42501"
 
 
 class Env:
-    def __init__(self, schema, admin, app, role, admin_user):
-        self.schema, self.admin, self.app, self.role, self.admin_user = schema, admin, app, role, admin_user
+    def __init__(self, schema, admin, app, role, admin_user, mid=None):
+        self.schema, self.admin, self.app, self.role, self.admin_user, self.mid = schema, admin, app, role, admin_user, mid
+
+
+@contextmanager
+def make_env(prepare=None):
+    """Schema with 001-014, then `prepare(admin_connection, env_info)` (to pre-create an unsafe role), then 015, then a login engine."""
+    url = require_test_database_url()
+    role = "zm_t_app_" + secrets.token_hex(4)
+    mid = "zm_t_mid_" + secrets.token_hex(4)
+    password = secrets.token_hex(16)
+    with isolated_schema(url, "role_t") as (schema, admin):
+        try:
+            with admin.begin() as c:
+                admin_user = one(c, "SELECT current_user")
+                for migration in sorted(INIT.glob("0[01][0-9]_*.sql")):
+                    if migration.name.startswith("015"):
+                        if prepare:
+                            prepare(c, {"schema": schema, "role": role, "mid": mid, "admin_user": admin_user})
+                        c.execute(text(f"SET LOCAL zm.app_role = '{role}'"))
+                    c.execute(text(migration.read_text()))
+                c.execute(text(f"ALTER ROLE {role} PASSWORD '{password}'"))
+            app = create_engine(url.set(username=role, password=password), connect_args={"options": f"-csearch_path={schema}"})
+            try:
+                yield Env(schema, admin, app, role, admin_user, mid if prepare else None)
+            finally:
+                app.dispose()
+        finally:
+            with admin.begin() as c:  # the cluster-wide roles are ours alone to remove
+                c.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+                for r in (role, mid):
+                    if one(c, "SELECT COUNT(*) FROM pg_roles WHERE rolname=:r", r=r):
+                        c.execute(text(f"DROP OWNED BY {r}"))
+                        c.execute(text(f"DROP ROLE {r}"))
+                c.execute(text(f'CREATE SCHEMA "{schema}"'))  # recreated empty so isolated_schema's own DROP succeeds
 
 
 @pytest.fixture
 def env():
-    url = require_test_database_url()
-    role = "zm_t_app_" + secrets.token_hex(4)
-    password = secrets.token_hex(16)
-    with isolated_schema(url, "role_t") as (schema, admin):
-        with admin.begin() as c:
-            for migration in sorted(INIT.glob("0[01][0-9]_*.sql")):
-                if migration.name.startswith("015"):
-                    c.execute(text(f"SET LOCAL zm.app_role = '{role}'"))
-                c.execute(text(migration.read_text()))
-            c.execute(text(f"ALTER ROLE {role} PASSWORD '{password}'"))
-            admin_user = one(c, "SELECT current_user")
-        app = create_engine(url.set(username=role, password=password), connect_args={"options": f"-csearch_path={schema}"})
-        try:
-            yield Env(schema, admin, app, role, admin_user)
-        finally:
-            app.dispose()
-            with admin.begin() as c:  # schema is dropped by isolated_schema; the cluster-wide role is ours alone to remove
-                c.execute(text(f"DROP SCHEMA \"{schema}\" CASCADE"))
-                c.execute(text(f"DROP OWNED BY {role}"))
-                c.execute(text(f"DROP ROLE {role}"))
-                c.execute(text(f'CREATE SCHEMA "{schema}"'))  # recreated empty so isolated_schema's own DROP succeeds
+    with make_env() as e:
+        yield e
+
+
+def make_unsafe(c, i):
+    """A role as an earlier, over-privileged deployment might have left it: superuser-ish attributes, direct and indirect membership
+    of the admin role, CREATE on the schema, TRUNCATE/DELETE on Energy tables and a hijacking search_path."""
+    c.execute(text(f"CREATE ROLE {i['role']} LOGIN SUPERUSER CREATEDB CREATEROLE REPLICATION BYPASSRLS INHERIT"))
+    c.execute(text(f"CREATE ROLE {i['mid']} NOLOGIN INHERIT"))
+    c.execute(text(f"GRANT {i['admin_user']} TO {i['mid']}"))  # indirect: role -> mid -> admin
+    c.execute(text(f"GRANT {i['mid']} TO {i['role']}"))
+    c.execute(text(f"GRANT {i['admin_user']} TO {i['role']}"))  # direct membership of the admin role
+    c.execute(text(f'GRANT CREATE ON SCHEMA "{i["schema"]}" TO {i["role"]}'))
+    c.execute(text(f"GRANT CREATE ON DATABASE {one(c, 'SELECT current_database()')} TO {i['role']}"))
+    c.execute(text(f"ALTER ROLE {i['role']} SET search_path = pg_temp"))
+    for table in ENERGY:
+        c.execute(text(f'GRANT ALL ON "{i["schema"]}".{table} TO {i["role"]}'))
+    # the starting point really is unsafe (so the convergence test proves a change, not a no-op)
+    assert one(c, "SELECT rolsuper AND rolcreaterole AND rolcreatedb FROM pg_roles WHERE rolname=:r", r=i["role"])
+    assert one(c, "SELECT pg_has_role(:r, :a, 'MEMBER') AND pg_has_role(:r, :a, 'USAGE')", r=i["role"], a=i["admin_user"])
+    assert one(c, "SELECT pg_has_role(:r, :m, 'MEMBER')", r=i["role"], m=i["mid"])
+    assert one(c, "SELECT has_schema_privilege(:r, :s, 'CREATE')", r=i["role"], s=i["schema"])
+    assert one(c, "SELECT has_table_privilege(:r, :t, 'TRUNCATE')", r=i["role"], t=f'{i["schema"]}.energy_generation_imports')
+
+
+@pytest.fixture
+def unsafe_env():
+    with make_env(make_unsafe) as e:
+        yield e
 
 
 def denied(app, sql, **params):
@@ -177,8 +219,7 @@ def test_application_role_cannot_bypass_immutability_through_delete_update_or_re
 
 
 # ------------------------------------------------------------------------------------------------------- what the importer needs
-def test_application_role_can_run_the_full_importer_lifecycle(env):
-    app = env.app
+def run_importer_lifecycle(app):
     with app.begin() as c:  # first import: stations, candidate, publication, import, rows, candidate acceptance (SELECT/INSERT/UPDATE of status)
         st = station(c, "S")
         cand = candidate(c, 1)
@@ -201,6 +242,10 @@ def test_application_role_can_run_the_full_importer_lifecycle(env):
         assert one(c, "SELECT COUNT(*) FROM energy_generation_imports") == 3
 
 
+def test_application_role_can_run_the_full_importer_lifecycle(env):
+    run_importer_lifecycle(env.app)
+
+
 def test_015_is_idempotent_and_refuses_unsafe_configurations(env):
     with env.admin.connect() as c:
         grants = lambda: c.execute(text("SELECT grantee, table_name, privilege_type FROM information_schema.role_table_grants "
@@ -220,10 +265,75 @@ def test_015_is_idempotent_and_refuses_unsafe_configurations(env):
     with env.admin.begin() as c:  # an application role that owns an object would defeat every grant: 015 refuses
         c.execute(text(f"CREATE TABLE owned_by_app (id INTEGER)"))
         c.execute(text(f"ALTER TABLE owned_by_app OWNER TO {env.role}"))
-    with pytest.raises(DBAPIError, match="owns objects"):
+    with pytest.raises(DBAPIError, match="owns the database, the schema"):
         with env.admin.begin() as c:
             c.execute(text(f"SET LOCAL zm.app_role = '{env.role}'"))
             c.execute(text((INIT / "015_application_role.sql").read_text()))
+
+
+# ---------------------------------------------------------------------------------------------------------------------- convergence
+def assert_app_role_is_converged(e):
+    with e.admin.connect() as c:
+        assert c.execute(text("SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls, rolinherit, rolcanlogin, rolconnlimit "
+                              "FROM pg_roles WHERE rolname=:r"), {"r": e.role}).one() == (False, False, False, False, False, False, True, -1)
+        assert one(c, "SELECT COUNT(*) FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.member WHERE r.rolname=:r", r=e.role) == 0
+        assert one(c, "SELECT COUNT(*) FROM pg_db_role_setting s JOIN pg_roles r ON r.oid=s.setrole WHERE r.rolname=:r", r=e.role) == 0
+        for target in (e.admin_user, e.mid):
+            if target:
+                assert not one(c, "SELECT pg_has_role(:r, :t, 'MEMBER')", r=e.role, t=target)
+        assert not one(c, "SELECT has_schema_privilege(:r, :s, 'CREATE')", r=e.role, s=e.schema)
+        assert one(c, "SELECT has_schema_privilege(:r, :s, 'USAGE')", r=e.role, s=e.schema)
+        assert not one(c, "SELECT has_database_privilege(:r, current_database(), 'CREATE')", r=e.role)
+        for table in ENERGY:
+            for priv in ("DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "UPDATE"):
+                assert not one(c, "SELECT has_table_privilege(:r, :t, :p)", r=e.role, t=f"{e.schema}.{table}", p=priv), (table, priv)
+
+
+def assert_application_cannot_escalate_or_create(e):
+    denied(e.app, f"SET ROLE {e.admin_user}")  # no membership left, direct or indirect
+    if e.mid:
+        denied(e.app, f"SET ROLE {e.mid}")
+    denied(e.app, "CREATE TABLE app_made_table (id INTEGER)")
+    denied(e.app, "CREATE VIEW app_made_view AS SELECT 1 AS x")
+    denied(e.app, "CREATE FUNCTION app_made_function() RETURNS integer AS 'SELECT 1' LANGUAGE sql")
+    denied(e.app, "CREATE OR REPLACE FUNCTION energy_reject_delete() RETURNS trigger AS $$ BEGIN RETURN OLD; END; $$ LANGUAGE plpgsql")
+    denied(e.app, "CREATE SCHEMA app_made_schema")
+    denied(e.app, "CREATE ROLE app_made_role")
+    for table in ("energy_generation_observations", "energy_generation_imports"):
+        denied(e.app, f"TRUNCATE {table}")
+        denied(e.app, f"DROP TABLE {table}")
+        denied(e.app, f"ALTER TABLE {table} ADD COLUMN sneaky INTEGER")
+        denied(e.app, f"DELETE FROM {table}")
+
+
+def test_application_role_can_never_create_or_replace_objects_in_the_schema(env):
+    assert_app_role_is_converged(env)
+    assert_application_cannot_escalate_or_create(env)
+
+
+def test_015_converges_an_existing_over_privileged_role(unsafe_env):
+    e = unsafe_env  # created SUPERUSER, member of the admin role (directly and through an intermediate role), CREATE on schema/db, TRUNCATE on Energy
+    assert_app_role_is_converged(e)  # attributes, memberships, role settings, schema/database CREATE and direct Energy grants all reset
+    assert_application_cannot_escalate_or_create(e)  # SET ROLE admin / intermediate refused, no CREATE, no TRUNCATE/DROP/ALTER/DELETE
+    with e.app.connect() as c:  # a real login: the identity is the application role, not the admin it used to inherit
+        assert one(c, "SELECT current_user") == e.role and one(c, "SELECT session_user") == e.role
+    run_importer_lifecycle(e.app)  # and the intended SELECT / INSERT / status-update path still works
+
+
+def test_015_fails_closed_when_public_can_create_in_the_schema(env):
+    with env.admin.begin() as c:
+        c.execute(text(f'GRANT CREATE ON SCHEMA "{env.schema}" TO PUBLIC'))  # e.g. a pre-PG15 public schema
+    try:
+        with pytest.raises(DBAPIError, match="can still CREATE in schema"):
+            with env.admin.begin() as c:
+                c.execute(text(f"SET LOCAL zm.app_role = '{env.role}'"))
+                c.execute(text((INIT / "015_application_role.sql").read_text()))
+    finally:
+        with env.admin.begin() as c:
+            c.execute(text(f'REVOKE CREATE ON SCHEMA "{env.schema}" FROM PUBLIC'))
+    with env.admin.begin() as c:  # once PUBLIC no longer has it, 015 converges
+        c.execute(text(f"SET LOCAL zm.app_role = '{env.role}'"))
+        c.execute(text((INIT / "015_application_role.sql").read_text()))
 
 
 # ------------------------------------------------------------------------------------------------- existing application behaviour

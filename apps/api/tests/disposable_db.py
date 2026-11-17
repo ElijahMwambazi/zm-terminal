@@ -1,8 +1,13 @@
-"""Parsed-URL safety guard for PostgreSQL tests that create and drop objects.
+"""Fail-closed safety guard for PostgreSQL tests that create and drop objects.
 
-The decision is made on the *parsed* database component of the URL (SQLAlchemy URL utilities), never on string suffixes, and runs
-before any engine is created or any connection is opened. Query parameters cannot influence the decision; the few libpq parameters
-that could redirect the connection to a different database than the URL path names (`dbname`, `service`) are rejected outright.
+The decision is made on the *parsed* URL (SQLAlchemy URL utilities), never on string suffixes, and runs before any engine is created
+or any connection is opened. Policy:
+  * driver: exactly `postgresql+psycopg` (psycopg 3, the only PostgreSQL driver in requirements.txt). Plain `postgresql` would resolve
+    to psycopg2, which is not installed, and other dialects (pg8000, asyncpg, ...) interpret query parameters such as `database=`
+    differently, so every other driver is refused rather than reasoned about;
+  * database: the parsed database component must be non-empty, match the `_test` naming rule and not be the normal `zm_terminal`;
+  * query: NO query parameters at all. Driver and libpq options (dbname, service, host, hostaddr, port, user, password, options, ...)
+    can silently redirect the connection, so none is allowed; nothing the destructive tests need is expressed as a URL parameter.
 """
 
 import re
@@ -15,7 +20,7 @@ from sqlalchemy.exc import ArgumentError
 
 PROTECTED_DATABASES = frozenset({"zm_terminal"})
 DISPOSABLE_NAME = re.compile(r"^[a-z0-9][a-z0-9_]*_test$")  # repository convention: disposable databases end in _test
-TARGET_OVERRIDING_PARAMETERS = frozenset({"dbname", "service", "servicefile"})
+SUPPORTED_DRIVERNAMES = frozenset({"postgresql+psycopg"})
 
 
 class UnsafeDatabaseURL(ValueError):
@@ -28,8 +33,8 @@ def parse_disposable_database_url(raw: str) -> URL:
         url = make_url(raw)
     except (ArgumentError, ValueError, TypeError) as exc:
         raise UnsafeDatabaseURL("TEST_DATABASE_URL is not a parseable database URL") from exc
-    if url.get_backend_name() != "postgresql":
-        raise UnsafeDatabaseURL(f"TEST_DATABASE_URL must be a PostgreSQL URL, got backend {url.get_backend_name()!r}")
+    if url.drivername not in SUPPORTED_DRIVERNAMES:
+        raise UnsafeDatabaseURL(f"unsupported driver {url.drivername!r}; destructive tests accept only {sorted(SUPPORTED_DRIVERNAMES)}")
     name = url.database
     if not name:
         raise UnsafeDatabaseURL("TEST_DATABASE_URL names no database")
@@ -37,9 +42,8 @@ def parse_disposable_database_url(raw: str) -> URL:
         raise UnsafeDatabaseURL(f"refusing to use the normal database {name!r}")
     if not DISPOSABLE_NAME.fullmatch(name):
         raise UnsafeDatabaseURL(f"database {name!r} is not a disposable test database (name must match {DISPOSABLE_NAME.pattern})")
-    overriding = sorted(TARGET_OVERRIDING_PARAMETERS & set(url.query))
-    if overriding:
-        raise UnsafeDatabaseURL(f"query parameters {overriding} could redirect the connection away from {name!r}")
+    if url.query:
+        raise UnsafeDatabaseURL(f"query parameters {sorted(url.query)} are not allowed: they can redirect the connection away from {name!r}")
     return url
 
 
