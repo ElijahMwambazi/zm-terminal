@@ -3,7 +3,6 @@ import copy
 import importlib
 import inspect
 import json
-import os
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -23,6 +22,7 @@ from app.services.imf_pcps import (
     IMF_COPPER_URL, MAX_RESPONSE_BYTES, CopperMonth, ImfCopperError, fetch_copper_payload, new_client, parse_copper_series,
 )
 from app.services.provider_policy import IMF_COPPER_POLICY, PROVIDER_POLICIES
+from disposable_db import require_test_database_url
 
 router_module = importlib.import_module("app.api.router")
 UTC = timezone.utc
@@ -545,11 +545,7 @@ def test_conflict_error_lists_months_not_prices():
 # ---------------- PostgreSQL (opt-in) ----------------
 @pytest.fixture
 def engine():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set")
-    if not url.rsplit("/", 1)[-1].endswith("_test"):
-        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test")
+    url = require_test_database_url()
     init = Path(__file__).parents[3] / "db/init"
     eng = create_engine(url)
     with eng.begin() as c:

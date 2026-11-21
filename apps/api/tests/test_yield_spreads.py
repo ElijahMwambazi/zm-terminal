@@ -1,6 +1,5 @@
 import importlib
 import inspect
-import os
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -15,6 +14,7 @@ from app.schemas.yield_spreads import SPREAD_DEFINITIONS, SPREAD_METHODOLOGY, SP
 from app.services import yield_spreads
 from app.services.yield_curve import derive_yield_curve, fetch_yield_curve
 from app.services.yield_spreads import derive_yield_spreads
+from disposable_db import require_test_database_url
 
 router_module = importlib.import_module("app.api.router")
 BILL_DAYS = {"91D": 91, "182D": 182, "273D": 273, "364D": 364}
@@ -249,11 +249,7 @@ def test_spreads_never_reach_an_upstream_source_and_existing_curve_routes_still_
 # ---------------- real PostgreSQL (opt-in) ----------------
 @pytest.fixture
 def engine():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set")
-    if not url.rsplit("/", 1)[-1].endswith("_test"):
-        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test")
+    url = require_test_database_url()
     init = Path(__file__).parents[3] / "db/init"
     eng = create_engine(url)
     with eng.begin() as c:

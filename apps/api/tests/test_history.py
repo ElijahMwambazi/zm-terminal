@@ -2,7 +2,6 @@ import asyncio
 import copy
 import importlib
 import json
-import os
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -19,6 +18,7 @@ from app.schemas.bonds import GovernmentBondHistoryPoint
 from app.schemas.tbills import TreasuryBillHistoryPoint
 from app.services import bond_store, tbill_store
 from app.services.jsonapi import TruncatedSearchError
+from disposable_db import require_test_database_url
 
 router_module = importlib.import_module("app.api.router")
 FIX = Path(__file__).parent / "fixtures"
@@ -210,11 +210,7 @@ def test_bond_history_api_validation_and_503(monkeypatch):
 # ---------------- real PostgreSQL (opt-in) ----------------
 @pytest.fixture
 def engine(monkeypatch):
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set")
-    if not url.rsplit("/", 1)[-1].endswith("_test"):
-        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test")
+    url = require_test_database_url()
     eng = create_engine(url)
     init = Path(__file__).parents[3] / "db/init"
     with eng.begin() as c:

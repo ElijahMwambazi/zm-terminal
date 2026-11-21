@@ -9,7 +9,6 @@ Pages are separated by form feeds.
 import asyncio
 import importlib
 import inspect
-import os
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -29,6 +28,7 @@ from app.services.fx_monthly_combine import MonthlyConflictError, MonthlyObserva
 from app.services.fx_monthly_store import fetch_fx_monthly, save_monthly_averages
 from tests.pdfgen import make_pdf
 from tests.storage_contract import assert_no_derived_storage
+from disposable_db import require_test_database_url
 
 router_module = importlib.import_module("app.api.router")
 client = TestClient(app)
@@ -569,11 +569,7 @@ def test_existing_intraday_fx_routes_are_untouched():
 # ---------------- PostgreSQL (opt-in) ----------------
 @pytest.fixture
 def engine():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set")
-    if not url.rsplit("/", 1)[-1].endswith("_test"):
-        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test")
+    url = require_test_database_url()
     init = Path(__file__).parents[3] / "db/init"
     eng = create_engine(url)
     with eng.begin() as c:

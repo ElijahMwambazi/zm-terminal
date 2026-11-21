@@ -12,6 +12,7 @@ from app.main import app
 from app.schemas.fx import FxHistoryPoint, FxQuote
 from app.services import fx_store
 from app.services.provider_policy import BOZ_USD_POLICY
+from disposable_db import require_test_database_url
 
 router_module = importlib.import_module("app.api.router")
 NOW = datetime(2026, 10, 9, 15, tzinfo=timezone.utc)
@@ -135,11 +136,7 @@ def test_upstream_failure_does_not_persist(monkeypatch):
 # ---- real PostgreSQL (opt-in: TEST_DATABASE_URL must point at a disposable DB) ----
 @pytest.fixture
 def engine():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set")
-    if not url.rsplit("/", 1)[-1].endswith("_test"):
-        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test")
+    url = require_test_database_url()
     eng = create_engine(url)
     schema = open(os.path.join(os.path.dirname(__file__), "../../../db/init/001_schema.sql")).read()
     extra = open(os.path.join(os.path.dirname(__file__), "../../../db/init/002_fx_rates_provenance.sql")).read()

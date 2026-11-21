@@ -88,3 +88,20 @@ def test_rejected_urls_fail_before_any_engine_or_connection(monkeypatch, url):
     monkeypatch.setenv("TEST_DATABASE_URL", url)
     with pytest.raises(pytest.fail.Exception):
         disposable_db.require_test_database_url()
+
+
+def test_postgres_test_files_use_the_shared_guard_not_a_raw_suffix_check():
+    """Static regression: no PostgreSQL test file may decide database safety from the raw URL string (rsplit / .endswith("_test")) or read TEST_DATABASE_URL itself."""
+    import re
+    from pathlib import Path
+
+    legacy = re.compile(r"""rsplit\(\s*["']/["']\s*,\s*1\s*\)\s*\[\s*-1\s*\]|\.endswith\(\s*["']_test["']\s*\)|os\.(?:environ\.get|getenv|environ\[)\s*\(?\s*["']TEST_DATABASE_URL["']""")
+    tests = Path(__file__).parent
+    offenders = [
+        f"{path.relative_to(tests)}:{number}"
+        for path in sorted(tests.rglob("*.py"))
+        if path.name not in {"disposable_db.py", Path(__file__).name}
+        for number, line in enumerate(path.read_text().splitlines(), 1)
+        if legacy.search(line.split("#", 1)[0])
+    ]
+    assert not offenders, f"use disposable_db.require_test_database_url() instead: {offenders}"

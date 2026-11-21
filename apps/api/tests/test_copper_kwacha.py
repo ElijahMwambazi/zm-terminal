@@ -1,5 +1,4 @@
 import importlib
-import os
 from datetime import date, datetime, timezone
 from decimal import Decimal, localcontext
 from pathlib import Path
@@ -19,6 +18,7 @@ from app.services.copper_kwacha import (
 from app.services.copper_store import save_copper_months
 from app.services.imf_pcps import IMF_COPPER_URL, CopperMonth
 from tests.storage_contract import assert_no_derived_storage, schema_objects
+from disposable_db import require_test_database_url
 
 router_module = importlib.import_module("app.api.router")
 client = TestClient(app)
@@ -334,11 +334,7 @@ def test_endpoint_never_reaches_an_upstream_source(monkeypatch):
 # ---------------- real PostgreSQL (opt-in) ----------------
 @pytest.fixture
 def engine():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set")
-    if not url.rsplit("/", 1)[-1].endswith("_test"):
-        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test")
+    url = require_test_database_url()
     init = Path(__file__).parents[3] / "db/init"
     eng = create_engine(url)
     with eng.begin() as c:

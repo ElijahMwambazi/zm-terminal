@@ -1,7 +1,6 @@
 import asyncio
 import copy
 import json
-import os
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -14,6 +13,7 @@ from app.config import Settings
 from app.jobs import backfill_usdzmw as job
 from app.schemas.fx import BOZ_SOURCE_URL
 from app.services import boz, fx_store
+from disposable_db import require_test_database_url
 
 NOW = datetime(2026, 11, 12, 16, tzinfo=timezone.utc)
 TODAY = NOW.date()
@@ -243,11 +243,7 @@ def test_cli_range_error_exit_code(capsys):
 # ---- real PostgreSQL (opt-in, disposable *_test database) ----
 @pytest.fixture
 def engine():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set")
-    if not url.rsplit("/", 1)[-1].endswith("_test"):
-        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test")
+    url = require_test_database_url()
     eng = create_engine(url)
     root = Path(__file__).parents[3] / "db/init"
     with eng.begin() as c:

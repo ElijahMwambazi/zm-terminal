@@ -28,6 +28,7 @@ from app.services import pdf_layout_text as layout
 from app.services.fx_monthly_combine import MonthlyObservation
 from app.services.fx_monthly_normalize import NormalizationError, normalize
 from app.services.fx_monthly_store import fetch_fx_monthly, save_monthly_averages
+from disposable_db import require_test_database_url
 
 D = Decimal
 FIX = Path(__file__).parent / "fixtures"
@@ -698,11 +699,7 @@ M013 = INIT / "013_fx_monthly_published_values.sql"
 
 
 def make_engine():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set")
-    if not url.rsplit("/", 1)[-1].endswith("_test"):
-        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test")
+    url = require_test_database_url()
     return create_engine(url)
 
 
