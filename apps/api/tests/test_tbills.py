@@ -1,7 +1,6 @@
 import copy
 import importlib
 import json
-import os
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -16,6 +15,7 @@ from app.schemas.tbills import TreasuryBillAuction
 from app.services import boz_treasury, tbill_store
 from app.services.boz_treasury import latest_per_tenor, parse_tbill_auctions
 from app.services.provider_policy import BOZ_TBILL_POLICY, BOZ_USD_POLICY, PROVIDER_POLICIES
+from disposable_db import require_test_database_url
 
 router_module = importlib.import_module("app.api.router")
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "boz_tbills.json").read_text())
@@ -235,11 +235,7 @@ def test_adapter_uses_mock_transport_and_rejects_non_json():
 # ---- real PostgreSQL (opt-in) ----
 @pytest.fixture
 def engine():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set")
-    if not url.rsplit("/", 1)[-1].endswith("_test"):
-        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test")
+    url = require_test_database_url()
     eng = create_engine(url)
     sql = (Path(__file__).parents[3] / "db/init/003_treasury_bill_auctions.sql").read_text()
     with eng.begin() as c:

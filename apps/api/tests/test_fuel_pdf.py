@@ -1,6 +1,5 @@
 import asyncio
 import importlib
-import os
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -17,6 +16,7 @@ from app.services import erb_pdf, fuel_buildup_store, fuel_store
 from app.services.erb_fuel import FuelRow
 from app.services.erb_pdf import FuelPdfError, ScannedPdfError
 from tests.pdfgen import make_pdf
+from disposable_db import require_test_database_url
 
 router_module = importlib.import_module("app.api.router")
 NOW = datetime(2026, 11, 20, 10, tzinfo=timezone.utc)
@@ -643,11 +643,7 @@ def test_build_up_route_does_not_shadow_product_route_and_never_calls_erb(monkey
 # ---------------- real PostgreSQL (opt-in) ----------------
 @pytest.fixture
 def engine():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set")
-    if not url.rsplit("/", 1)[-1].endswith("_test"):
-        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test")
+    url = require_test_database_url()
     eng = create_engine(url)
     init = Path(__file__).parents[3] / "db/init"
     with eng.begin() as c:

@@ -1,5 +1,4 @@
 import importlib
-import os
 from dataclasses import replace
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -14,6 +13,7 @@ from app.schemas.agriculture import AgricultureHistoryPoint, AgriculturePrice
 from app.services import agriculture_store, moa_agriculture
 from app.services.moa_agriculture import AgricultureSourceError, UnsupportedLayoutError
 from app.services.provider_policy import MOA_AGRICULTURE_POLICY, PROVIDER_POLICIES
+from disposable_db import require_test_database_url
 
 router_module = importlib.import_module("app.api.router")
 NOW = datetime(2026, 11, 13, 10, tzinfo=timezone.utc)
@@ -175,10 +175,7 @@ def test_agriculture_api_latest_history_validation_and_503(monkeypatch):
 
 @pytest.fixture
 def pg_engine():
-    url = os.getenv("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set")
-    assert url.rsplit("/", 1)[-1].endswith("_test")
+    url = require_test_database_url()
     engine = create_engine(url)
     migration = Path(__file__).parents[3] / "db" / "init" / "008_zambia_agricultural_prices.sql"
     with engine.begin() as conn:

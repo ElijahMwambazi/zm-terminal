@@ -1,6 +1,5 @@
 import importlib
 import inspect
-import os
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, localcontext
 from pathlib import Path
@@ -16,6 +15,7 @@ from app.services import btc_zmw_history
 from app.services.btc_store import save_daily_candles
 from app.services.bitstamp_btc import DailyCandle
 from app.services.btc_zmw_history import InvalidHistoryInputError, derive_btc_zmw_history, fetch_btc_zmw_history, lusaka_date
+from disposable_db import require_test_database_url
 
 router_module = importlib.import_module("app.api.router")
 UTC = timezone.utc
@@ -206,11 +206,7 @@ def test_history_makes_no_upstream_calls_and_the_live_route_is_unaffected(monkey
 # ---------------- PostgreSQL (opt-in) ----------------
 @pytest.fixture
 def engine():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set")
-    if not url.rsplit("/", 1)[-1].endswith("_test"):
-        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test")
+    url = require_test_database_url()
     init = Path(__file__).parents[3] / "db/init"
     eng = create_engine(url)
     with eng.begin() as c:
