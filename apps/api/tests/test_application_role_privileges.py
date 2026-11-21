@@ -6,6 +6,7 @@ The application engine logs in as that role over a real connection; a superuser 
 """
 
 import secrets
+import sys
 import time
 from contextlib import contextmanager
 from decimal import Decimal
@@ -34,10 +35,17 @@ class Env:
         self.schema, self.admin, self.app, self.role, self.admin_user, self.mid, self.other = schema, admin, app, role, admin_user, mid, other
 
 
+DEPENDENT_OBJECTS_STILL_EXIST = "2BP01"  # SQLSTATE of DROP ROLE while objects (e.g. TEMP tables of a backend still exiting) still depend on it
+DROP_ROLE_ATTEMPTS = 50  # at most 50 attempts x 0.1 s = 5 s of sleeping, then the original error is raised
+
+
 def drop_role(admin, r):
-    """End the role's sessions, then drop it. A just-closed session's TEMP tables disappear asynchronously as its backend exits, and DROP
-    ROLE refuses while they still exist, so retry briefly."""
-    for attempt in range(100):
+    """End the role's sessions (only those of this uniquely named test role), then drop it. pg_terminate_backend only signals: a TEMP table
+    of a backend that is still exiting can make DROP ROLE fail with dependent_objects_still_exist (2BP01), so that one condition, and
+    nothing else, is retried, up to DROP_ROLE_ATTEMPTS times. Any other error (privileges, syntax, connection, ...) is raised at once, and
+    when the retries run out the last 2BP01 error is raised unchanged. The race is documented PostgreSQL behaviour but could not be
+    reproduced here (no retry was needed in repeated runs), so the connections the tests own are still closed first (app.dispose())."""
+    for attempt in range(1, DROP_ROLE_ATTEMPTS + 1):
         try:
             with admin.begin() as c:
                 if not one(c, "SELECT COUNT(*) FROM pg_roles WHERE rolname=:r", r=r):
@@ -46,9 +54,59 @@ def drop_role(admin, r):
                 c.execute(text(f"DROP OWNED BY {r}"))
                 c.execute(text(f"DROP ROLE {r}"))
             return
-        except DBAPIError:
+        except DBAPIError as exc:
+            if getattr(exc.orig, "sqlstate", None) != DEPENDENT_OBJECTS_STILL_EXIST or attempt == DROP_ROLE_ATTEMPTS:
+                raise
             time.sleep(0.1)
-    raise AssertionError(f"could not drop test role {r}")
+
+
+class _SqlStateError(Exception):
+    def __init__(self, sqlstate):
+        super().__init__(sqlstate)
+        self.sqlstate = sqlstate
+
+
+class _FakeAdmin:
+    """Stands in for the admin engine: the role exists and DROP ROLE raises the scripted SQLSTATEs in turn (None = success)."""
+    def __init__(self, script):
+        self.script, self.drop_attempts = list(script), 0
+
+    @contextmanager
+    def begin(self):
+        outer = self
+
+        class Connection:
+            def execute(self, statement, params=None):
+                if str(statement).startswith("DROP ROLE"):
+                    outer.drop_attempts += 1
+                    state = outer.script.pop(0) if outer.script else None
+                    if state:
+                        raise DBAPIError("DROP ROLE", None, _SqlStateError(state))
+        yield Connection()
+
+
+def _drop_with(monkeypatch, script):
+    sleeps = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    admin = _FakeAdmin(script)
+    return admin, sleeps
+
+
+def test_drop_role_retries_only_dependent_objects_still_exist_and_is_bounded(monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "one", lambda c, sql, **p: 1)  # the role "exists"
+    admin, sleeps = _drop_with(monkeypatch, [DEPENDENT_OBJECTS_STILL_EXIST, DEPENDENT_OBJECTS_STILL_EXIST, None])
+    drop_role(admin, "zm_t_x")  # transient dependency condition: retried until it succeeds
+    assert admin.drop_attempts == 3 and sleeps == [0.1, 0.1]
+    for state in ("42501", "42601", "08006", "55006"):  # privilege, syntax, connection, object_in_use: never retried
+        admin, sleeps = _drop_with(monkeypatch, [state])
+        with pytest.raises(DBAPIError) as raised:
+            drop_role(admin, "zm_t_x")
+        assert raised.value.orig.sqlstate == state and admin.drop_attempts == 1 and sleeps == []
+    admin, sleeps = _drop_with(monkeypatch, [DEPENDENT_OBJECTS_STILL_EXIST] * 1000)  # never clears: bounded, original error raised
+    with pytest.raises(DBAPIError) as raised:
+        drop_role(admin, "zm_t_x")
+    assert raised.value.orig.sqlstate == DEPENDENT_OBJECTS_STILL_EXIST
+    assert admin.drop_attempts == DROP_ROLE_ATTEMPTS and len(sleeps) == DROP_ROLE_ATTEMPTS - 1
 
 
 @contextmanager
