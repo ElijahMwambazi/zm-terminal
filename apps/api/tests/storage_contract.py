@@ -33,6 +33,9 @@ APPROVED_STORAGE = {
     "energy_source_stations": "source ERB station identities as printed",
     "energy_generation_observations": "source ERB station/year observations, not derived analytics",
     "energy_generation_group_totals": "source ERB published group totals, not derived analytics",
+    "bank_fx_snapshots": "source BoZ commercial bank rate node revisions, immutable, not derived analytics",
+    "bank_fx_rates": "source BoZ commercial bank rates per snapshot, slot and institution, not derived analytics",
+    "bank_fx_canonical_snapshots": "read-only selection view over source snapshots (one per observation date), stores nothing",
     "energy_publication_current_imports": "read-only view mapping publications to current imports, stores nothing",
     "energy_generation_canonical": "read-only selection view over source observations, stores nothing",
 }

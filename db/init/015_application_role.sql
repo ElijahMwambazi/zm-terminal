@@ -8,6 +8,8 @@
 --   * legacy tables (migrations 001-013): SELECT, INSERT, UPDATE  (the stores use INSERT ... ON CONFLICT DO UPDATE; no DELETE anywhere)
 --   * Energy tables (migration 014, when present): SELECT and INSERT; UPDATE only on the lifecycle-status columns the importer will
 --     need (candidate review fields, publication/import status). No DELETE, TRUNCATE, REFERENCES or TRIGGER, no DDL.
+--   * Bank FX tables (migration 017, when present): SELECT and INSERT only, like the Energy source tables: append-only source snapshots,
+--     no UPDATE, DELETE, TRUNCATE, REFERENCES or TRIGGER. (017 also grants its own objects itself because it runs after this script.)
 --   * views: SELECT. sequences: USAGE, SELECT. Never ownership. No password here: db/init/016_application_role_password.sh sets it.
 -- The role is created with LOGIN but no password, so it cannot authenticate over password auth until one is set.
 -- Idempotent. Re-run it after applying a later migration (e.g. 014 on an existing database) so the new objects are granted:
@@ -88,7 +90,7 @@ BEGIN
             EXECUTE format('REVOKE ALL ON %I.%I FROM %I', sch, rel.relname, app_role);
             IF rel.relkind = 'v' THEN
                 EXECUTE format('GRANT SELECT ON %I.%I TO %I', sch, rel.relname, app_role);
-            ELSIF rel.relname LIKE 'energy\_%' THEN
+            ELSIF rel.relname LIKE 'energy\_%' OR rel.relname LIKE 'bank\_fx\_%' THEN
                 EXECUTE format('GRANT SELECT, INSERT ON %I.%I TO %I', sch, rel.relname, app_role);
             ELSE
                 EXECUTE format('GRANT SELECT, INSERT, UPDATE ON %I.%I TO %I', sch, rel.relname, app_role);
