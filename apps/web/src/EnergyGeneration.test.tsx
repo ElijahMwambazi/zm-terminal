@@ -236,6 +236,17 @@ describe("refresh, rights and empty-result regressions", () => {
   });
 });
 
+describe("long station names", () => {
+  it("puts the wrapping class on the station-history heading and keeps the full exact name", async () => {
+    const long = "X".repeat(96);
+    render(<EnergyGenerationDetail state={ready(snapshot({ stations: [station("zesco_diesel", long, "reported", "1.00")] }))} onRefresh={() => {}} />);
+    const title = within(screen.getByLabelText("Station annual history")).getByText(new RegExp(`STATION HISTORY · ${long}`));
+    expect(title.className).toContain("energy-history-title");
+    expect(title.textContent).toContain(long);
+    await screen.findByLabelText(new RegExp(`${long} annual generation`));
+  });
+});
+
 describe("Energy in the app", () => {
   const appRoutes = () => {
     routes["/api/v1/energy/generation/latest"] = () => json({ snapshot: snapshot() });

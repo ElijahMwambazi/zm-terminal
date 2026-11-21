@@ -148,7 +148,7 @@ const EnergyGenerationDetail = forwardRef<HTMLElement, { state: EnergyState; onR
               </section>
 
               <section className="history-section" aria-label="Station annual history">
-                <div className="panel-heading"><span>STATION HISTORY{selected ? ` · ${selected.name} · ${ENERGY_GROUP_LABEL[selected.group]}` : ""}</span></div>
+                <div className="panel-heading"><span className="energy-history-title">STATION HISTORY{selected ? ` · ${selected.name} · ${ENERGY_GROUP_LABEL[selected.group]}` : ""}</span></div>
                 {!selected && <p className="notice">Select a station.</p>}
                 {selected && stationHistory.status === "loading" && <p className="notice">Loading stored station history…</p>}
                 {selected && stationHistory.status === "error" && <p className="notice notice--error" role="alert">{stationHistory.message}. No station history is shown.</p>}

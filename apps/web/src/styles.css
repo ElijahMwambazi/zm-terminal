@@ -303,3 +303,4 @@ th { text-align: left; color: #8c8c8c; font-weight: normal; padding: 6px 4px; }
   .energy-total { padding: 10px 12px; }
 }
 .energy-readout { padding: 6px 16px; color: #f2f2f2; font-size: 0.85rem; overflow-wrap: anywhere; }
+.energy-history-title { min-width: 0; overflow-wrap: anywhere; }
