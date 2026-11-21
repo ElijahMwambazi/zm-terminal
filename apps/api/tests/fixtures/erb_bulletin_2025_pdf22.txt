@@ -1,0 +1,45 @@
+2     ELECTRICITY SUBSECTOR
+
+     2.1 ELECTRICITY GENERATION
+Table 12: National Electricity Generation 2025
+                         Generator                  Generation (GWh)
+ ZESCO’s Major-Hydro                    3.00
+ ZESCO’s Mini-Hydro                    2.00
+ ZESCO’s Diesel                    1.00
+ IPPs                    90.07
+                         Total                    98.57
+
+
+2.1.1 ZESCO’s Electricity Generation from Major Hydro Power Stations
+Table 13: Electricity generation from ZESCO's large hydro power plants (GWh), 2013-2025
+   Year   Kafue Gorge   Kariba North Bank   Victoria falls   Total (GWh)
+   2013   1.00   2.00   3.00   6.00
+   2014   2.00   3.00   4.00   9.00
+   2015   3.00   4.00   5.00   12.00
+   2016   4.00   5.00   6.00   15.00
+   2017   5.00   6.00   7.00   18.00
+   2018   6.00   7.00   8.00   21.00
+   2019   7.00   8.00   9.00   24.00
+   2020   8.00   9.00   10.00   27.00
+   2021   9.00   10.00   11.00   30.00
+   2022   10.00   11.00   12.00   33.00
+   2023   11.00   12.00   13.00   36.00
+   2024   12.00   13.00   14.00   39.00
+   2025   1,013.00   14.00   15.00   1,042.00
+
+
+2.1.2 ZESCO’s Electricity Generation from Small and Mini Hydro Power Stations
+Table 14: Electricity generation from ZESCO's mini- hydro power plants (GWh), 2013-2025
+    Year   Chishimba Falls   Lunzua   Lusiwasi Lower   Lusiwasi Upper   Musonda Falls   Shiwan'gandu   Total (GWh)
+    2013   1.00   2.00   3.00   -   5.00   -   11.00
+    2014   1.10   2.10   3.10   -   5.10   6.10   17.50
+    2015   1.20   2.20   3.20   -   5.20   6.20   18.00
+    2016   1.30   2.30   3.30   -   5.30   6.30   18.50
+    2017   1.40   2.40   3.40   -   5.40   6.40   19.00
+    2018   1.50   2.50   3.50   -   5.50   6.50   19.50
+    2019   1.60   2.60   3.60   -   5.60   6.60   20.00
+    2020   1.70   2.70   3.70   4.70   5.70   6.70   25.20
+
+
+                                                                                                15
+

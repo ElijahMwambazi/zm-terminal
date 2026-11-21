@@ -27,6 +27,14 @@ APPROVED_STORAGE = {
     "btc_usd_daily": "source Bitstamp candles",
     "global_copper_prices": "source IMF Copper observations, not derived analytics",
     "fx_monthly_averages": "source BoZ published monthly observations, not derived analytics",
+    "energy_publication_candidates": "administrative source-review log, no observations",
+    "energy_publications": "source ERB accepted publication revisions",
+    "energy_generation_imports": "local import revisions of accepted publications",
+    "energy_source_stations": "source ERB station identities as printed",
+    "energy_generation_observations": "source ERB station/year observations, not derived analytics",
+    "energy_generation_group_totals": "source ERB published group totals, not derived analytics",
+    "energy_publication_current_imports": "read-only view mapping publications to current imports, stores nothing",
+    "energy_generation_canonical": "read-only selection view over source observations, stores nothing",
 }
 
 
@@ -53,6 +61,8 @@ def assert_no_derived_storage(engine, init: Path, *, extra_sql=()):
             before = set(connection.execute(catalog).all())
             connection.execute(text(f'CREATE SCHEMA "{schema}"'))
             connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+            # 015 creates/grants an application role: use a throwaway name (rolled back) so the real one is never touched.
+            connection.execute(text(f"SET LOCAL zm.app_role = 'zm_contract_{uuid4().hex[:12]}'"))
             for migration in sorted(init.glob("*.sql")):
                 connection.execute(text(migration.read_text()))
             for statement in extra_sql:
