@@ -77,7 +77,7 @@ describe("EnergyGenerationDetail", () => {
     const names = within(screen.getByLabelText("Station generation")).getAllByRole("button").map((b) => b.textContent);
     expect(names).toEqual(["Alpha", "Beta", "Gamma", "Delta & Co"]);
     expect(screen.getAllByText(/rights_status = other_state/).length).toBeGreaterThan(0);
-    expect(screen.getByText("LOCAL / INTERNAL · RIGHTS REVIEW REQUIRED")).toBeTruthy();
+    expect(screen.getByText("LOCAL / INTERNAL · RIGHTS STATUS")).toBeTruthy();
   });
 
   it("loads the first station by default and the exact selected identity on click", async () => {
@@ -108,7 +108,9 @@ describe("EnergyGenerationDetail", () => {
     cleanup();
     routes["/api/v1/energy/generation/history"] = (p) => json(history(p.get("station_group")!, p.get("station_name")!, [hpoint(2029, null), hpoint(2030, "1.00")]));
     render(<EnergyGenerationDetail state={ready()} onRefresh={() => {}} />);
-    expect(await screen.findByText(/Only one reported year/)).toBeTruthy();
+    expect(await screen.findByText(/Single reported observation: no line is drawn/)).toBeTruthy();
+    expect(screen.queryByLabelText(/Alpha annual generation/)).toBeNull();
+    expect(screen.getByText("1.00")).toBeTruthy();
   });
 
   it("keeps the rest usable when station history fails or is empty", async () => {
@@ -187,6 +189,50 @@ describe("EnergyGenerationDetail", () => {
     expect(screen.getByRole("button", { name: "Beta" }).getAttribute("aria-pressed")).toBe("true");
     rerender(<EnergyGenerationDetail state={ready(snapshot({ stations: [station("zesco_diesel", "Only", "reported", "1.00")] }))} onRefresh={() => {}} />);
     expect(screen.getByRole("button", { name: "Only" }).getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+describe("refresh, rights and empty-result regressions", () => {
+  const stations2 = () => snapshot({ stations: [station("zesco_large_hydro", "Alpha", "reported", "1.00"), station("zesco_large_hydro", "Beta", "reported", "2.00")] });
+  const sel = (name: string) => screen.getByRole("button", { name }).getAttribute("aria-pressed");
+
+  it("keeps Beta selected through a real loading/refreshing transition", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<EnergyGenerationDetail state={ready(stations2())} onRefresh={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "Beta" }));
+    expect(sel("Beta")).toBe("true");
+    const prev = ready(stations2());
+    rerender(<EnergyGenerationDetail state={{ ...prev, refreshing: true } as EnergyState} onRefresh={() => {}} />);
+    expect(sel("Beta")).toBe("true");
+    rerender(<EnergyGenerationDetail state={{ status: "loading" }} onRefresh={() => {}} />);
+    rerender(<EnergyGenerationDetail state={{ status: "error", message: "x" }} onRefresh={() => {}} />);
+    rerender(<EnergyGenerationDetail state={ready(stations2())} onRefresh={() => {}} />);
+    expect(sel("Beta")).toBe("true");
+  });
+  it("falls back to the first station when the selection disappears, and clears on an empty snapshot", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<EnergyGenerationDetail state={ready(stations2())} onRefresh={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "Beta" }));
+    rerender(<EnergyGenerationDetail state={ready(snapshot({ stations: [station("zesco_diesel", "Only", "reported", "1.00")] }))} onRefresh={() => {}} />);
+    expect(sel("Only")).toBe("true");
+    rerender(<EnergyGenerationDetail state={{ status: "ready", data: { snapshot: null } }} onRefresh={() => {}} />);
+    rerender(<EnergyGenerationDetail state={ready(stations2())} onRefresh={() => {}} />);
+    expect(sel("Alpha")).toBe("true"); // cleared by the empty snapshot, so the first station is picked again
+  });
+  it("uses the review heading only for review_required and a neutral one otherwise", () => {
+    const { unmount } = render(<EnergyGenerationDetail state={ready()} onRefresh={() => {}} />);
+    expect(screen.getByText("LOCAL / INTERNAL · RIGHTS REVIEW REQUIRED")).toBeTruthy();
+    unmount();
+    render(<EnergyGenerationDetail state={ready(snapshot({ rights_status: "restricted" }))} onRefresh={() => {}} />);
+    expect(screen.getByText("LOCAL / INTERNAL · RIGHTS STATUS")).toBeTruthy();
+    expect(screen.queryByText(/RIGHTS REVIEW REQUIRED/)).toBeNull();
+    expect(screen.getAllByText(/rights_status = restricted\. Public redistribution is not represented as cleared by this interface/).length).toBeGreaterThan(0);
+  });
+  it("never renders null for an empty group history's rights", async () => {
+    routes["/api/v1/energy/generation/group-history"] = (p) => json({ ...ghistory(p.get("station_group")!, []), rights_status: null });
+    render(<EnergyGenerationDetail state={ready()} onRefresh={() => {}} />);
+    expect(await screen.findByText(/No publication rights state is available for this empty result/)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/null|undefined/);
   });
 });
 

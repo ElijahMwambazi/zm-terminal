@@ -292,7 +292,7 @@ th { text-align: left; color: #8c8c8c; font-weight: normal; padding: 6px 4px; }
 .energy-total-label { color: #ffb000; font-size: 0.7rem; }
 .energy-short { display: none; }
 .energy-wrap { overflow-wrap: anywhere; }
-.energy-station { max-width: 260px; white-space: normal !important; }
+.energy-station { min-width: 150px; max-width: 260px; white-space: normal !important; }
 .energy-pick { text-align: left; min-height: 32px; overflow-wrap: anywhere; }
 .energy-pick[aria-pressed="true"] { color: #f2f2f2; }
 @media (max-width: 1000px) { .energy-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -302,3 +302,4 @@ th { text-align: left; color: #8c8c8c; font-weight: normal; padding: 6px 4px; }
   .energy-pick { min-height: 40px; }
   .energy-total { padding: 10px 12px; }
 }
+.energy-readout { padding: 6px 16px; color: #f2f2f2; font-size: 0.85rem; overflow-wrap: anywhere; }

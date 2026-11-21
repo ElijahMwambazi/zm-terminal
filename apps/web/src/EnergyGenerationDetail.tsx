@@ -14,8 +14,11 @@ const message = (e: unknown) => (e instanceof ApiError ? e.message : "History un
 /** Exact stored string (never reformatted) with its unit; a reported 0.00 stays "0.00 GWh". */
 export const gwh = (value: string) => `${value} GWh`;
 export function rightsText(status: string) {
-  return `Stored ERB data. rights_status = ${status}. Public redistribution is not represented as cleared.`;
+  return `Stored ERB data. rights_status = ${status}. Public redistribution is not represented as cleared by this interface.`;
 }
+/** Only the exact stored state review_required gets the review wording; any other value is shown neutrally. */
+export const rightsHeading = (status: string) =>
+  status === "review_required" ? "LOCAL / INTERNAL · RIGHTS REVIEW REQUIRED" : "LOCAL / INTERNAL · RIGHTS STATUS";
 
 function useStationHistory(sel: Selected | null) {
   const [state, setState] = useState<Load<EnergyGenerationHistory>>({ status: "loading" });
@@ -58,7 +61,9 @@ const EnergyGenerationDetail = forwardRef<HTMLElement, { state: EnergyState; onR
     const [groupPick, setGroupPick] = useState<EnergyStationGroup | null>(null);
 
     // Keep the exact (group, name) identity across refreshes; otherwise fall back to the first station.
+    // Reconcile only after a successful latest response: loading/refreshing/error never reset the identity.
     useEffect(() => {
+      if (state.status !== "ready") return;
       setSelected((prev) => {
         const stations = snapshot?.stations ?? [];
         if (stations.length === 0) return null;
@@ -66,7 +71,7 @@ const EnergyGenerationDetail = forwardRef<HTMLElement, { state: EnergyState; onR
         const pick = keep ?? stations[0];
         return keep && prev ? prev : { group: pick.station_group, name: pick.station_name };
       });
-    }, [snapshot]);
+    }, [state, snapshot]);
 
     const group = groupPick ?? selected?.group ?? ENERGY_STATION_GROUPS[0];
     const stationHistory = useStationHistory(snapshot ? selected : null);
@@ -77,8 +82,8 @@ const EnergyGenerationDetail = forwardRef<HTMLElement, { state: EnergyState; onR
       <article className="panel detail-panel" ref={ref} tabIndex={-1} aria-label="Electricity generation detail">
         <div className="panel-heading">
           <span>POWER ZM · ELECTRICITY GENERATION <span className="muted">ERB · ANNUAL · STORED</span></span>
-          <button type="button" className="link-button" onClick={onRefresh} disabled={state.status === "loading"} title="Re-reads stored data; nothing is fetched from ERB">
-            {state.status === "loading" ? "LOADING…" : "RE-READ STORED"}
+          <button type="button" className="link-button" onClick={onRefresh} disabled={state.status === "loading" || (state.status === "ready" && !!state.refreshing)} title="Re-reads stored data; nothing is fetched from ERB">
+            {state.status === "loading" || (state.status === "ready" && state.refreshing) ? "LOADING…" : "RE-READ STORED"}
           </button>
         </div>
         <div className="detail-body">
@@ -165,7 +170,7 @@ const EnergyGenerationDetail = forwardRef<HTMLElement, { state: EnergyState; onR
               </section>
 
               <section aria-label="Source and rights">
-                <div className="panel-heading"><span>SOURCE · RIGHTS</span><span className="muted">LOCAL / INTERNAL · RIGHTS REVIEW REQUIRED</span></div>
+                <div className="panel-heading"><span>SOURCE · RIGHTS</span><span className="muted">{rightsHeading(snapshot.rights_status)}</span></div>
                 <p className="notice">{rightsText(snapshot.rights_status)}</p>
                 <ul className="provenance">
                   <li><span>Source</span><a href={snapshot.source_url} target="_blank" rel="noreferrer" className="energy-wrap">{snapshot.source_url}</a></li>
@@ -191,8 +196,8 @@ function HistoryBody({ h }: { h: EnergyGenerationHistory }) {
         {h.count} stored years, {h.observations[0].observation_year} to {h.observations[h.count - 1].observation_year}. {rightsText(h.rights_status)}
       </p>
       {reported === 0 && <p className="notice">No reported values: every stored year is not reported (printed as a dash in the source).</p>}
-      {reported === 1 && <p className="notice">Only one reported year; there is no line to draw.</p>}
-      {reported > 0 && <EnergyAnnualChart points={points} label={`${h.station_name} annual generation, GWh; years not reported are gaps`} />}
+      {reported === 1 && <p className="notice">Single reported observation: no line is drawn. See the annual table below.</p>}
+      {reported > 1 && <EnergyAnnualChart points={points} label={`${h.station_name} annual generation, GWh; years not reported are gaps`} />}
       <details className="monthly-source" open>
         <summary>Annual values and provenance</summary>
         <div className="table-scroll monthly-table-scroll">
@@ -217,13 +222,14 @@ function HistoryBody({ h }: { h: EnergyGenerationHistory }) {
 
 function GroupBody({ h }: { h: EnergyGenerationGroupHistory }) {
   const points = useMemo(() => h.observations.map((p) => ({ year: p.observation_year, value: p.total_gwh })), [h]);
-  if (h.observations.length === 0) return <p className="notice">No stored published totals for {ENERGY_GROUP_LABEL[h.station_group]}.</p>;
+  if (h.observations.length === 0) return <p className="notice">No stored published totals for {ENERGY_GROUP_LABEL[h.station_group]}. No publication rights state is available for this empty result.</p>;
   return (
     <>
       <p className="notice">
         {h.count} stored years, {h.observations[0].observation_year} to {h.observations[h.count - 1].observation_year}. Published ERB totals, not calculated from stations.
         {h.rights_status ? ` ${rightsText(h.rights_status)}` : ""}
       </p>
+      {h.count === 1 && <p className="notice">Single published observation: no line is drawn. See the table below.</p>}
       {h.count > 1 && <EnergyAnnualChart points={points} label={`${ENERGY_GROUP_LABEL[h.station_group]} published annual total, GWh`} color="#7cc4ff" />}
       <details className="monthly-source" open>
         <summary>Published totals and provenance</summary>
