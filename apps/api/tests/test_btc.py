@@ -446,6 +446,8 @@ def test_btc_usd_latest_maps_upstream_errors(api):
 
 
 def test_btc_zmw_latest_success_uses_stored_fx_only(api):
+    # Keep the stored FX leg within the unchanged 96-hour freshness window regardless of the calendar date the suite runs.
+    api["fx"] = fx(observed=datetime.now(UTC) - timedelta(hours=22))
     body = client.get("/api/v1/btc/zmw/latest").json()
     assert body["classification"] == "derived" and body["derived"] is True and body["symbol"] == "BTCZMW"
     assert Decimal(body["btc_zmw"]) == Decimal(body["btc_usd_last"]) * Decimal(body["usd_zmw_mid"])
