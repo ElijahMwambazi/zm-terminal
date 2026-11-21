@@ -147,13 +147,13 @@ Keep installed capacity, actual generation, consumption, demand, contracted impo
 
 Existing ERB petroleum coverage forms part of this broader energy domain.
 
-Energy backend Phase 1 (complete; frontend is the immediate next step): `docs/research/zambia-energy-data-sources.md` assesses the ERB Statistical Bulletin and Energy Sector Report as the strongest canonical-source candidates (annual only; SAPP, Ministry of Energy, ZESCO and the Zambia Statistics Agency not yet assessed in depth).
+Energy Phase 1 (complete: backend and frontend): `docs/research/zambia-energy-data-sources.md` assesses the ERB Statistical Bulletin and Energy Sector Report as the strongest canonical-source candidates (annual only; SAPP, Ministry of Energy, ZESCO and the Zambia Statistics Agency not yet assessed in depth).
 
 **Completed backend:** a tested, fail-closed parser for annual generation by station from the pinned ERB 2025 Statistical Bulletin Tables 13-16; vintage-aware canonical storage (migration `db/init/014_energy_generation_vintages.sql`, six tables and two views, designed in `docs/design/energy-generation-storage-vintages.md`, applied to the local database); limited application-role grants (migration 015: the API role cannot truncate, drop or alter Energy history); the storage importer service and manual import CLI; the controlled real import; and the stored-only read API (`/api/v1/energy/generation/latest`, `/history`, `/group-history`).
 
 **Current real dataset:** ERB 2025 Annual Statistical Bulletin, 30 stations, 390 station/year observations, 52 published group totals, 2013-2025 (publication revision 1, import sequence 1). Rights remain `review_required`: local/internal use only.
 
-**Immediate next step: Energy frontend / terminal experience** (before another major dataset vertical such as Commercial Bank FX). Scope: a `POWER ZM` view (optional `ENERGY ZM` / `GENERATION ZM` aliases) with a latest publication/year overview, published group totals, a station list, station history and group history charts, source/provenance, a local/internal rights notice, an Energy dashboard entry and a responsive/mobile layout. Not started. It needs none of the Phase 2 items below.
+**Completed frontend:** the `POWER ZM` terminal view (aliases `ENERGY ZM`, `GENERATION ZM`) with a dashboard card, latest publication/year overview, published group totals, station table, station and group annual history charts, provenance, a local/internal rights notice and a responsive layout. Energy Phase 1 is complete end to end. **Next major vertical: Commercial Bank USD/ZMW Rates** (not started).
 
 **Later Energy Phase 2 (not required for the first frontend):** installed generation capacity; electricity consumption; peak demand (annual-peak and all-time-peak definitions differ, so canonicalization is deferred); electricity imports and exports; contracted versus delivered imports; generation-mix analytics; power-generation/mining analytics; a reliable load-shedding history; water/reservoir data; power infrastructure and projects; an official source-replacement workflow; a reviewed local import-correction workflow; and public-rights approval.
 

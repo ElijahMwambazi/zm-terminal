@@ -869,3 +869,195 @@ export async function getCopperKwachaSensitivity(range: CopperRange): Promise<Co
   if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
   return response.json();
 }
+
+/* ---------- Energy: stored ERB annual generation (Phase 1; local/internal, rights review_required) ----------
+ * Values are plain-decimal GWh strings, kept exactly as the API sends them. Responses are validated at runtime and rejected whole. */
+export const ENERGY_STATION_GROUPS = ["zesco_large_hydro", "zesco_mini_hydro", "zesco_diesel", "independent_power_producer"] as const;
+export type EnergyStationGroup = (typeof ENERGY_STATION_GROUPS)[number];
+export const ENERGY_GROUP_LABEL: Record<EnergyStationGroup, string> = {
+  zesco_large_hydro: "ZESCO LARGE HYDRO",
+  zesco_mini_hydro: "ZESCO MINI HYDRO",
+  zesco_diesel: "ZESCO DIESEL",
+  independent_power_producer: "INDEPENDENT POWER PRODUCERS",
+};
+export const ENERGY_GROUP_SHORT: Record<EnergyStationGroup, string> = {
+  zesco_large_hydro: "LARGE HYDRO",
+  zesco_mini_hydro: "MINI HYDRO",
+  zesco_diesel: "DIESEL",
+  independent_power_producer: "IPPs",
+};
+export type EnergyValueState = "reported" | "not_reported";
+type EnergyCell = {
+  value_state: EnergyValueState;
+  generation_gwh: string | null;
+  published_precision: number | null;
+  source_table: string;
+  source_pdf_page: number;
+  source_printed_page: number;
+};
+export type EnergyGenerationObservation = EnergyCell & { station_group: EnergyStationGroup; station_name: string; observation_year: number };
+export type EnergyGenerationGroupTotal = {
+  station_group: EnergyStationGroup; observation_year: number; total_gwh: string; published_precision: number;
+  source_table: string; source_pdf_page: number; source_printed_page: number;
+};
+export type EnergyGenerationSnapshot = {
+  publisher: string; source_series: string; publication_year: number; revision_sequence: number; title: string;
+  cover_date: string | null; source_url: string; rights_status: string; observation_year: number;
+  stations: EnergyGenerationObservation[]; group_totals: EnergyGenerationGroupTotal[];
+};
+export type EnergyGenerationLatest = { snapshot: EnergyGenerationSnapshot | null };
+export type EnergyGenerationHistoryPoint = EnergyCell & { observation_year: number; publication_year: number; revision_sequence: number };
+export type EnergyGenerationHistory = {
+  station_group: EnergyStationGroup; station_name: string; count: number; rights_status: string; observations: EnergyGenerationHistoryPoint[];
+};
+export type EnergyGenerationGroupHistoryPoint = {
+  station_group: EnergyStationGroup; observation_year: number; total_gwh: string; published_precision: number;
+  publication_year: number; revision_sequence: number; source_table: string; source_pdf_page: number; source_printed_page: number;
+};
+export type EnergyGenerationGroupHistory = {
+  station_group: EnergyStationGroup; count: number; rights_status: string | null; observations: EnergyGenerationGroupHistoryPoint[];
+};
+
+class EnergyShapeError extends Error {}
+const bad = (what: string): never => { throw new EnergyShapeError(what); };
+const rec = (v: unknown, what: string): Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : bad(what);
+const str = (v: unknown, what: string): string => (typeof v === "string" ? v : bad(what));
+const int = (v: unknown, what: string, min = 0): number => (typeof v === "number" && Number.isInteger(v) && v >= min ? v : bad(what));
+const arr = (v: unknown, what: string): unknown[] => (Array.isArray(v) ? v : bad(what));
+const PLAIN_DECIMAL = /^[0-9]+(\.[0-9]+)?$/;
+const decimal = (v: unknown, what: string): string => (typeof v === "string" && PLAIN_DECIMAL.test(v) ? v : bad(what));
+const group = (v: unknown): EnergyStationGroup =>
+  (ENERGY_STATION_GROUPS as readonly unknown[]).includes(v) ? (v as EnergyStationGroup) : bad("station_group");
+
+function cell(o: Record<string, unknown>): EnergyCell {
+  const state = o.value_state;
+  if (state !== "reported" && state !== "not_reported") bad("value_state");
+  const gwh = o.generation_gwh ?? null;
+  const precision = o.published_precision ?? null;
+  if (state === "reported") {
+    decimal(gwh, "generation_gwh"); int(precision, "published_precision");
+  } else if (gwh !== null || precision !== null) bad("not_reported cell carries a value");
+  return {
+    value_state: state as EnergyValueState, generation_gwh: gwh as string | null, published_precision: precision as number | null,
+    source_table: str(o.source_table, "source_table"), source_pdf_page: int(o.source_pdf_page, "source_pdf_page", 1),
+    source_printed_page: int(o.source_printed_page, "source_printed_page", 1),
+  };
+}
+
+export function parseEnergyLatest(raw: unknown): EnergyGenerationLatest {
+  const top = rec(raw, "latest");
+  if (top.snapshot === null) return { snapshot: null };
+  const s = rec(top.snapshot, "snapshot");
+  const year = int(s.observation_year, "observation_year");
+  const seen = new Set<string>();
+  const stations = arr(s.stations, "stations").map((item) => {
+    const o = rec(item, "station");
+    const out: EnergyGenerationObservation = {
+      ...cell(o), station_group: group(o.station_group), station_name: str(o.station_name, "station_name"),
+      observation_year: int(o.observation_year, "observation_year"),
+    };
+    if (out.observation_year !== year) bad("station year mismatch");
+    const key = JSON.stringify([out.station_group, out.station_name]);
+    if (seen.has(key)) bad("duplicate station");
+    seen.add(key);
+    return out;
+  });
+  const totalGroups = new Set<string>();
+  const group_totals = arr(s.group_totals, "group_totals").map((item) => {
+    const o = rec(item, "group total");
+    const out: EnergyGenerationGroupTotal = {
+      station_group: group(o.station_group), observation_year: int(o.observation_year, "observation_year"),
+      total_gwh: decimal(o.total_gwh, "total_gwh"), published_precision: int(o.published_precision, "published_precision"),
+      source_table: str(o.source_table, "source_table"), source_pdf_page: int(o.source_pdf_page, "source_pdf_page", 1),
+      source_printed_page: int(o.source_printed_page, "source_printed_page", 1),
+    };
+    if (out.observation_year !== year) bad("total year mismatch");
+    if (totalGroups.has(out.station_group)) bad("duplicate group total");
+    totalGroups.add(out.station_group);
+    return out;
+  });
+  return {
+    snapshot: {
+      publisher: str(s.publisher, "publisher"), source_series: str(s.source_series, "source_series"),
+      publication_year: int(s.publication_year, "publication_year"), revision_sequence: int(s.revision_sequence, "revision_sequence", 1),
+      title: str(s.title, "title"), cover_date: s.cover_date === null ? null : str(s.cover_date, "cover_date"),
+      source_url: str(s.source_url, "source_url"), rights_status: str(s.rights_status, "rights_status"),
+      observation_year: year, stations, group_totals,
+    },
+  };
+}
+
+function ascending(years: number[]) {
+  for (let i = 1; i < years.length; i++) if (years[i] <= years[i - 1]) bad("years not strictly ascending");
+}
+
+export function parseEnergyHistory(raw: unknown): EnergyGenerationHistory {
+  const o = rec(raw, "history");
+  const observations = arr(o.observations, "observations").map((item): EnergyGenerationHistoryPoint => {
+    const p = rec(item, "point");
+    return {
+      ...cell(p), observation_year: int(p.observation_year, "observation_year"),
+      publication_year: int(p.publication_year, "publication_year"), revision_sequence: int(p.revision_sequence, "revision_sequence", 1),
+    };
+  });
+  if (int(o.count, "count") !== observations.length) bad("count mismatch");
+  ascending(observations.map((p) => p.observation_year));
+  return {
+    station_group: group(o.station_group), station_name: str(o.station_name, "station_name"), count: observations.length,
+    rights_status: str(o.rights_status, "rights_status"), observations,
+  };
+}
+
+export function parseEnergyGroupHistory(raw: unknown, expected?: EnergyStationGroup): EnergyGenerationGroupHistory {
+  const o = rec(raw, "group history");
+  const g = group(o.station_group);
+  if (expected && g !== expected) bad("group mismatch");
+  const observations = arr(o.observations, "observations").map((item): EnergyGenerationGroupHistoryPoint => {
+    const p = rec(item, "point");
+    const out = {
+      station_group: group(p.station_group), observation_year: int(p.observation_year, "observation_year"),
+      total_gwh: decimal(p.total_gwh, "total_gwh"), published_precision: int(p.published_precision, "published_precision"),
+      publication_year: int(p.publication_year, "publication_year"), revision_sequence: int(p.revision_sequence, "revision_sequence", 1),
+      source_table: str(p.source_table, "source_table"), source_pdf_page: int(p.source_pdf_page, "source_pdf_page", 1),
+      source_printed_page: int(p.source_printed_page, "source_printed_page", 1),
+    };
+    if (out.station_group !== g) bad("point group mismatch");
+    return out;
+  });
+  if (int(o.count, "count") !== observations.length) bad("count mismatch");
+  ascending(observations.map((p) => p.observation_year));
+  return {
+    station_group: g, count: observations.length,
+    rights_status: o.rights_status === null ? null : str(o.rights_status, "rights_status"), observations,
+  };
+}
+
+/** Station-history 404 is a distinct state; 503 is the stored-data outage. Raw server text is never shown. */
+export class EnergyNotFoundError extends ApiError {
+  constructor() { super("api", "No stored ERB generation history for that station"); }
+}
+
+async function getEnergyJson<T>(path: string, parse: (raw: unknown) => T): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`);
+  } catch {
+    throw new ApiError("api", "ZM Terminal API is unreachable");
+  }
+  if (response.status === 503) throw new ApiError("api", "Stored ERB generation data is unavailable (database)");
+  if (response.status === 404) throw new EnergyNotFoundError();
+  if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
+  try {
+    return parse(await response.json());
+  } catch {
+    throw new ApiError("api", "ZM Terminal API returned an invalid Energy response");
+  }
+}
+
+export const getEnergyGenerationLatest = () => getEnergyJson("/api/v1/energy/generation/latest", parseEnergyLatest);
+export const getEnergyStationHistory = (stationGroup: EnergyStationGroup, stationName: string) =>
+  getEnergyJson(`/api/v1/energy/generation/history?${new URLSearchParams({ station_group: stationGroup, station_name: stationName })}`, parseEnergyHistory);
+export const getEnergyGroupHistory = (stationGroup: EnergyStationGroup) =>
+  getEnergyJson(`/api/v1/energy/generation/group-history?${new URLSearchParams({ station_group: stationGroup })}`,
+    (raw) => parseEnergyGroupHistory(raw, stationGroup));
