@@ -198,6 +198,28 @@ SELECT pg_has_role(current_user, :'admin', 'USAGE');                      -- f: 
 SQL
 docker compose exec -T api python -c "from sqlalchemy import text; from app.db import get_engine; print(get_engine().connect().execute(text('SELECT current_user, current_database()')).one())"
 ```
+### ERB generation import (controlled, manual; local/internal only, not yet performed)
+
+The Energy generation importer is a manual job around the pinned ERB 2025 Annual Statistical Bulletin. It reads **only a local PDF you deliberately provide** (it never downloads anything), verifies the pinned size and SHA-256, parses it and validates it before any database access, prints only counts and statuses, and writes through the limited application role. Do not commit the PDF; rights status is `review_required`. Nothing below has been run against the normal database: no real ERB data is imported and migration 014 is not applied to it.
+
+*Admin/owner step* (existing volume; run once, then again after any later migration):
+
+```
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 --single-transaction' < db/init/014_energy_generation_vintages.sql
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 --single-transaction' < db/init/015_application_role.sql   # grants the application role the new Energy objects
+```
+
+*Application-role steps* (the PDF must be mounted or copied into the container for this operation, for example `docker compose cp statBullet2025.pdf api:/tmp/statBullet2025.pdf`; `--pdf` is a path inside the container):
+
+```
+docker compose exec api python -m app.jobs.import_erb_generation --pdf /tmp/statBullet2025.pdf --dry-run             # verify + parse + validate; no database
+docker compose exec api python -m app.jobs.import_erb_generation --pdf /tmp/statBullet2025.pdf --register-candidate   # pending source candidate (idempotent)
+docker compose exec api python -m app.jobs.import_erb_generation --pdf /tmp/statBullet2025.pdf --import               # atomic first import (needs the candidate)
+docker compose exec api python -m app.jobs.import_erb_generation --pdf /tmp/statBullet2025.pdf --import               # must report status=already_present
+```
+
+Exactly one action flag is required. Failures (changed file, missing candidate, schema not migrated, same-SHA conflict) exit non-zero and write nothing; a generic database error prints only its exception type. Registering never imports, and importing never registers. There is still no Energy API or frontend.
+
 Offline tests use a small sanitized JSON fixture with altered test values, a preserved upstream structure, and mocked HTTP; they require neither BoZ access, PostgreSQL, nor OpenBB. Run `cd apps/api && python -m pytest` (or the existing Docker-based `make api-test`).
 
 ## Implemented terminal commands
