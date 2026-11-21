@@ -27,6 +27,8 @@ import { useGovernmentBonds } from "./useGovernmentBonds";
 import { useTreasuryBills } from "./useTreasuryBills";
 import UsdZmwDetail, { QuoteBlock, quoteProblem } from "./UsdZmwDetail";
 import { useUsdZmwQuote } from "./useUsdZmwQuote";
+import EnergyGenerationDetail from "./EnergyGenerationDetail";
+import { useEnergyGeneration } from "./useEnergyGeneration";
 
 type MarketCard = {
   label: string;
@@ -46,11 +48,12 @@ export default function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [command, setCommand] = useState("");
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | "oil-zm" | "yield-curve" | "btc-usd" | "btc-zmw" | "copper" | "copper-zm" | "copper-fx" | null>(null);
+  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | "oil-zm" | "yield-curve" | "btc-usd" | "btc-zmw" | "copper" | "copper-zm" | "copper-fx" | "energy" | null>(null);
   const [oilFocus, setOilFocus] = useState<OilBenchmark | null>(null);
   const [oilNavigationKey, setOilNavigationKey] = useState(0);
   const { state: oilState, refresh: refreshOil } = useOil();
   const { state: oilZmState, refresh: refreshOilZm } = useOilZm();
+  const { state: energyState, refresh: refreshEnergy } = useEnergyGeneration();
   const { state: copperState, refresh: refreshCopper } = useCopper();
   const { state: copperZmState, refresh: refreshCopperZm } = useCopperZm();
   const { state: btcUsdState, refresh: refreshBtcUsd } = useBtcUsd();
@@ -145,6 +148,11 @@ export default function App() {
     requestAnimationFrame(() => detailRef.current?.focus());
   };
 
+  const openEnergy = () => {
+    setDetail("energy");
+    requestAnimationFrame(() => detailRef.current?.focus());
+  };
+
   const openBtcUsd = () => {
     setDetail("btc-usd");
     requestAnimationFrame(() => detailRef.current?.focus());
@@ -170,6 +178,7 @@ export default function App() {
     else if (result.action.type === "open-copper") openCopper();
     else if (result.action.type === "open-copper-zm") openCopperZm();
     else if (result.action.type === "open-copper-fx") openCopperFx();
+    else if (result.action.type === "open-energy") openEnergy();
     else if (result.action.type === "open-btc-usd") openBtcUsd();
     else if (result.action.type === "open-btc-zmw") openBtcZmw();
     else openAgriculture(result.action.commodity);
@@ -186,6 +195,7 @@ export default function App() {
   const maize = agricultureState.status === "ready" ? agricultureState.data.prices.find((p) => p.commodity === "MAIZE") : undefined;
   const copperObservation = copperState.status === "ready" ? copperState.data.observation : null;
   const brent = oilState.status === "ready" ? oilState.data.observations.find((o) => o.benchmark === "BRENT") : undefined;
+  const energySnapshot = energyState.status === "ready" ? energyState.data.snapshot : null;
   const tbillSkipped = tbillState.status === "ready" ? tbillState.data.skipped_tenders : [];
 
   const now = useMemo(
@@ -213,7 +223,7 @@ export default function App() {
         <span><StatusDot ok={status?.api} /> API</span>
         <span><StatusDot ok={status?.database} /> POSTGRES</span>
         <span><StatusDot ok={status?.openbb} /> OPENBB</span>
-        <span className="status-note">v0.1 — USD/ZMW, BoZ fixed income, ERB fuel, Ministry agriculture averages, and global oil and copper monthly benchmarks</span>
+        <span className="status-note">v0.1 — USD/ZMW, BoZ fixed income, ERB fuel, Ministry agriculture averages, global oil and copper monthly benchmarks, and ERB annual electricity generation</span>
       </section>
 
       <section className="market-grid" aria-label="Market overview">
@@ -343,6 +353,16 @@ export default function App() {
             {btcZmwState.status === "ready" && <><br /><span className={btcZmwState.quote.derived_stale ? "text-stale" : undefined}>BTC {formatAge(btcZmwState.quote.btc_age_seconds)} old · BoZ FX {formatAge(btcZmwState.quote.fx_age_seconds)} old{btcZmwState.quote.derived_stale ? " (stale)" : ""}</span></>}
           </small>
         </button>
+        <button type="button" className="market-card market-card--live" onClick={openEnergy}>
+          <span className="market-label">POWER ZM</span>
+          <strong>{energySnapshot ? energySnapshot.observation_year : energyState.status === "loading" ? "…" : "—"}</strong>
+          <small>
+            {energyState.status === "loading" && "Loading stored ERB generation…"}
+            {energyState.status === "error" && "Stored Energy data unavailable"}
+            {energyState.status === "ready" && !energySnapshot && "No stored ERB generation"}
+            {energySnapshot && <>ERB GENERATION · {energySnapshot.stations.length} STATIONS · {energySnapshot.group_totals.length} PUBLISHED GROUP TOTALS<br /><span className="muted">Local/internal · rights {energySnapshot.rights_status}</span></>}
+          </small>
+        </button>
         {markets.map((market) => (
           <article className="market-card" key={market.label}>
             <span className="market-label">{market.label}</span>
@@ -367,6 +387,8 @@ export default function App() {
           <BtcUsdDetail ref={detailRef} state={btcUsdState} onRefresh={refreshBtcUsd} />
         ) : detail === "btc-zmw" ? (
           <BtcZmwDetail ref={detailRef} state={btcZmwState} onRefresh={refreshBtcZmw} />
+        ) : detail === "energy" ? (
+          <EnergyGenerationDetail ref={detailRef} state={energyState} onRefresh={refreshEnergy} />
         ) : detail === "copper-fx" ? (
           <CopperKwachaDetail ref={detailRef} />
         ) : detail === "copper-zm" ? (
@@ -382,7 +404,7 @@ export default function App() {
         ) : (
           <article className="panel">
             <div className="panel-heading"><span>WORKSPACE</span></div>
-            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, <code>OIL</code> for global Brent and WTI monthly benchmarks, <code>OIL ZM</code> for the derived Brent-in-kwacha view, <code>CURVE ZM</code> for the sovereign auction yield curve, <code>COPPER</code> for the global IMF Copper monthly benchmark, <code>COPPER ZM</code> for the derived Copper-in-kwacha view, <code>COPPER FX</code> for the Copper–Kwacha comparison, <code>BTC</code> for Bitstamp BTC/USD, or <code>BTC ZMW</code> for the indicative derived BTC/ZMW.</p>
+            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, <code>OIL</code> for global Brent and WTI monthly benchmarks, <code>OIL ZM</code> for the derived Brent-in-kwacha view, <code>CURVE ZM</code> for the sovereign auction yield curve, <code>COPPER</code> for the global IMF Copper monthly benchmark, <code>COPPER ZM</code> for the derived Copper-in-kwacha view, <code>COPPER FX</code> for the Copper–Kwacha comparison, <code>BTC</code> for Bitstamp BTC/USD, <code>BTC ZMW</code> for the indicative derived BTC/ZMW, or <code>POWER ZM</code> for stored ERB electricity generation.</p>
           </article>
         )}
 
