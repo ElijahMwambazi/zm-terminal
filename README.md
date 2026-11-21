@@ -198,9 +198,9 @@ SELECT pg_has_role(current_user, :'admin', 'USAGE');                      -- f: 
 SQL
 docker compose exec -T api python -c "from sqlalchemy import text; from app.db import get_engine; print(get_engine().connect().execute(text('SELECT current_user, current_database()')).one())"
 ```
-### ERB generation import (controlled, manual; local/internal only, not yet performed)
+### ERB generation import (controlled, manual; local/internal only; performed once on the local database)
 
-The Energy generation importer is a manual job around the pinned ERB 2025 Annual Statistical Bulletin. It reads **only a local PDF you deliberately provide** (it never downloads anything), verifies the pinned size and SHA-256, parses it and validates it before any database access, prints only counts and statuses, and writes through the limited application role. Do not commit the PDF; rights status is `review_required`. Nothing below has been run against the normal database: no real ERB data is imported and migration 014 is not applied to it.
+The Energy generation importer is a manual job around the pinned ERB 2025 Annual Statistical Bulletin. It reads **only a local PDF you deliberately provide** (it never downloads anything), verifies the pinned size and SHA-256, parses it and validates it before any database access, prints only counts and statuses, and writes through the limited application role. Do not commit the PDF; rights status is `review_required`. This runbook has been performed once on the local database (the stored data is served by the local/internal read API `GET /api/v1/energy/generation/latest`, `/history` and `/group-history`; rights remain `review_required`). Re-running `--import` reports `already_present`.
 
 *Admin/owner step* (existing volume; run once, then again after any later migration):
 
@@ -218,7 +218,7 @@ docker compose exec api python -m app.jobs.import_erb_generation --pdf /tmp/stat
 docker compose exec api python -m app.jobs.import_erb_generation --pdf /tmp/statBullet2025.pdf --import               # must report status=already_present
 ```
 
-Exactly one action flag is required. Failures (changed file, missing candidate, schema not migrated, same-SHA conflict) exit non-zero and write nothing; a generic database error prints only its exception type. Registering never imports, and importing never registers. There is still no Energy API or frontend.
+Exactly one action flag is required. Failures (changed file, missing candidate, schema not migrated, same-SHA conflict) exit non-zero and write nothing; a generic database error prints only its exception type. Registering never imports, and importing never registers. The stored data is served by the read-only Energy API (`/api/v1/energy/generation/*`); there is no Energy frontend yet.
 
 Offline tests use a small sanitized JSON fixture with altered test values, a preserved upstream structure, and mocked HTTP; they require neither BoZ access, PostgreSQL, nor OpenBB. Run `cd apps/api && python -m pytest` (or the existing Docker-based `make api-test`).
 
