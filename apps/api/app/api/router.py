@@ -12,6 +12,9 @@ from app.schemas.btc import BtcRange, BtcUsdHistory, BtcUsdQuote, BtcZmwHistory,
 from app.schemas.copper import CopperHistory, CopperLatest, CopperRange
 from app.schemas.copper_kwacha import CopperKwachaCorrelation, CopperKwachaSensitivity, CorrelationWindow
 from app.schemas.copper_zm import CopperZmHistory, CopperZmMonth
+from app.schemas.energy import (
+    EnergyGenerationGroupHistory, EnergyGenerationHistory, EnergyGenerationLatest, EnergyStationGroup,
+)
 from app.schemas.fx import FxHistory, FxQuote
 from app.schemas.fx_monthly import FxMonthlyHistory, FxMonthlyRange
 from app.schemas.agriculture import (
@@ -39,6 +42,7 @@ from app.services.agriculture_store import fetch_agriculture_history, fetch_late
 from app.services.bond_store import BondConflictError, fetch_bond_history, save_bond_auctions
 from app.services.boz_bonds import get_boz_bonds, latest_per_tenor as latest_bonds, unverified_tenors
 from app.services.boz_treasury import LUSAKA, get_boz_tbills, latest_per_tenor
+from app.services.energy_generation_read import fetch_group_history, fetch_latest_generation, fetch_station_history
 from app.services.fuel_buildup_store import fetch_build_up
 from app.services.fuel_store import fetch_fuel_history, fetch_latest_fuel
 from app.services.fx_monthly_store import fetch_fx_monthly
@@ -587,3 +591,38 @@ async def openbb_coverage() -> dict:
         return await get_openbb_coverage()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"OpenBB unavailable: {exc}") from exc
+
+
+@router.get("/energy/generation/latest", response_model=EnergyGenerationLatest)
+async def energy_generation_latest() -> EnergyGenerationLatest:
+    """Stored ERB generation, newest year of the newest approved publication (local/internal; rights review_required). PostgreSQL only."""
+    try:
+        return await asyncio.to_thread(fetch_latest_generation)
+    except Exception as exc:
+        logger.warning("Energy generation read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored ERB generation data unavailable") from exc
+
+
+@router.get("/energy/generation/history", response_model=EnergyGenerationHistory)
+async def energy_generation_history(
+    station_group: EnergyStationGroup, station_name: Annotated[str, Query(min_length=1, max_length=200)],
+) -> EnergyGenerationHistory:
+    """Canonical annual history of one exact station identity (group + name; no normalization). Stored data only."""
+    try:
+        history = await asyncio.to_thread(fetch_station_history, station_group, station_name)
+    except Exception as exc:
+        logger.warning("Energy generation history read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored ERB generation data unavailable") from exc
+    if history is None:
+        raise HTTPException(status_code=404, detail="No stored ERB generation history for that station")
+    return history
+
+
+@router.get("/energy/generation/group-history", response_model=EnergyGenerationGroupHistory)
+async def energy_generation_group_history(station_group: EnergyStationGroup) -> EnergyGenerationGroupHistory:
+    """Canonical published group totals per year (never a sum of stations). Stored data only."""
+    try:
+        return await asyncio.to_thread(fetch_group_history, station_group)
+    except Exception as exc:
+        logger.warning("Energy group history read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored ERB generation data unavailable") from exc
