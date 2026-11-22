@@ -1,0 +1,112 @@
+{
+ "jsonapi": {
+  "version": "1.1"
+ },
+ "data": [
+  {
+   "type": "node--commercial_bank_daily_rates",
+   "id": "00000000-0000-4000-8000-0000000000b1",
+   "attributes": {
+    "drupal_internal__nid": 5,
+    "drupal_internal__vid": 6,
+    "title": "SYNTHETIC LEGACY 02-01-30",
+    "created": "2030-01-02T13:36:38+00:00",
+    "changed": "2030-01-02T13:36:46+00:00",
+    "revision_timestamp": "2030-01-02T13:36:46+00:00",
+    "commercial_bank_rates_date": "2030-01-02T15:36:15+02:00",
+    "field_commercial_bank_rates": {
+     "value": {
+      "0": {
+       "0": "\ufeff\u00a002-01-2030",
+       "1": "9:30",
+       "2": "",
+       "3": "",
+       "4": "",
+       "5": "12:30",
+       "6": "",
+       "7": "",
+       "8": "",
+       "9": "15:30",
+       "10": "",
+       "11": "",
+       "12": "",
+       "weight": "0"
+      },
+      "1": {
+       "0": "Bank Name",
+       "1": "Interbank Rates",
+       "2": "",
+       "3": "Retail Rates",
+       "4": "",
+       "5": "Interbank Rates",
+       "6": "",
+       "7": "Retail Rates",
+       "8": "",
+       "9": "Interbank Rates",
+       "10": "",
+       "11": "Retail Rates",
+       "12": "",
+       "weight": "1"
+      },
+      "2": {
+       "0": "",
+       "1": "Buy",
+       "2": "Sell",
+       "3": "Buy",
+       "4": "Sell",
+       "5": "Buy",
+       "6": "Sell",
+       "7": "Buy",
+       "8": "Sell",
+       "9": "Buy",
+       "10": "Sell",
+       "11": "Buy",
+       "12": "Sell",
+       "weight": "2"
+      },
+      "3": {
+       "0": "ALPHA TEST BANK    ",
+       "1": "10.1",
+       "2": "10.25",
+       "3": "10.123",
+       "4": "10.1234",
+       "5": "11.5",
+       "6": "11.60",
+       "7": "11.700",
+       "8": "11.8000",
+       "9": "12.1",
+       "10": "12.2",
+       "11": "12.3",
+       "12": "12.4",
+       "weight": "3"
+      },
+      "4": {
+       "0": "Market Average",
+       "1": "10.1",
+       "2": "10.2",
+       "3": "10.3",
+       "4": "10.4",
+       "5": "",
+       "6": "",
+       "7": "",
+       "8": "",
+       "9": "",
+       "10": "",
+       "11": "",
+       "12": "",
+       "weight": "4"
+      },
+      "caption": "COMMERCIAL BANK RATES"
+     },
+     "format": null,
+     "caption": "COMMERCIAL BANK RATES"
+    }
+   }
+  }
+ ],
+ "links": {
+  "self": {
+   "href": "https://example.test/self"
+  }
+ }
+}

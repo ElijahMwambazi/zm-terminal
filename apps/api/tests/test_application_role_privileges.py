@@ -27,6 +27,8 @@ INIT = Path(__file__).parents[3] / "db/init"
 ENERGY = ("energy_generation_group_totals", "energy_generation_observations", "energy_generation_imports",
           "energy_publication_candidates", "energy_publications", "energy_source_stations")
 ENERGY_VIEWS = ("energy_publication_current_imports", "energy_generation_canonical")
+BANK_FX = ("bank_fx_snapshots", "bank_fx_rates")
+BANK_FX_VIEWS = ("bank_fx_canonical_snapshots",)
 INSUFFICIENT_PRIVILEGE = "42501"
 
 
@@ -504,7 +506,7 @@ def test_existing_fx_application_behaviour_works_as_the_application_role(env):
 def test_application_role_has_the_dml_the_stores_use_on_every_legacy_table_and_no_destructive_privileges(env):
     with env.admin.connect() as c:
         tables = [r[0] for r in c.execute(text(
-            "SELECT tablename FROM pg_tables WHERE schemaname=current_schema() AND tablename NOT LIKE 'energy\\_%'"))]
+            "SELECT tablename FROM pg_tables WHERE schemaname=current_schema() AND tablename NOT LIKE 'energy\\_%' AND tablename NOT LIKE 'bank\\_fx\\_%'"))]
         assert len(tables) >= 14
         for t in tables:
             for priv, expected in (("SELECT", True), ("INSERT", True), ("UPDATE", True), ("DELETE", False), ("TRUNCATE", False),
@@ -515,3 +517,128 @@ def test_application_role_has_the_dml_the_stores_use_on_every_legacy_table_and_n
             c.execute(text(f"SELECT 1 FROM {t} LIMIT 1"))
     denied(env.app, "TRUNCATE fx_rates")
     denied(env.app, "DROP TABLE fx_rates")
+
+
+# ------------------------------------------------------------------------------------------------------------------ Bank FX (017)
+def bank_fx_grants(env):
+    with env.admin.connect() as c:
+        return c.execute(text("SELECT table_name, privilege_type FROM information_schema.role_table_grants WHERE grantee=:r AND table_schema=:s "
+                              "AND table_name LIKE 'bank\\_fx\\_%' ORDER BY 1,2"), {"r": env.role, "s": env.schema}).all()
+
+
+def bank_fx_sequence_privileges(env):
+    with env.admin.connect() as c:
+        return {(seq, priv): one(c, "SELECT has_sequence_privilege(:r, :s, :p)", r=env.role, s=f"{env.schema}.{seq}", p=priv)
+                for seq in ("bank_fx_snapshots_id_seq", "bank_fx_rates_id_seq") for priv in ("USAGE", "SELECT", "UPDATE")}
+
+
+def test_bank_fx_privilege_matrix_on_a_fresh_install(env):  # 015 ran BEFORE 017 here: 017 granted its own new objects
+    def has(priv, table):
+        with env.admin.connect() as c:
+            return one(c, "SELECT has_table_privilege(:r, :t, :p)", r=env.role, t=f"{env.schema}.{table}", p=priv)
+    for table in BANK_FX:
+        assert has("SELECT", table) and has("INSERT", table), table
+        for forbidden in ("UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+            assert not has(forbidden, table), (table, forbidden)
+    for view in BANK_FX_VIEWS:
+        assert has("SELECT", view) and not any(has(p, view) for p in ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"))
+    assert bank_fx_sequence_privileges(env) == {(s, "USAGE"): True for s in ("bank_fx_snapshots_id_seq", "bank_fx_rates_id_seq")} | \
+        {(s, "SELECT"): True for s in ("bank_fx_snapshots_id_seq", "bank_fx_rates_id_seq")} | {(s, "UPDATE"): False for s in ("bank_fx_snapshots_id_seq", "bank_fx_rates_id_seq")}
+    with env.admin.connect() as c:  # column-level grants stay absent too
+        for table, column in (("bank_fx_snapshots", "source_title"), ("bank_fx_rates", "interbank_buy"), ("bank_fx_rates", "institution_name")):
+            assert not one(c, "SELECT has_column_privilege(:r, :t, :col, 'UPDATE')", r=env.role, t=f"{env.schema}.{table}", col=column)
+
+
+def test_bank_fx_objects_are_owned_by_the_admin_role_and_the_application_role_owns_nothing(env):
+    with env.admin.connect() as c:
+        owners = {r[0]: r[1] for r in c.execute(text(
+            "SELECT c.relname, pg_get_userbyid(c.relowner) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+            "WHERE n.nspname=:s AND c.relname LIKE 'bank\\_fx\\_%'"), {"s": env.schema})}
+        fns = {r[0]: r[1] for r in c.execute(text(
+            "SELECT p.proname, pg_get_userbyid(p.proowner) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+            "WHERE n.nspname=:s AND p.proname LIKE 'bank\\_fx\\_%'"), {"s": env.schema})}
+    assert set(BANK_FX + BANK_FX_VIEWS) <= set(owners) and fns
+    assert set(owners.values()) == {env.admin_user} and set(fns.values()) == {env.admin_user}
+
+
+def synthetic_bank_fx(vid=22, text_value="10.0001"):
+    import bank_fx_builders as b
+    from datetime import datetime, timezone
+    from app.services.boz_bank_fx import parse_bank_fx_document
+    banks = b.default_banks()
+    banks[0][1] = text_value
+    return parse_bank_fx_document(b.document(b.node(vid=vid, banks=banks)), retrieved_at=datetime(2030, 1, 3, tzinfo=timezone.utc))
+
+
+def test_the_application_role_can_insert_and_read_a_complete_synthetic_snapshot_through_the_store(env):
+    from app.services.bank_fx_store import save_bank_fx_snapshots
+    assert save_bank_fx_snapshots(synthetic_bank_fx(), engine=env.app).inserted == 1
+    assert save_bank_fx_snapshots(synthetic_bank_fx(), engine=env.app).already_present == 1  # the same-revision comparison reads as the app role
+    assert save_bank_fx_snapshots(synthetic_bank_fx(vid=23), engine=env.app).inserted == 1  # a new revision: a second snapshot
+    with env.app.connect() as c:
+        assert one(c, "SELECT COUNT(*) FROM bank_fx_snapshots") == 2 and one(c, "SELECT COUNT(*) FROM bank_fx_rates") == 18
+        assert one(c, "SELECT COUNT(*) FROM bank_fx_canonical_snapshots") == 1
+
+
+def test_the_application_role_cannot_modify_destroy_or_bypass_bank_fx_history(env):
+    from app.services.bank_fx_store import save_bank_fx_snapshots
+    save_bank_fx_snapshots(synthetic_bank_fx(), engine=env.app)
+    def state():
+        with env.admin.connect() as c:
+            return [one(c, f"SELECT COUNT(*) FROM {t}") for t in BANK_FX]
+    before = state()
+    for table in BANK_FX:
+        denied(env.app, f"TRUNCATE {table}")
+        denied(env.app, f"TRUNCATE {table} CASCADE")
+        denied(env.app, f"DROP TABLE {table}")
+        denied(env.app, f"DROP TABLE {table} CASCADE")
+        denied(env.app, f"ALTER TABLE {table} ADD COLUMN sneaky INTEGER")
+        denied(env.app, f"ALTER TABLE {table} DISABLE TRIGGER ALL")
+        denied(env.app, f"ALTER TABLE {table} OWNER TO {env.role}")
+        denied(env.app, f"DELETE FROM {table}")
+        with env.app.begin() as c:
+            c.execute(text(f"GRANT ALL ON {table} TO {env.role}"))  # only a warning: nothing is granted without a grant option
+    denied(env.app, "UPDATE bank_fx_snapshots SET source_title='x'")
+    denied(env.app, "UPDATE bank_fx_rates SET interbank_buy_text='9.9'")
+    denied(env.app, "DROP TRIGGER bank_fx_rates_immutable ON bank_fx_rates")
+    denied(env.app, "DROP VIEW bank_fx_canonical_snapshots")
+    denied(env.app, "DROP FUNCTION bank_fx_reject_change() CASCADE")
+    denied(env.app, "CREATE OR REPLACE FUNCTION bank_fx_reject_change() RETURNS trigger AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql")
+    denied(env.app, "SET session_replication_role = replica")  # would disable the immutability triggers if it were allowed
+    with env.admin.connect() as c:
+        for table in BANK_FX:
+            for priv in ("TRUNCATE", "UPDATE", "DELETE", "REFERENCES", "TRIGGER"):
+                assert not one(c, "SELECT has_table_privilege(:r, :t, :p)", r=env.role, t=f"{env.schema}.{table}", p=priv), (table, priv)
+        assert one(c, "SELECT COUNT(*) FROM pg_trigger t JOIN pg_class r ON r.oid=t.tgrelid WHERE r.relname LIKE 'bank\\_fx\\_%' AND NOT t.tgisinternal AND t.tgenabled='O'") == 5
+        assert one(c, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=current_schema() AND column_name='sneaky'") == 0
+    assert state() == before
+
+
+def test_rerunning_015_keeps_the_bank_fx_grants_unchanged_and_safe(env):
+    before = (bank_fx_grants(env), bank_fx_sequence_privileges(env))
+    assert before[0] == [("bank_fx_canonical_snapshots", "SELECT"), ("bank_fx_rates", "INSERT"), ("bank_fx_rates", "SELECT"),
+                         ("bank_fx_snapshots", "INSERT"), ("bank_fx_snapshots", "SELECT")]
+    with env.admin.begin() as c:
+        c.execute(text(f"SET LOCAL zm.app_role = '{env.role}'"))
+        c.execute(text((INIT / "015_application_role.sql").read_text()))
+    assert (bank_fx_grants(env), bank_fx_sequence_privileges(env)) == before
+    denied(env.app, "UPDATE bank_fx_rates SET interbank_buy_text='9.9'")  # a rerun never reopens the generic legacy UPDATE grant
+    with env.admin.begin() as c:  # 015 also repairs an over-granted Bank FX table: grants are revoked, then re-established
+        c.execute(text(f"GRANT UPDATE, DELETE, TRUNCATE ON bank_fx_rates TO {env.role}"))
+        c.execute(text(f"SET LOCAL zm.app_role = '{env.role}'"))
+        c.execute(text((INIT / "015_application_role.sql").read_text()))
+    assert (bank_fx_grants(env), bank_fx_sequence_privileges(env)) == before
+
+
+def test_017_alone_regrants_only_its_own_objects_and_leaves_the_rest_of_the_role_untouched(env):
+    with env.admin.connect() as c:
+        legacy_before = c.execute(text("SELECT table_name, privilege_type FROM information_schema.role_table_grants WHERE grantee=:r AND table_schema=:s "
+                                       "AND table_name NOT LIKE 'bank\\_fx\\_%' ORDER BY 1,2"), {"r": env.role, "s": env.schema}).all()
+    with env.admin.begin() as c:
+        c.execute(text(f"GRANT UPDATE, DELETE ON bank_fx_snapshots TO {env.role}"))  # drift on a Bank FX table only
+        c.execute(text(f"SET LOCAL zm.app_role = '{env.role}'"))
+        c.execute(text((INIT / "017_bank_fx.sql").read_text()))
+    with env.admin.connect() as c:
+        legacy_after = c.execute(text("SELECT table_name, privilege_type FROM information_schema.role_table_grants WHERE grantee=:r AND table_schema=:s "
+                                      "AND table_name NOT LIKE 'bank\\_fx\\_%' ORDER BY 1,2"), {"r": env.role, "s": env.schema}).all()
+    assert legacy_after == legacy_before and ("bank_fx_snapshots", "UPDATE") not in bank_fx_grants(env)

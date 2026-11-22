@@ -71,6 +71,24 @@ BOZ_BOND_POLICY = BOZ_USD_POLICY.model_copy(update={
     ),
 })
 
+# Same provider, separate dataset: the commercial banks' own published USD/ZMW rates (not the BoZ reference quote above).
+BOZ_BANK_FX_POLICY = BOZ_USD_POLICY.model_copy(update={
+    "dataset_id": "boz_commercial_bank_daily_rates",
+    "source_url": "https://www.boz.zm/markets-securities/commercial-banks-rates",
+    "required_provenance": ("source", "source_url", "source_record_id", "source_revision_id", "observation_date"),
+    "required_timestamps": ("observation_date", "retrieved_at"),
+    "request_guidance": (
+        "Local/internal implementation. Manual exact-date import only (future job): ONE GET per requested date to the BoZ JSON:API "
+        "commercial_bank_daily_rates (HTTPS www.boz.zm only, no key, 10 s timeout, page limit 10 with links.next failing the import, "
+        "response-size cap, JSON:API Content-Type check, no redirects, no retries, no polling, no backfill loop in Phase 1). An empty "
+        "result is 'no publication for requested date'; no other date is substituted. The response is parsed in memory and no raw "
+        "response is stored; every node revision is stored as an immutable snapshot and a changed same-revision node is a conflict, "
+        "never an overwrite. Attribution to the Bank of Zambia is required. The BoZ terms permit personal or in-organisation "
+        "non-commercial use and short extracts with the source stated; public display, API redistribution and commercial use are not "
+        "cleared and stay review_required (docs/research/boz-commercial-bank-fx.md)."
+    ),
+})
+
 # Separate provider: the Energy Regulation Board Zambia (not BoZ).
 ERB_FUEL_POLICY = ProviderPolicy(
     provider_id="erb",
@@ -209,5 +227,5 @@ IMF_COPPER_POLICY = ProviderPolicy(
 
 # Keyed by dataset: one provider may publish several datasets.
 PROVIDER_POLICIES: dict[str, ProviderPolicy] = {
-    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY, ERB_FUEL_POLICY, MOA_AGRICULTURE_POLICY, WORLD_BANK_OIL_POLICY, BITSTAMP_BTC_POLICY, IMF_COPPER_POLICY)
+    p.dataset_id: p for p in (BOZ_USD_POLICY, BOZ_TBILL_POLICY, BOZ_BOND_POLICY, ERB_FUEL_POLICY, MOA_AGRICULTURE_POLICY, WORLD_BANK_OIL_POLICY, BITSTAMP_BTC_POLICY, IMF_COPPER_POLICY, BOZ_BANK_FX_POLICY)
 }
