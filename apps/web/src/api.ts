@@ -1089,7 +1089,7 @@ const nonEmpty = (v: unknown, what: string): string => (typeof v === "string" &&
 const rate = (v: unknown, what: string): string => (typeof v === "string" && BANK_FX_RATE.test(v) && /[1-9]/.test(v) ? v : bad(what));
 /** Explicit Gregorian validation (no `Date`, so years 0000-0099 are not remapped to 1900-1999). */
 function validGregorian(year: number, month: number, day: number): boolean {
-  if (month < 1 || month > 12 || day < 1) return false;
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false; // Python date/datetime reject year 0
   const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
   const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
   return day <= days;

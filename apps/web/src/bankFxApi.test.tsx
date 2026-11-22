@@ -96,6 +96,20 @@ describe("Bank FX strict timestamps", () => {
 });
 
 describe("Bank FX calendar dates", () => {
+  it("rejects year 0000 as an observation date and accepts 0001 and 0099", () => {
+    expect(() => parseBankFxSnapshot(snapshot({ observation_date: "0000-01-01" }))).toThrow();
+    expect(() => parseBankFxSnapshot(snapshot({ observation_date: "0000-12-31" }))).toThrow();
+    expect(parseBankFxSnapshot(snapshot({ observation_date: "0001-01-01" })).observation_date).toBe("0001-01-01");
+    expect(parseBankFxSnapshot(snapshot({ observation_date: "0099-01-01" })).observation_date).toBe("0099-01-01");
+  });
+  describe.each(["source_created", "source_changed", "source_revision_timestamp", "source_rates_datetime", "retrieved_at"])("%s year bounds", (key) => {
+    it.each(["0000-01-01T00:00:00Z", "0000-01-01T00:00:00+00:00", "0000-12-31T23:59:59.123456+02:00"])("rejects %s", (v) => {
+      expect(() => parseBankFxSnapshot(snapshot({ [key]: v }))).toThrow();
+    });
+    it("accepts a year-0001 timestamp", () => {
+      expect((parseBankFxSnapshot(snapshot({ [key]: "0001-01-01T00:00:00Z" })) as unknown as Record<string, string>)[key]).toBe("0001-01-01T00:00:00Z");
+    });
+  });
   it.each(["0001-01-01", "0099-01-01", "0100-01-01", "2000-02-29", "2024-02-29"])("accepts %s", (d) => {
     expect(parseBankFxSnapshot(snapshot({ observation_date: d })).observation_date).toBe(d);
   });
