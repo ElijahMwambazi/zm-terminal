@@ -199,3 +199,19 @@ def test_v1_snapshot_stores_its_own_source_label(engine):
     save_bank_fx_snapshots(parsed(b.node(layout="v1")), engine=engine)
     assert {r[0] for r in rows(engine, "SELECT retail_source_label FROM bank_fx_rates")} == {"Retail Rates"}
     assert rows(engine, "SELECT table_layout FROM bank_fx_snapshots") == [("v1",)]
+
+
+def blank_row(name, weight=None):
+    return b.bank_row(name, (None, None, None))
+
+
+def test_same_revision_change_in_a_wholly_blank_institution_is_a_conflict_and_rolls_back(engine):
+    banks = b.default_banks()
+    save_bank_fx_snapshots(parsed(b.node(banks=banks[:2] + [blank_row("EXAMPLE BANK A")] + banks[2:])), engine=engine)
+    before = counts(engine)
+    other = b.node(uuid="00000000-0000-4000-8000-0000000000b2", vid=23)
+    with pytest.raises(BankFxConflictError):  # same identity, only the blank institution's raw name differs; a new revision in the same batch
+        save_bank_fx_snapshots(parsed(other, b.node(banks=banks[:2] + [blank_row("EXAMPLE BANK B")] + banks[2:])), engine=engine)
+    assert counts(engine) == before  # whole batch rolled back, including the new node
+    same = save_bank_fx_snapshots(parsed(b.node(banks=banks[:2] + [blank_row("EXAMPLE BANK A")] + banks[2:]), at=T2), engine=engine)
+    assert (same.inserted, same.already_present) == (0, 1)

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS bank_fx_snapshots (
     source_rates_datetime_raw TEXT NOT NULL CHECK (source_rates_datetime_raw <> ''),
     source_rates_datetime TIMESTAMPTZ NOT NULL,
     table_layout TEXT NOT NULL CHECK (table_layout IN ('v1', 'v2')),
+    source_table_sha256 TEXT NOT NULL CHECK (source_table_sha256 ~ '^[0-9a-f]{64}$'),  -- provenance of the whole validated source table (covers rows with no rate row)
     retrieved_at TIMESTAMPTZ NOT NULL,
     source_url TEXT NOT NULL CHECK (source_url <> ''),
     rights_status TEXT NOT NULL CHECK (rights_status = 'review_required'),

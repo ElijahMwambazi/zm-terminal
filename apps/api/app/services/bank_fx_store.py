@@ -2,7 +2,7 @@
 
 Identity of a snapshot is (source_record_id, source_revision_id). A new identity is inserted with its rate rows. An existing identity is a
 no-op only if its complete stored SOURCE representation equals the supplied one: observation date, node ids and timestamps, title, the raw
-`commercial_bank_rates_date` string, layout, and every rate row (source row order, slot presence, raw and normalised institution text,
+`commercial_bank_rates_date` string, layout, the source-table SHA-256 (which also covers institution rows that published no rate), and every rate row (source row order, slot presence, raw and normalised institution text,
 market-average flag, source label, and each rate's exact text AND numeric value). Anything else for the same revision, even a formatting-only
 change such as 9.9 -> 9.9000, raises BankFxConflictError and rolls the whole batch back; stored rows are never updated. A different revision id
 is always a new snapshot, even with identical numbers. `retrieved_at` and `source_url` are local retrieval metadata (request location), not source
@@ -19,7 +19,7 @@ from app.services.bank_fx_models import BankFxRate, BankFxSnapshot
 
 _SNAPSHOT_COLUMNS = (
     "id, observation_date, source_internal_nid, source_created, source_changed, source_revision_timestamp, source_title, "
-    "source_rates_datetime_raw, source_rates_datetime, table_layout, rights_status"
+    "source_rates_datetime_raw, source_rates_datetime, table_layout, source_table_sha256, rights_status"
 )
 
 
@@ -35,7 +35,7 @@ class BankFxSaveResult:
 
 def _snapshot_content(s: BankFxSnapshot) -> tuple:
     return (s.observation_date, s.source_internal_nid, s.source_created, s.source_changed, s.source_revision_timestamp, s.source_title,
-            s.source_rates_datetime_raw, s.source_rates_datetime, s.table_layout, s.rights_status)
+            s.source_rates_datetime_raw, s.source_rates_datetime, s.table_layout, s.source_table_sha256, s.rights_status)
 
 
 def _rate_content(r: BankFxRate) -> tuple:
@@ -55,9 +55,9 @@ def _insert(connection: Connection, snapshot: BankFxSnapshot) -> bool:
     snapshot_id = connection.execute(text(
         "INSERT INTO public.bank_fx_snapshots (observation_date, source_record_id, source_revision_id, source_internal_nid, source_created, "
         "source_changed, source_revision_timestamp, source_title, source_rates_datetime_raw, source_rates_datetime, table_layout, "
-        "retrieved_at, source_url, rights_status) VALUES (:observation_date, :source_record_id, :source_revision_id, :source_internal_nid, "
+        "source_table_sha256, retrieved_at, source_url, rights_status) VALUES (:observation_date, :source_record_id, :source_revision_id, :source_internal_nid, "
         ":source_created, :source_changed, :source_revision_timestamp, :source_title, :source_rates_datetime_raw, :source_rates_datetime, "
-        ":table_layout, :retrieved_at, :source_url, :rights_status) "
+        ":table_layout, :source_table_sha256, :retrieved_at, :source_url, :rights_status) "
         "ON CONFLICT (source_record_id, source_revision_id) DO NOTHING RETURNING id"
     ), {
         "observation_date": snapshot.observation_date, "source_record_id": snapshot.source_record_id,
@@ -65,7 +65,8 @@ def _insert(connection: Connection, snapshot: BankFxSnapshot) -> bool:
         "source_created": snapshot.source_created, "source_changed": snapshot.source_changed,
         "source_revision_timestamp": snapshot.source_revision_timestamp, "source_title": snapshot.source_title,
         "source_rates_datetime_raw": snapshot.source_rates_datetime_raw, "source_rates_datetime": snapshot.source_rates_datetime,
-        "table_layout": snapshot.table_layout, "retrieved_at": snapshot.retrieved_at, "source_url": snapshot.source_url,
+        "table_layout": snapshot.table_layout, "source_table_sha256": snapshot.source_table_sha256,
+        "retrieved_at": snapshot.retrieved_at, "source_url": snapshot.source_url,
         "rights_status": snapshot.rights_status,
     }).scalar()
     if snapshot_id is None:

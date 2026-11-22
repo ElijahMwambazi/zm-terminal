@@ -58,6 +58,7 @@ class BankFxSnapshot:
     source_rates_datetime_raw: str  # exact JSON string received
     source_rates_datetime: datetime  # that string parsed to an aware instant
     table_layout: str
+    source_table_sha256: str  # SHA-256 (lowercase hex) of the canonical validated source table, incl. rows that published no rate
     retrieved_at: datetime
     source_url: str  # request-location metadata, not source content (excluded from same-revision comparison)
     rights_status: str

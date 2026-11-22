@@ -2,7 +2,9 @@
 
 import asyncio
 import copy
+import gzip
 import json
+import re
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -280,6 +282,106 @@ def test_naive_retrieved_at_is_rejected():
         fx.parse_bank_fx_document(b.document(b.node()), retrieved_at=datetime(2030, 1, 3))
 
 
+# ------------------------------------------------------------------------------------------------- exact group labels
+def with_label(layout, value, column=3, row=1):
+    return b.cell(b.document(b.node(layout=layout)), row, column, value)
+
+
+@pytest.mark.parametrize("layout,label", [("v1", "Retail Rates"), ("v2", "BOARD RATES")])
+def test_exact_retail_label_is_accepted_and_reaches_the_model_unchanged(layout, label):
+    assert {r.retail_source_label for r in one(b.document(b.node(layout=layout))).rates} == {label}
+
+
+@pytest.mark.parametrize("layout,good", [("v2", "BOARD RATES"), ("v1", "Retail Rates")])
+def test_retail_label_variants_are_rejected(layout, good):
+    variants = [f" {good}", f"{good} ", f" {good.replace(' ', '   ')} ", good.replace(" ", "  "), good.lower(), good.title() if good != "Retail Rates" else "retail rates",
+                good + "\u00a0", "\ufeff" + good, good.replace(" ", "\u00a0")]
+    for variant in variants:
+        assert variant != good
+        for column in (3, 7, 11):
+            rejects(with_label(layout, variant, column), "layout")
+
+
+@pytest.mark.parametrize("layout,good", [("v2", "INTERBANK"), ("v1", "Interbank Rates")])
+def test_interbank_group_and_other_header_cells_are_not_normalised(layout, good):
+    for variant in (f" {good}", f"{good} ", good.lower()):
+        rejects(with_label(layout, variant, 1), "layout")
+    rejects(with_label(layout, " Buy", 1, row=2), "layout")
+    rejects(with_label(layout, "9:30 ", 1, row=0), "layout")
+    rejects(with_label(layout, " ", 2, row=1), "layout")  # a whitespace-only cell is not blank either
+    name_cell = 0 if layout == "v1" else 0
+    rejects(with_label(layout, "Bank Name ", name_cell, row=1 if layout == "v1" else 0), "layout")
+
+
+def test_only_the_v1_date_cell_is_read_tolerantly():
+    for text_ in ("\ufeff\u00a002-01-2030", "  02-01-2030 ", "anything"):
+        assert one(b.cell(b.document(b.node(layout="v1")), 0, 0, text_)).table_layout == "v1"
+    rejects(b.cell(b.document(b.node(layout="v1")), 0, 0, " \ufeff "), "layout")
+
+
+# -------------------------------------------------------------------------------------------------- source-table digest
+def digest(doc):
+    return one(doc).source_table_sha256
+
+
+def banks_with_blank(name="EXAMPLE BANK A", at=2):
+    banks = b.default_banks()
+    return banks[:at] + [b.bank_row(name, (None, None, None))] + banks[at:]
+
+
+def test_digest_is_lowercase_sha256_hex_and_deterministic():
+    d = digest(b.document(b.node()))
+    assert re.fullmatch(r"[0-9a-f]{64}", d) and d == digest(b.document(b.node()))
+    assert d != digest(b.document(b.node(layout="v1")))
+
+
+def test_blank_institution_is_parsed_without_rate_rows_but_changes_the_digest():
+    a = one(b.document(b.node(banks=banks_with_blank("EXAMPLE BANK A"))))
+    c = one(b.document(b.node(banks=banks_with_blank("EXAMPLE BANK B"))))
+    assert a.rates == c.rates and "EXAMPLE BANK A" not in {r.institution_name for r in a.rates}  # no fake or nullable rows
+    assert a.source_table_sha256 != c.source_table_sha256
+
+
+def test_blank_row_order_weight_header_caption_and_cell_changes_change_the_digest():
+    base = digest(b.document(b.node(banks=banks_with_blank())))
+    assert digest(b.document(b.node(banks=banks_with_blank(at=3)))) != base  # blank row in another position
+    two = b.default_banks()
+    assert digest(b.document(b.node(banks=two[:2] + [b.bank_row("X", (None,) * 3), b.bank_row("Y", (None,) * 3)] + two[2:]))) != \
+        digest(b.document(b.node(banks=two[:2] + [b.bank_row("Y", (None,) * 3), b.bank_row("X", (None,) * 3)] + two[2:])))
+    doc = b.document(b.node(banks=banks_with_blank()))
+    weighted = copy.deepcopy(doc)
+    weighted["data"][0]["attributes"]["field_commercial_bank_rates"]["value"]["5"]["weight"] = "123"
+    assert digest(weighted) != base
+    no_weight = copy.deepcopy(doc)
+    del no_weight["data"][0]["attributes"]["field_commercial_bank_rates"]["value"]["5"]["weight"]
+    assert digest(no_weight) != base
+    captioned = copy.deepcopy(doc)
+    captioned["data"][0]["attributes"]["field_commercial_bank_rates"]["value"]["caption"] = "OTHER"
+    assert digest(captioned) != base
+    assert digest(b.cell(doc, 0, 0, "Bank Name")) == base  # unchanged value, same digest
+    assert digest(b.cell(doc, 0, 1, "9:30")) == base
+    assert digest(b.cell(b.document(b.node(layout="v1", banks=banks_with_blank())), 0, 0, "\ufeff 03-01-2030")) != \
+        digest(b.document(b.node(layout="v1", banks=banks_with_blank())))  # the raw v1 date cell is source content
+
+
+def test_published_cell_text_changes_the_digest_even_when_numerically_equal():
+    base = digest(b.document(b.node()))
+    assert digest(b.cell(b.document(b.node()), 3, 1, "10.0000")) != base
+
+
+def test_json_object_key_order_does_not_change_the_digest_but_numeric_row_order_does():
+    doc = b.document(b.node())
+    value = doc["data"][0]["attributes"]["field_commercial_bank_rates"]["value"]
+    shuffled = copy.deepcopy(doc)
+    sv = shuffled["data"][0]["attributes"]["field_commercial_bank_rates"]
+    sv["value"] = {k: dict(reversed(list(v.items()))) if isinstance(v, dict) else v for k, v in reversed(list(value.items()))}
+    assert digest(shuffled) == digest(doc)
+    swapped = copy.deepcopy(doc)
+    sw = swapped["data"][0]["attributes"]["field_commercial_bank_rates"]["value"]
+    sw["3"], sw["4"] = sw["4"], sw["3"]  # the row contents of keys 3 and 4 exchanged: numeric CMS row order changed
+    assert digest(swapped) != digest(doc)
+
+
 # ------------------------------------------------------------------------------------------------------------------------ adapter
 def run(handler, day=date(2030, 1, 2)):
     calls = []
@@ -296,8 +398,24 @@ def run(handler, day=date(2030, 1, 2)):
     return calls, go
 
 
+class ChunkStream(httpx.AsyncByteStream):
+    """A response body that is really streamed (never pre-buffered), so the adapter's own accumulator is what is exercised."""
+
+    def __init__(self, chunks):
+        self.chunks, self.yielded = list(chunks), 0
+
+    async def __aiter__(self):
+        for chunk in self.chunks:
+            self.yielded += 1
+            yield chunk
+
+
+def streamed(chunks, status=200, media="application/vnd.api+json", **headers):
+    return httpx.Response(status, headers={"content-type": media, **headers}, stream=ChunkStream(chunks))
+
+
 def ok(doc, status=200, media="application/vnd.api+json"):
-    return lambda request: httpx.Response(status, headers={"content-type": media}, content=json.dumps(doc).encode())
+    return lambda request: streamed([json.dumps(doc).encode()], status, media)
 
 
 def test_one_exact_date_get_with_the_researched_query_and_headers():
@@ -345,7 +463,7 @@ def test_non_jsonapi_content_type_is_rejected():
 
 def test_oversized_response_is_rejected():
     big = b"{" + b" " * fx.MAX_RESPONSE_BYTES + b"}"
-    calls, go = run(lambda r: httpx.Response(200, headers={"content-type": "application/vnd.api+json"}, content=big))
+    calls, go = run(lambda r: streamed([big]))
     with pytest.raises(BankFxError, match="too large"):
         asyncio.run(go())
     assert fx.MAX_RESPONSE_BYTES == 1_048_576
@@ -370,7 +488,7 @@ def test_timeouts_and_transport_errors_are_wrapped_and_not_retried():
 
 
 def test_invalid_json_and_changed_shapes_fail():
-    calls, go = run(lambda r: httpx.Response(200, headers={"content-type": "application/vnd.api+json"}, content=b"{not json"))
+    calls, go = run(lambda r: streamed([b"{not json"]))
     with pytest.raises(BankFxError, match="not valid JSON"):
         asyncio.run(go())
     for doc in ({"data": {"id": 1}}, {"unexpected": []}, [1, 2]):
@@ -399,3 +517,111 @@ def test_no_live_network_import_side_effects():
     root = Path(__file__).parents[1] / "app"
     assert not (root / "jobs" / "import_bank_fx.py").exists()
     assert "bank_fx" not in (root / "api" / "router.py").read_text().lower()
+
+
+# ----------------------------------------------------------------------------------------------- bounded raw streaming
+LIMIT = fx.MAX_RESPONSE_BYTES
+
+
+def valid_padded(total):
+    """A valid JSON document of exactly `total` bytes (trailing JSON whitespace)."""
+    raw = json.dumps(b.document(b.node())).encode()
+    assert total >= len(raw)
+    return raw + b" " * (total - len(raw))
+
+
+def split(raw, size):
+    return [raw[i:i + size] for i in range(0, len(raw), size)]
+
+
+def test_request_asks_for_identity_encoding():
+    calls, go = run(ok(b.document(b.node())))
+    asyncio.run(go())
+    assert calls[0].headers["accept-encoding"] == "identity"
+    assert fx.new_client().headers["accept-encoding"] == "identity"
+
+
+def test_many_small_chunks_below_the_limit_are_accepted():
+    calls, go = run(lambda r: streamed(split(valid_padded(300_000), 1000)))
+    assert len(asyncio.run(go())) == 1
+
+
+@pytest.mark.parametrize("total", [LIMIT - 1, LIMIT])
+def test_exactly_at_and_just_below_the_limit_are_accepted(total):
+    calls, go = run(lambda r: streamed(split(valid_padded(total), 50_000)))
+    assert len(asyncio.run(go())) == 1
+
+
+def test_one_byte_over_the_limit_is_rejected():
+    calls, go = run(lambda r: streamed(split(valid_padded(LIMIT + 1), 50_000)))
+    with pytest.raises(BankFxError, match="too large"):
+        asyncio.run(go())
+
+
+def test_a_single_huge_chunk_is_rejected_without_being_accumulated():
+    calls, go = run(lambda r: streamed([b" " * (8 * LIMIT)]))
+    with pytest.raises(BankFxError, match="too large"):
+        asyncio.run(go())
+
+
+def test_the_accumulator_never_exceeds_the_limit():
+    seen = []
+
+    async def chunks(sizes):
+        for n in sizes:
+            yield b"x" * n
+
+    async def feed(sizes, limit):
+        return await fx.read_capped(chunks(sizes), limit, observe=seen.append)
+
+    assert len(asyncio.run(feed([4, 4, 4], 12))) == 12 and max(seen) == 12  # exactly at the cap
+    seen.clear()
+    with pytest.raises(BankFxError):
+        asyncio.run(feed([4, 4, 5, 4], 12))  # the chunk that would cross the cap is never appended
+    assert max(seen) <= 8
+    seen.clear()
+    with pytest.raises(BankFxError):
+        asyncio.run(feed([100], 12))  # a single chunk beyond the remaining capacity
+    assert seen == []
+    seen.clear()
+    with pytest.raises(BankFxError):
+        asyncio.run(feed([12, 1], 12))
+    assert max(seen) == 12
+    assert asyncio.run(feed([], 12)) == b""
+
+
+def test_the_real_adapter_stops_reading_after_the_cap():
+    stream = ChunkStream([b" " * 50_000] * 40)  # 2 MB offered in raw chunks
+
+    def handler(request):
+        return httpx.Response(200, headers={"content-type": "application/vnd.api+json"}, stream=stream)
+
+    calls, go = run(handler)
+    with pytest.raises(BankFxError, match="too large"):
+        asyncio.run(go())
+    assert stream.yielded * 50_000 <= LIMIT + fx.READ_CHUNK_BYTES + 50_000 and stream.yielded < 40  # the rest of the body was never pulled
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "br", "deflate", "compress", "zstd", "GZIP", "x-unknown", "gzip, identity", "identity, gzip", ""])
+def test_compressed_or_unknown_content_encoding_is_rejected_before_any_body_is_read(encoding):
+    stream = ChunkStream([b"{}"])
+    calls, go = run(lambda r: httpx.Response(200, headers={"content-type": "application/vnd.api+json", "content-encoding": encoding}, stream=stream))
+    with pytest.raises(BankFxError, match="Content-Encoding"):
+        asyncio.run(go())
+    assert stream.yielded == 0 and len(calls) == 1
+
+
+def test_a_tiny_gzip_bomb_is_rejected_for_its_encoding_and_never_decoded():
+    bomb = gzip.compress(b" " * (8 * 1024 * 1024))
+    assert len(bomb) < 20_000
+    stream = ChunkStream([bomb])
+    calls, go = run(lambda r: httpx.Response(200, headers={"content-type": "application/vnd.api+json", "content-encoding": "gzip"}, stream=stream))
+    with pytest.raises(BankFxError, match="Content-Encoding"):
+        asyncio.run(go())
+    assert stream.yielded == 0  # not a single (compressed or decoded) byte was pulled
+
+
+def test_identity_content_encoding_is_accepted():
+    for header in ("identity", "Identity", "identity, identity"):
+        calls, go = run(lambda r, h=header: streamed([json.dumps(b.document(b.node())).encode()], **{"content-encoding": h}))
+        assert len(asyncio.run(go())) == 1

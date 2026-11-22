@@ -22,7 +22,7 @@ def snap(c, **over):
     row = {"observation_date": "2030-01-02", "source_record_id": str(uuid4()), "source_revision_id": 1, "source_internal_nid": 1,
            "source_created": NOW, "source_changed": NOW, "source_revision_timestamp": NOW, "source_title": "T",
            "source_rates_datetime_raw": "2030-01-02T15:00:00+02:00", "source_rates_datetime": NOW, "table_layout": "v2",
-           "retrieved_at": NOW, "source_url": "https://example.test/", "rights_status": "review_required"}
+           "source_table_sha256": "0" * 64, "retrieved_at": NOW, "source_url": "https://example.test/", "rights_status": "review_required"}
     row.update(over)
     cols = ", ".join(row)
     return c.execute(text(f"INSERT INTO bank_fx_snapshots ({cols}) VALUES ({', '.join(':' + k for k in row)}) RETURNING id"), row).scalar()
@@ -84,9 +84,19 @@ def test_unique_node_revision_identity_and_foreign_key(db):
 
 @pytest.mark.parametrize("override", [
     {"source_revision_id": 0}, {"source_internal_nid": 0}, {"table_layout": "v3"}, {"rights_status": "cleared"}, {"rights_status": "REVIEW_REQUIRED"},
-    {"source_title": ""}, {"source_url": ""}, {"source_rates_datetime_raw": ""}])
+    {"source_title": ""}, {"source_url": ""}, {"source_rates_datetime_raw": ""},
+    {"source_table_sha256": None}, {"source_table_sha256": ""}, {"source_table_sha256": "a" * 63}, {"source_table_sha256": "a" * 65},
+    {"source_table_sha256": "A" * 64}, {"source_table_sha256": "g" * 64}, {"source_table_sha256": "a" * 63 + "\n"}])
 def test_snapshot_constraints(db, override):
     fails(db[0], lambda c: snap(c, **override))
+
+
+def test_source_table_sha256_accepts_lowercase_hex_and_is_immutable(db):
+    admin, _ = db
+    with admin.begin() as c:
+        sid = snap(c, source_table_sha256="0123456789abcdef" * 4)
+        assert scalar(c, "SELECT source_table_sha256 FROM bank_fx_snapshots WHERE id=:i", i=sid) == "0123456789abcdef" * 4
+    fails(admin, lambda c: c.execute(text("UPDATE bank_fx_snapshots SET source_table_sha256 = :h WHERE id = :i"), {"h": "f" * 64, "i": sid}))
 
 
 def test_snapshot_rights_status_is_exactly_review_required(db):

@@ -6,11 +6,12 @@ docs/research/boz-commercial-bank-fx.md (two table layouts v1/v2, 1-4 decimal st
 review_required: local/internal use only.
 """
 
+import hashlib
 import json
 import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from collections.abc import AsyncIterable, Callable
 from uuid import UUID
 
 import httpx
@@ -28,6 +29,8 @@ BANK_FX_TIMEOUT_SECONDS = 10.0
 MAX_RESPONSE_BYTES = 1_048_576  # about 7 KB per node observed; this is a safety cap, not an expectation
 PAGE_LIMIT = 10  # comfortably above the 3 nodes observed for one date; there is no pagination (links.next fails the import)
 JSONAPI_MEDIA_TYPE = "application/vnd.api+json"
+READ_CHUNK_BYTES = 65_536
+TABLE_DIGEST_VERSION = 1
 
 _RATE = re.compile(r"[0-9]+\.[0-9]{1,4}")  # matched with fullmatch: no whitespace, sign, comma, exponent or fifth decimal
 _ROW_KEY = re.compile(r"0|[1-9][0-9]*")
@@ -82,9 +85,27 @@ def parse_rate(value: object, what: str = "rate") -> Decimal:
     return number
 
 
-def _table_rows(field: object) -> list[tuple[int, list[str]]]:
-    """The CMS table as (row key, 13 cell strings) in numeric key order. Only the keys 0..N-1 are rows (contiguous, canonical);
-    `caption` is the only other key allowed, and a row's `weight` is ignored (never identity or ordering)."""
+def _table_digest(value: dict, row_keys: list[int]) -> str:
+    """SHA-256 over a canonical serialisation of the validated table: numeric row order, every cell string (empty ones included), each row's
+    `weight` when present, and the `caption`. JSON with sorted keys and fixed separators, so it never depends on object key order or repr()."""
+    rows = []
+    for index in row_keys:
+        row = value[str(index)]
+        entry: dict = {"i": index, "c": [row[cell] for cell in _CELLS]}
+        if "weight" in row:
+            entry["w"] = row["weight"]
+        rows.append(entry)
+    canonical = {"v": TABLE_DIGEST_VERSION, "rows": rows}
+    if "caption" in value:
+        canonical["caption"] = value["caption"]
+    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+    return hashlib.sha256(encoded.encode("ascii")).hexdigest()
+
+
+def _table_rows(field: object) -> tuple[list[tuple[int, list[str]]], str]:
+    """The CMS table as (row key, 13 cell strings) in numeric key order plus the source-table digest. Only the keys 0..N-1 are rows
+    (contiguous, canonical); `caption` is the only other key allowed. A row's `weight` is never identity or ordering, but it is part of
+    the digest (source content)."""
     value = _mapping(_mapping(field, "field_commercial_bank_rates").get("value"), "field_commercial_bank_rates.value")
     row_keys = []
     for key in value:
@@ -106,12 +127,12 @@ def _table_rows(field: object) -> list[tuple[int, list[str]]]:
         rows.append((index, [row[cell] for cell in _CELLS]))
     if len(rows) <= _HEADER_ROWS:
         raise BankFxError("the table has no institution rows")
-    return rows
+    return rows, _table_digest(value, row_keys)
 
 
 def _detect_layout(rows: list[tuple[int, list[str]]]) -> str:
     """Exactly the two researched header families; anything else (including a changed label) fails closed."""
-    r0, r1, r2 = (tuple(_norm(c) for c in rows[i][1]) for i in range(3))
+    r0, r1, r2 = (tuple(rows[i][1]) for i in range(3))  # exact source strings: no trimming, collapsing or case folding
     blank = lambda row, cells: all(row[c] == "" for c in cells)
     slot_cells = set(_SLOT_LABELS)
     slots_ok = all(r0[c] == label for c, label in _SLOT_LABELS.items()) and blank(r0, set(range(1, 13)) - slot_cells)
@@ -123,8 +144,9 @@ def _detect_layout(rows: list[tuple[int, list[str]]]) -> str:
 
     if slots_ok and sides_ok and r0[0] == "Bank Name" and r1[0] == "" and groups("INTERBANK", "BOARD RATES"):
         return LAYOUT_V2
-    # v1: the first cell of row 0 holds the source's date text (any text; BOM/no-break space are whitespace to the page)
-    if slots_ok and sides_ok and r0[0] and r1[0] == "Bank Name" and groups("Interbank Rates", "Retail Rates"):
+    # v1: the first cell of row 0 holds the source's date text. This is the ONLY header cell read tolerantly (BOM/no-break space are
+    # whitespace to the page); it must still contain text.
+    if slots_ok and sides_ok and _norm(r0[0]) and r1[0] == "Bank Name" and groups("Interbank Rates", "Retail Rates"):
         return LAYOUT_V1
     raise BankFxError("unknown or malformed table layout")
 
@@ -148,9 +170,11 @@ def _parse_node(item: object, *, retrieved_at: datetime, source_url: str) -> Ban
     rates_datetime = _aware(raw_datetime, "commercial_bank_rates_date")
     observation = rates_datetime.date()  # taken at the supplied offset, before any UTC conversion
 
-    rows = _table_rows(attributes.get("field_commercial_bank_rates"))
+    rows, table_sha256 = _table_rows(attributes.get("field_commercial_bank_rates"))
     layout = _detect_layout(rows)
-    label = RETAIL_SOURCE_LABEL[layout]
+    label = rows[1][1][3]  # the exact retail group label as published; _detect_layout proved it equals the researched string for the layout
+    if label != RETAIL_SOURCE_LABEL[layout]:
+        raise BankFxError("retail group label does not match the layout")
     rates: list[BankFxRate] = []
     seen: set[str] = set()
     averages = 0
@@ -184,6 +208,7 @@ def _parse_node(item: object, *, retrieved_at: datetime, source_url: str) -> Ban
         observation_date=observation, source_record_id=record_id, source_revision_id=vid, source_internal_nid=nid,
         source_created=created, source_changed=changed, source_revision_timestamp=revised, source_title=title,
         source_rates_datetime_raw=raw_datetime, source_rates_datetime=rates_datetime, table_layout=layout,
+        source_table_sha256=table_sha256,
         retrieved_at=retrieved_at, source_url=source_url, rights_status=RIGHTS_STATUS, rates=tuple(rates),
     )
 
@@ -236,26 +261,45 @@ def exact_date_url(day: date, *, base: str | None = None, limit: int = PAGE_LIMI
             f"&{prefix}[value][1]={day.isoformat()}T23:59:59&sort=-created&page[limit]={limit}")
 
 
+async def read_capped(chunks: AsyncIterable[bytes], limit: int = MAX_RESPONSE_BYTES, *, observe: Callable[[int], None] | None = None) -> bytes:
+    """Accumulate raw chunks without ever holding more than `limit` bytes: each chunk is checked against the remaining capacity BEFORE
+    it is appended. `observe` (tests only) receives the accumulator size after every append."""
+    buffer = bytearray()
+    async for chunk in chunks:
+        if len(chunk) > limit - len(buffer):
+            raise BankFxError("Bank of Zambia response is too large")
+        buffer.extend(chunk)
+        if observe is not None:
+            observe(len(buffer))
+    return bytes(buffer)
+
+
+def _require_identity_encoding(response: httpx.Response) -> None:
+    """Phase 1 does not decompress: any Content-Encoding other than identity is rejected before a body byte is read."""
+    for header in response.headers.get_list("content-encoding"):
+        if any(token.strip().lower() != "identity" for token in header.split(",")):
+            raise BankFxError("Unsupported Content-Encoding from the Bank of Zambia (identity only)")
+
+
 async def fetch_bank_fx_payload(client: httpx.AsyncClient, day: date) -> object:
-    """Exactly one GET for one exact date: no redirects, no retries, no pagination, JSON:API content type, a response-size cap."""
+    """Exactly one GET for one exact date: identity transfer only, no redirects, no retries, no pagination, JSON:API content type, and a
+    hard cap on the raw (never decoded) bytes held."""
     url = exact_date_url(day)
+    headers = {"Accept": JSONAPI_MEDIA_TYPE, "Accept-Encoding": "identity"}
     try:
-        async with client.stream("GET", url, follow_redirects=False, headers={"Accept": JSONAPI_MEDIA_TYPE}) as response:
+        async with client.stream("GET", url, follow_redirects=False, headers=headers) as response:
             if response.is_redirect:
                 raise BankFxError("Unexpected redirect from the Bank of Zambia")
             response.raise_for_status()
+            _require_identity_encoding(response)
             media = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
             if media != JSONAPI_MEDIA_TYPE:
                 raise BankFxError("Expected a JSON:API response from the Bank of Zambia")
-            body = bytearray()
-            async for chunk in response.aiter_bytes():
-                body.extend(chunk)
-                if len(body) > MAX_RESPONSE_BYTES:
-                    raise BankFxError("Bank of Zambia response is too large")
+            body = await read_capped(response.aiter_raw(READ_CHUNK_BYTES))
     except httpx.HTTPError:
         raise BankFxError("Bank of Zambia request failed") from None
     try:
-        return json.loads(bytes(body))
+        return json.loads(body)
     except ValueError:
         raise BankFxError("Bank of Zambia response is not valid JSON") from None
 
@@ -268,4 +312,4 @@ async def fetch_bank_fx_snapshots(client: httpx.AsyncClient, day: date, *, retri
 
 def new_client() -> httpx.AsyncClient:
     """Never follows redirects; one source, one request."""
-    return httpx.AsyncClient(headers={"User-Agent": BANK_FX_USER_AGENT}, timeout=BANK_FX_TIMEOUT_SECONDS, follow_redirects=False)
+    return httpx.AsyncClient(headers={"User-Agent": BANK_FX_USER_AGENT, "Accept-Encoding": "identity"}, timeout=BANK_FX_TIMEOUT_SECONDS, follow_redirects=False)
