@@ -13,7 +13,8 @@ export type CommandResult =
     | { type: "open-copper" }
     | { type: "open-copper-zm" }
     | { type: "open-copper-fx" }
-    | { type: "open-energy" } }
+    | { type: "open-energy" }
+    | { type: "open-bank-fx" } }
   | { ok: false; error: string };
 
 /** Normalized command text -> action. Add new commands here. */
@@ -52,6 +53,8 @@ const COMMANDS: Record<string, CommandResult & { ok: true }> = {
   "POWER ZM": { ok: true, action: { type: "open-energy" } },
   "ENERGY ZM": { ok: true, action: { type: "open-energy" } },
   "GENERATION ZM": { ok: true, action: { type: "open-energy" } },
+  "BANK FX": { ok: true, action: { type: "open-bank-fx" } },
+  "FX BANKS": { ok: true, action: { type: "open-bank-fx" } },
   "BOND ZM": { ok: true, action: { type: "open-bond", tenor: null } },
   "BOND 2Y": { ok: true, action: { type: "open-bond", tenor: "2Y" } },
   "BOND 3Y": { ok: true, action: { type: "open-bond", tenor: "3Y" } },

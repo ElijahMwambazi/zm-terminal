@@ -1061,3 +1061,136 @@ export const getEnergyStationHistory = (stationGroup: EnergyStationGroup, statio
 export const getEnergyGroupHistory = (stationGroup: EnergyStationGroup) =>
   getEnergyJson(`/api/v1/energy/generation/group-history?${new URLSearchParams({ station_group: stationGroup })}`,
     (raw) => parseEnergyGroupHistory(raw, stationGroup));
+
+/* ---------- Bank FX: stored BoZ commercial-bank USD/ZMW rates (local/internal, rights review_required) ----------
+ * Stored-only: these functions read the ZM Terminal API, which reads PostgreSQL. Nothing here contacts BoZ. Rate values are the exact
+ * published strings and are NEVER converted through Number: they are validated by pattern only and kept as received. */
+export const BANK_FX_SLOTS = ["09:30", "12:30", "15:30"] as const;
+export type BankFxSlot = (typeof BANK_FX_SLOTS)[number];
+export type BankFxLayout = "v1" | "v2";
+export type BankFxInstitutionRate = {
+  source_row_index: number; institution_name: string; institution_name_raw: string;
+  interbank_buy: string; interbank_sell: string; retail_buy: string; retail_sell: string;
+};
+export type BankFxSlotSnapshot = {
+  slot: BankFxSlot; retail_source_label: "Retail Rates" | "BOARD RATES"; banks: BankFxInstitutionRate[]; market_average: BankFxInstitutionRate | null;
+};
+export type BankFxSnapshot = {
+  observation_date: string; source_record_id: string; source_revision_id: number; source_internal_nid: number;
+  source_created: string; source_changed: string; source_revision_timestamp: string; source_title: string;
+  source_rates_datetime_raw: string; source_rates_datetime: string; table_layout: BankFxLayout; retrieved_at: string; source_url: string;
+  rights_status: string; slots: BankFxSlotSnapshot[];
+};
+export type BankFxLatest = { snapshot: BankFxSnapshot | null };
+
+const BANK_FX_RATE = /^[0-9]+\.[0-9]{1,4}$/;
+const BANK_FX_RETAIL_LABEL: Record<BankFxLayout, BankFxSlotSnapshot["retail_source_label"]> = { v1: "Retail Rates", v2: "BOARD RATES" };
+const nonEmpty = (v: unknown, what: string): string => (typeof v === "string" && v.length > 0 ? v : bad(what));
+const rate = (v: unknown, what: string): string => (typeof v === "string" && BANK_FX_RATE.test(v) && /[1-9]/.test(v) ? v : bad(what));
+const instant = (v: unknown, what: string): string => (typeof v === "string" && v.length > 0 && !Number.isNaN(Date.parse(v)) ? v : bad(what));
+function calendarDate(v: unknown, what: string): string {
+  const text = nonEmpty(v, what);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!m) return bad(what);
+  const probe = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return probe.getUTCFullYear() === Number(m[1]) && probe.getUTCMonth() === Number(m[2]) - 1 && probe.getUTCDate() === Number(m[3]) ? text : bad(what);
+}
+const isMarketAverageName = (name: string) => name.trim().replace(/\s+/g, " ").toLowerCase() === "market average";
+
+function institution(raw: unknown, what: string): BankFxInstitutionRate {
+  const o = rec(raw, what);
+  return {
+    source_row_index: int(o.source_row_index, "source_row_index", 1), institution_name: nonEmpty(o.institution_name, "institution_name"),
+    institution_name_raw: nonEmpty(o.institution_name_raw, "institution_name_raw"),
+    interbank_buy: rate(o.interbank_buy, "interbank_buy"), interbank_sell: rate(o.interbank_sell, "interbank_sell"),
+    retail_buy: rate(o.retail_buy, "retail_buy"), retail_sell: rate(o.retail_sell, "retail_sell"),
+  };
+}
+
+function slotSnapshot(raw: unknown, layout: BankFxLayout): BankFxSlotSnapshot {
+  const o = rec(raw, "slot");
+  const slot = (BANK_FX_SLOTS as readonly unknown[]).includes(o.slot) ? (o.slot as BankFxSlot) : bad("slot");
+  if (o.retail_source_label !== BANK_FX_RETAIL_LABEL[layout]) bad("retail_source_label does not match the layout");
+  const banks = arr(o.banks, "banks").map((b) => institution(b, "bank"));
+  const average = o.market_average === null || o.market_average === undefined ? null : institution(o.market_average, "market_average");
+  const names = new Set<string>();
+  const rows = new Set<number>();
+  let previous = 0;
+  for (const bank of banks) {
+    if (bank.source_row_index <= previous) bad("bank rows are not in strictly increasing source order");
+    previous = bank.source_row_index;
+    if (names.has(bank.institution_name)) bad("duplicate institution in a slot");
+    if (isMarketAverageName(bank.institution_name)) bad("market average inside banks");
+    names.add(bank.institution_name); rows.add(bank.source_row_index);
+  }
+  if (average && (rows.has(average.source_row_index) || names.has(average.institution_name))) bad("market average duplicates a bank row");
+  return { slot, retail_source_label: BANK_FX_RETAIL_LABEL[layout], banks, market_average: average };
+}
+
+export function parseBankFxSnapshot(raw: unknown): BankFxSnapshot {
+  const o = rec(raw, "snapshot");
+  const layout = o.table_layout === "v1" || o.table_layout === "v2" ? o.table_layout : bad("table_layout");
+  const slots = arr(o.slots, "slots").map((s) => slotSnapshot(s, layout));
+  if (slots.length === 0) bad("snapshot has no published slot");
+  slots.forEach((s, i) => { if (i > 0 && BANK_FX_SLOTS.indexOf(s.slot) <= BANK_FX_SLOTS.indexOf(slots[i - 1].slot)) bad("slots are not unique and chronological"); });
+  const source_url = nonEmpty(o.source_url, "source_url");
+  let url: URL;
+  try { url = new URL(source_url); } catch { return bad("source_url"); }
+  if (url.protocol !== "https:") bad("source_url");
+  return {
+    observation_date: calendarDate(o.observation_date, "observation_date"), source_record_id: nonEmpty(o.source_record_id, "source_record_id"),
+    source_revision_id: int(o.source_revision_id, "source_revision_id", 1), source_internal_nid: int(o.source_internal_nid, "source_internal_nid", 1),
+    source_created: instant(o.source_created, "source_created"), source_changed: instant(o.source_changed, "source_changed"),
+    source_revision_timestamp: instant(o.source_revision_timestamp, "source_revision_timestamp"), source_title: nonEmpty(o.source_title, "source_title"),
+    source_rates_datetime_raw: nonEmpty(o.source_rates_datetime_raw, "source_rates_datetime_raw"),
+    source_rates_datetime: instant(o.source_rates_datetime, "source_rates_datetime"), table_layout: layout,
+    retrieved_at: instant(o.retrieved_at, "retrieved_at"), source_url, rights_status: nonEmpty(o.rights_status, "rights_status"), slots,
+  };
+}
+
+export function parseBankFxLatest(raw: unknown): BankFxLatest {
+  const o = rec(raw, "latest");
+  if (!("snapshot" in o)) bad("snapshot");
+  return { snapshot: o.snapshot === null ? null : parseBankFxSnapshot(o.snapshot) };
+}
+
+async function getBankFxJson(path: string, allowNotFound: boolean): Promise<unknown | null> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`);
+  } catch {
+    throw new ApiError("api", "ZM Terminal API is unreachable");
+  }
+  if (response.status === 503) throw new ApiError("api", "Stored commercial bank FX data is unavailable (database)");
+  if (response.status === 404 && allowNotFound) return null;
+  if (response.status === 422) throw new ApiError("api", "Invalid date for the stored Bank FX lookup");
+  if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
+  try {
+    return await response.json();
+  } catch {
+    throw new ApiError("api", "Unexpected Bank FX response");
+  }
+}
+
+/** Newest stored observation date's canonical snapshot (or `{ snapshot: null }`). Never contacts BoZ. */
+export async function getBankFxLatest(): Promise<BankFxLatest> {
+  const body = await getBankFxJson("/api/v1/fx/banks/latest", false);
+  try {
+    return parseBankFxLatest(body);
+  } catch {
+    throw new ApiError("api", "Unexpected Bank FX response");
+  }
+}
+
+/** Exactly this stored date; `null` when it is not stored (never another date). Never contacts BoZ. */
+export async function getBankFxDate(day: string): Promise<BankFxSnapshot | null> {
+  const body = await getBankFxJson(`/api/v1/fx/banks/history?${new URLSearchParams({ date: day })}`, true);
+  if (body === null) return null;
+  try {
+    const snapshot = parseBankFxSnapshot(body);
+    if (snapshot.observation_date !== day) bad("observation_date differs from the requested date");
+    return snapshot;
+  } catch {
+    throw new ApiError("api", "Unexpected Bank FX response");
+  }
+}
