@@ -27,7 +27,9 @@ import { useGovernmentBonds } from "./useGovernmentBonds";
 import { useTreasuryBills } from "./useTreasuryBills";
 import UsdZmwDetail, { QuoteBlock, quoteProblem } from "./UsdZmwDetail";
 import { useUsdZmwQuote } from "./useUsdZmwQuote";
+import BankFxDetail from "./BankFxDetail";
 import EnergyGenerationDetail from "./EnergyGenerationDetail";
+import { useBankFx } from "./useBankFx";
 import { useEnergyGeneration } from "./useEnergyGeneration";
 
 type MarketCard = {
@@ -48,12 +50,14 @@ export default function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [command, setCommand] = useState("");
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | "oil-zm" | "yield-curve" | "btc-usd" | "btc-zmw" | "copper" | "copper-zm" | "copper-fx" | "energy" | null>(null);
+  const [detail, setDetail] = useState<"usdzmw" | "tbill" | "bond" | "fuel" | "agriculture" | "oil" | "oil-zm" | "yield-curve" | "btc-usd" | "btc-zmw" | "copper" | "copper-zm" | "copper-fx" | "energy" | "bank-fx" | null>(null);
   const [oilFocus, setOilFocus] = useState<OilBenchmark | null>(null);
   const [oilNavigationKey, setOilNavigationKey] = useState(0);
   const { state: oilState, refresh: refreshOil } = useOil();
   const { state: oilZmState, refresh: refreshOilZm } = useOilZm();
   const { state: energyState, refresh: refreshEnergy } = useEnergyGeneration();
+  const { state: bankFxState, refresh: refreshBankFx } = useBankFx();
+  const [bankFxNavigationKey, setBankFxNavigationKey] = useState(0);
   const { state: copperState, refresh: refreshCopper } = useCopper();
   const { state: copperZmState, refresh: refreshCopperZm } = useCopperZm();
   const { state: btcUsdState, refresh: refreshBtcUsd } = useBtcUsd();
@@ -153,6 +157,12 @@ export default function App() {
     requestAnimationFrame(() => detailRef.current?.focus());
   };
 
+  const openBankFx = () => {
+    setBankFxNavigationKey((key) => key + 1); // reopening resets the detail to the latest stored snapshot
+    setDetail("bank-fx");
+    requestAnimationFrame(() => detailRef.current?.focus());
+  };
+
   const openBtcUsd = () => {
     setDetail("btc-usd");
     requestAnimationFrame(() => detailRef.current?.focus());
@@ -179,6 +189,7 @@ export default function App() {
     else if (result.action.type === "open-copper-zm") openCopperZm();
     else if (result.action.type === "open-copper-fx") openCopperFx();
     else if (result.action.type === "open-energy") openEnergy();
+    else if (result.action.type === "open-bank-fx") openBankFx();
     else if (result.action.type === "open-btc-usd") openBtcUsd();
     else if (result.action.type === "open-btc-zmw") openBtcZmw();
     else openAgriculture(result.action.commodity);
@@ -196,6 +207,7 @@ export default function App() {
   const copperObservation = copperState.status === "ready" ? copperState.data.observation : null;
   const brent = oilState.status === "ready" ? oilState.data.observations.find((o) => o.benchmark === "BRENT") : undefined;
   const energySnapshot = energyState.status === "ready" ? energyState.data.snapshot : null;
+  const bankFxSnapshot = bankFxState.status === "ready" ? bankFxState.data.snapshot : null;
   const tbillSkipped = tbillState.status === "ready" ? tbillState.data.skipped_tenders : [];
 
   const now = useMemo(
@@ -223,7 +235,7 @@ export default function App() {
         <span><StatusDot ok={status?.api} /> API</span>
         <span><StatusDot ok={status?.database} /> POSTGRES</span>
         <span><StatusDot ok={status?.openbb} /> OPENBB</span>
-        <span className="status-note">v0.1 — USD/ZMW, BoZ fixed income, ERB fuel, Ministry agriculture averages, global oil and copper monthly benchmarks, and ERB annual electricity generation</span>
+        <span className="status-note">v0.1 — USD/ZMW, BoZ fixed income, ERB fuel, Ministry agriculture averages, global oil and copper monthly benchmarks, ERB annual electricity generation, and stored BoZ commercial-bank USD/ZMW tables</span>
       </section>
 
       <section className="market-grid" aria-label="Market overview">
@@ -363,6 +375,16 @@ export default function App() {
             {energySnapshot && <>ERB GENERATION · {energySnapshot.stations.length} STATIONS · {energySnapshot.group_totals.length} PUBLISHED GROUP TOTALS<br /><span className="muted">Local/internal · rights {energySnapshot.rights_status}</span></>}
           </small>
         </button>
+        <button type="button" className="market-card market-card--live" onClick={openBankFx}>
+          <span className="market-label">BANK FX</span>
+          <strong>{bankFxSnapshot ? formatDate(bankFxSnapshot.observation_date) : bankFxState.status === "loading" ? "…" : "—"}</strong>
+          <small>
+            {bankFxState.status === "loading" && "Loading stored Bank FX…"}
+            {bankFxState.status === "error" && "Stored Bank FX unavailable"}
+            {bankFxState.status === "ready" && !bankFxSnapshot && "No stored commercial-bank FX"}
+            {bankFxSnapshot && <>LATEST STORED · {bankFxSnapshot.slots.length} PUBLISHED SLOT{bankFxSnapshot.slots.length === 1 ? "" : "S"}<br />BoZ commercial-bank table · local/internal<br /><span className="muted">{bankFxSnapshot.rights_status === "review_required" ? "Rights review required" : `Rights ${bankFxSnapshot.rights_status}`}</span></>}
+          </small>
+        </button>
         {markets.map((market) => (
           <article className="market-card" key={market.label}>
             <span className="market-label">{market.label}</span>
@@ -389,6 +411,8 @@ export default function App() {
           <BtcZmwDetail ref={detailRef} state={btcZmwState} onRefresh={refreshBtcZmw} />
         ) : detail === "energy" ? (
           <EnergyGenerationDetail ref={detailRef} state={energyState} onRefresh={refreshEnergy} />
+        ) : detail === "bank-fx" ? (
+          <BankFxDetail key={bankFxNavigationKey} ref={detailRef} state={bankFxState} onRefresh={refreshBankFx} />
         ) : detail === "copper-fx" ? (
           <CopperKwachaDetail ref={detailRef} />
         ) : detail === "copper-zm" ? (
@@ -404,7 +428,7 @@ export default function App() {
         ) : (
           <article className="panel">
             <div className="panel-heading"><span>WORKSPACE</span></div>
-            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, <code>OIL</code> for global Brent and WTI monthly benchmarks, <code>OIL ZM</code> for the derived Brent-in-kwacha view, <code>CURVE ZM</code> for the sovereign auction yield curve, <code>COPPER</code> for the global IMF Copper monthly benchmark, <code>COPPER ZM</code> for the derived Copper-in-kwacha view, <code>COPPER FX</code> for the Copper–Kwacha comparison, <code>BTC</code> for Bitstamp BTC/USD, <code>BTC ZMW</code> for the indicative derived BTC/ZMW, or <code>POWER ZM</code> for stored ERB electricity generation.</p>
+            <p className="notice">Type <code>FX USDZMW</code> or <code>USDZMW</code> (Ctrl + K) for USD/ZMW, <code>TBILL ZM</code> for Treasury Bills, <code>BOND ZM</code> for Government Bonds, <code>FUEL ZM</code> for fuel prices, <code>AGRI ZM</code> for Ministry agriculture averages, <code>OIL</code> for global Brent and WTI monthly benchmarks, <code>OIL ZM</code> for the derived Brent-in-kwacha view, <code>CURVE ZM</code> for the sovereign auction yield curve, <code>COPPER</code> for the global IMF Copper monthly benchmark, <code>COPPER ZM</code> for the derived Copper-in-kwacha view, <code>COPPER FX</code> for the Copper–Kwacha comparison, <code>BTC</code> for Bitstamp BTC/USD, <code>BTC ZMW</code> for the indicative derived BTC/ZMW, <code>POWER ZM</code> for stored ERB electricity generation, or <code>BANK FX</code> / <code>FX BANKS</code> for stored BoZ commercial-bank USD/ZMW tables.</p>
           </article>
         )}
 

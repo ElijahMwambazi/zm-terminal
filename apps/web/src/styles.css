@@ -304,3 +304,32 @@ th { text-align: left; color: #8c8c8c; font-weight: normal; padding: 6px 4px; }
 }
 .energy-readout { padding: 6px 16px; color: #f2f2f2; font-size: 0.85rem; overflow-wrap: anywhere; }
 .energy-history-title { min-width: 0; overflow-wrap: anywhere; }
+
+/* ---------- Bank FX (stored BoZ commercial-bank table) ---------- */
+.bank-fx-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; }
+.bank-fx-controls label { color: #ffb000; font-size: 0.7rem; }
+.bank-fx-controls input[type="date"] { background: #0a0a0a; color: #f2f2f2; border: 1px solid #292929; padding: 5px 8px; min-height: 32px; color-scheme: dark; }
+.bank-fx-controls input:focus-visible, .bank-fx-controls button:focus-visible, .bank-fx-slot:focus-visible, .bank-fx-details summary:focus-visible,
+.bank-fx-provenance a:focus-visible { outline: 2px solid #7cc4ff; outline-offset: 2px; }
+.bank-fx-slots { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 16px; }
+.bank-fx-slot { min-height: 40px; min-width: 72px; font-variant-numeric: tabular-nums; }
+.bank-fx-slot[aria-pressed="true"] { color: #0a0a0a; background: #ffb000; border-color: #ffb000; }
+.bank-fx-table { min-width: 760px; border-collapse: separate; border-spacing: 0; }
+.bank-fx-table th { text-align: left; font-weight: 500; }
+.bank-fx-table thead th[colspan] { text-align: center; color: #ffb000; }
+.bank-fx-table .bank-fx-rate { text-align: right; padding-right: 16px; }
+.bank-fx-table thead tr:nth-child(2) th { text-align: right; padding-right: 16px; }
+.bank-fx-rate { font-variant-numeric: tabular-nums; }
+.bank-fx-table .bank-fx-bank { position: sticky; left: 0; z-index: 1; background: #0a0a0a; min-width: 190px; max-width: 280px; white-space: normal; overflow-wrap: anywhere; border-right: 1px solid #292929; }
+.bank-fx-average { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.bank-fx-average dd { overflow-wrap: anywhere; }
+.bank-fx-provenance dd, .bank-fx-url { overflow-wrap: anywhere; word-break: break-word; }
+.bank-fx-details { padding: 6px 16px 12px; }
+.bank-fx-details summary { cursor: pointer; color: #ffb000; font-size: 0.75rem; }
+@media (max-width: 1000px) { .bank-fx-average { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .bank-fx-controls, .bank-fx-slots { padding-left: 12px; padding-right: 12px; }
+  .bank-fx-controls input[type="date"] { flex: 1 1 140px; min-width: 0; }
+  .bank-fx-controls button { min-height: 40px; }
+  .bank-fx-table .bank-fx-bank { min-width: 130px; max-width: 160px; }
+}
