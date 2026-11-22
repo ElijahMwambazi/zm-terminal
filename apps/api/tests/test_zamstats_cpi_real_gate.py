@@ -1,7 +1,7 @@
 """The opt-in real-source suite's enable/fail gate (temporary directories only; no network, no real PDFs)."""
 
 from app.services import zamstats_cpi_source as src
-from zamstats_cpi_real_gate import ENV_VAR, gate_state, missing_files
+from zamstats_cpi_real_gate import EMPTY_VALUE, ENV_VAR, gate_state, missing_files
 
 NAMES = [p.filename for p in src.PUBLICATIONS]
 
@@ -11,10 +11,19 @@ def make(directory, names):
         (directory / name).write_bytes(b"%PDF-")
 
 
-def test_env_unset_or_empty_skips_the_suite():
+def test_only_an_unset_variable_skips_the_suite():
     assert gate_state(None, NAMES) == ("skip", [])
-    assert gate_state("", NAMES) == ("skip", [])
     assert ENV_VAR == "ZM_ZAMSTATS_CPI_PDF_DIR"
+
+
+def test_an_explicitly_empty_variable_is_a_configuration_error_not_unset():
+    state, problems = gate_state("", NAMES)
+    assert state == "fail" and problems == [EMPTY_VALUE]
+
+
+def test_a_whitespace_only_variable_is_rejected_not_silently_disabled():
+    for value in (" ", "   ", "\t", " \n "):
+        assert gate_state(value, NAMES) == ("fail", [EMPTY_VALUE])
 
 
 def test_env_set_to_a_complete_directory_runs(tmp_path):

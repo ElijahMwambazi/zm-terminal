@@ -144,7 +144,10 @@ def parsed(manifest_pub: src.Publication, values: dict) -> ParsedPublication:
     """A ParsedPublication for every table of `manifest_pub`; values: {table_id: {month: text}}."""
     tables = []
     for t in manifest_pub.tables:
-        cells = tuple(obs(manifest_pub.key, t.table_id, m, text, canonical=t.columns[0][2]) for m, text in values[t.table_id].items())
+        cells = tuple(
+            SourceObservation(m, "index", "all_items", parse_index_number(text), "2009=100", manifest_pub.key, t.table_id, t.pdf_page,
+                              i, t.family, t.columns[0][2])
+            for i, (m, text) in enumerate(values[t.table_id].items(), start=1))
         tables.append(ParsedTable(t.table_id, t.pdf_page, t.family, t.first_month, t.last_month, cells))
     return ParsedPublication(manifest_pub.key, manifest_pub.reference_month, tuple(tables))
 
@@ -209,7 +212,8 @@ def test_missing_table_inside_a_supplied_publication_is_detected():
 def test_all_required_publications_pass_completeness_and_unrelated_ones_are_not_required():
     scope = cmb.scope_for(["index_all_items"], M1, M4, SYN)
     required = cmb.validate_evidence_completeness(evidence(), scope, SYN)
-    assert required == {("syn-1", "T1"), ("syn-2", "V2"), ("syn-2", "T2")}  # syn-3 was never supplied and never needed
+    assert {(k, t) for k, t, *_ in required} == {("syn-1", "T1"), ("syn-2", "V2"), ("syn-2", "T2")}  # syn-3 never supplied or needed
+    assert len(required) == 3 + 3 + 1  # cells, not tables: T1 Jan-Mar, V2 Feb-Apr, T2 Apr
 
 
 def test_a_supplied_table_must_be_the_manifest_table():
@@ -250,7 +254,7 @@ def test_ready_requires_every_scope_observation_to_be_resolved():
     p2 = partial[1]
     t2 = dataclasses.replace(p2.tables[1], observations=())
     partial[1] = ParsedPublication(p2.manifest_key, p2.reference_month, (p2.tables[0], t2))
-    with pytest.raises(ZamstatsCpiError, match="unresolved"):
+    with pytest.raises(ZamstatsCpiError, match="incomplete"):  # the required owner cell is missing: caught before resolution
         cmb.require_canonical_ready(partial, cmb.scope_for(["index_all_items"], M4, M4, SYN), SYN)
 
 
@@ -266,3 +270,242 @@ def test_the_real_manifest_scope_and_requirements():
     assert cmb.required_evidence(scope) == {(p.key, t.table_id) for p in P for t in p.tables}
     index_food_2021 = cmb.scope_for(["index_food"], D(2021, 1, 1), D(2021, 12, 1))
     assert cmb.required_evidence(index_food_2021) == {("zam-cpi-2023-12", P[10].tables[0].table_id), ("zam-cpi-2025-12", P[12].tables[0].table_id)}
+
+
+
+# ================================================================== cell-level completeness (synthetic manifest)
+def cells_of(parsed_list):
+    return {(o.manifest_key, o.source_table, o.metric, o.category, o.month) for p in parsed_list for t in p.tables for o in t.observations}
+
+
+def drop(parsed_list, key, table_id, month=None):
+    """The same batch without the cells of one table (or one month of it)."""
+    out = []
+    for p in parsed_list:
+        tables = []
+        for t in p.tables:
+            if p.manifest_key == key and t.source_table == table_id:
+                t = dataclasses.replace(t, observations=tuple(o for o in t.observations if month is not None and o.month != month))
+            tables.append(t)
+        out.append(ParsedPublication(p.manifest_key, p.reference_month, tuple(tables)))
+    return out
+
+
+def test_required_evidence_cells_are_manifest_derived_and_cell_specific():
+    scope = cmb.scope_for(["index_all_items"], M3, M3, SYN)
+    assert cmb.required_evidence_cells(scope, SYN) == {
+        ("syn-1", "T1", "index", "all_items", M3), ("syn-2", "V2", "index", "all_items", M3)}  # owner + validation overlap, nothing else
+    full = cmb.required_evidence_cells(cmb.manifest_scope(SYN), SYN)
+    assert ("syn-2", "V2", "index", "all_items", M2) in full and ("syn-3", "T3", "index", "all_items", D(2022, 2, 1)) in full
+
+
+def test_a_missing_validation_cell_fails_completeness_and_readiness_even_though_its_table_is_present():
+    scope = cmb.scope_for(["index_all_items"], M1, M4, SYN)
+    batch = evidence()
+    cmb.validate_evidence_completeness(batch, scope, SYN)  # complete
+    mutated = drop(batch, "syn-2", "V2", M3)  # keep every table, remove ONE validation cell
+    assert cells_of(batch) - cells_of(mutated) == {("syn-2", "V2", "index", "all_items", M3)}
+    with pytest.raises(ZamstatsCpiError, match="incomplete") as info:
+        cmb.validate_evidence_completeness(mutated, scope, SYN)
+    assert "syn-2 / V2 index_all_items 2020-03" in str(info.value)
+    with pytest.raises(ZamstatsCpiError, match="incomplete"):
+        cmb.require_canonical_ready(mutated, scope, SYN)
+    assert cmb.reconcile(mutated, SYN).conflicts == ()  # the diagnostic reconcile alone is silent: the trap this gate closes
+    cmb.validate_evidence_completeness(batch, scope, SYN)  # restoring it passes again
+
+
+def test_a_missing_owner_cell_fails_completeness():
+    with pytest.raises(ZamstatsCpiError, match="syn-1 / T1 index_all_items 2020-02"):
+        cmb.validate_evidence_completeness(_without(evidence(), "syn-1", "T1", M2), cmb.scope_for(["index_all_items"], M1, M3, SYN), SYN)
+
+
+def _without(batch, key, table_id, month):
+    out = []
+    for p in batch:
+        tables = []
+        for t in p.tables:
+            if p.manifest_key == key and t.source_table == table_id:
+                t = dataclasses.replace(t, observations=tuple(o for o in t.observations if o.month != month))
+            tables.append(t)
+        out.append(ParsedPublication(p.manifest_key, p.reference_month, tuple(tables)))
+    return out
+
+
+def test_a_duplicated_required_cell_fails():
+    batch = evidence()
+    t = batch[0].tables[0]
+    doubled = dataclasses.replace(t, observations=t.observations + (t.observations[0],))
+    batch[0] = ParsedPublication(batch[0].manifest_key, batch[0].reference_month, (doubled,))
+    with pytest.raises(ZamstatsCpiError, match="repeats required source cells"):
+        cmb.validate_evidence_completeness(batch, cmb.scope_for(["index_all_items"], M1, M3, SYN), SYN)
+
+
+def test_wrong_provenance_metric_category_or_month_does_not_satisfy_a_requirement():
+    scope = cmb.scope_for(["index_all_items"], M1, M3, SYN)
+    base = evidence()
+    t = base[0].tables[0]
+    first = t.observations[0]
+    variants = {
+        "key": dataclasses.replace(first, manifest_key="syn-2"),
+        "table": dataclasses.replace(first, source_table="V2"),
+        "page": dataclasses.replace(first, pdf_page=7),
+        "layout": dataclasses.replace(first, layout_family="annual_rows"),
+        "role": dataclasses.replace(first, canonical_for_table=False),
+    }
+    for name, bad in variants.items():
+        batch = evidence()
+        batch[0] = ParsedPublication("syn-1", batch[0].reference_month, (dataclasses.replace(t, observations=(bad,) + t.observations[1:]),))
+        with pytest.raises(ZamstatsCpiError, match="other provenance|does not match"):
+            cmb.validate_evidence_completeness(batch, scope, SYN)
+    # a cell for another month cannot stand in for the missing one
+    shifted = dataclasses.replace(first, month=M4)
+    batch = evidence()
+    batch[0] = ParsedPublication("syn-1", batch[0].reference_month, (dataclasses.replace(t, observations=(shifted,) + t.observations[1:]),))
+    with pytest.raises(ZamstatsCpiError, match="syn-1 / T1 index_all_items 2020-01"):
+        cmb.validate_evidence_completeness(batch, scope, SYN)
+    # another metric/category cannot satisfy an index_all_items requirement (and is not a valid table column)
+    from app.services.zamstats_cpi_models import parse_rate_number
+    other = dataclasses.replace(first, metric="monthly_inflation", category="food", number=parse_rate_number("1.0"))
+    batch = evidence()
+    batch[0] = ParsedPublication("syn-1", batch[0].reference_month, (dataclasses.replace(t, observations=(other,) + t.observations[1:]),))
+    with pytest.raises(ZamstatsCpiError, match="does not match the table's columns"):
+        cmb.validate_evidence_completeness(batch, scope, SYN)
+
+
+def test_scope_must_be_owned_by_the_manifest_and_the_order_is_scope_then_completeness_then_resolution():
+    with pytest.raises(ZamstatsCpiError, match="the manifest does not own"):
+        cmb.require_canonical_ready(evidence(), frozenset({("index_all_items", D(1999, 1, 1))}), SYN)
+    with pytest.raises(ZamstatsCpiError, match="the manifest does not own"):
+        cmb.validate_evidence_completeness(evidence(), frozenset({("annual_inflation_food", M1)}), SYN)
+    conflicted = _without(evidence({("syn-2", "V2"): {M3: "12.50"}}), "syn-2", "V2", M3)
+    # evidence is incomplete AND (with the cell restored) would be conflicting: completeness is reported first, never a resolution
+    with pytest.raises(ZamstatsCpiError, match="incomplete"):
+        cmb.require_canonical_ready(conflicted, cmb.scope_for(["index_all_items"], M1, M4, SYN), SYN)
+
+
+def test_a_narrow_scope_requires_only_its_own_cells():
+    narrow = cmb.scope_for(["index_all_items"], M1, M1, SYN)
+    only_t1 = [parsed(S1, AGREE[S1])]
+    assert cmb.validate_evidence_completeness(only_t1, narrow, SYN) == {("syn-1", "T1", "index", "all_items", M1)}
+    assert len(cmb.require_canonical_ready(only_t1, narrow, SYN)) == 1
+
+
+# ================================================================== the real manifest with fabricated (invented-value) evidence
+def fabricate(publications=P):
+    """Complete evidence for every cell of every manifest table, with invented values that agree wherever tables overlap."""
+    from app.services.zamstats_cpi_models import parse_rate_number
+    out = []
+    for p in publications:
+        tables = []
+        for t in p.tables:
+            months = []
+            m = t.first_month
+            while m <= t.last_month:
+                months.append(m)
+                m = D(m.year + (m.month == 12), m.month % 12 + 1, 1)
+            cells = []
+            for row, month in enumerate(months, start=1):
+                n = month.year * 12 + month.month
+                for metric, category, canonical in t.columns:
+                    base = {"all_items": 0, "food": 7, "non_food": 13}[category]
+                    text = f"{100 + (n % 100) + base}.50" if metric == "index" else f"{(n + base) % 9 + 1}.{(n + base) % 10}"
+                    number = parse_index_number(text) if metric == "index" else parse_rate_number(text)
+                    cells.append(SourceObservation(month, metric, category, number, "2009=100", p.key, t.table_id, t.pdf_page, row,
+                                                   t.family, canonical))
+            tables.append(ParsedTable(t.table_id, t.pdf_page, t.family, t.first_month, t.last_month, tuple(cells)))
+        out.append(ParsedPublication(p.key, p.reference_month, tuple(tables)))
+    return out
+
+
+def test_fabricated_complete_evidence_is_canonical_ready_for_the_whole_real_manifest():
+    batch = fabricate()
+    cmb.validate_evidence_completeness(batch)
+    ready = cmb.require_canonical_ready(batch)
+    assert len(ready) == 1366 and cmb.reconcile(batch).conflicts == ()
+
+
+def test_december_2014_regression_removing_the_later_validation_cell_fails_for_missing_evidence_not_for_a_conflict():
+    scope = cmb.scope_for(["monthly_inflation_all_items"], D(2014, 12, 1), D(2014, 12, 1))
+    cells = cmb.required_evidence_cells(scope)
+    z152_table = P[2].tables[1].table_id
+    assert {(k, t) for k, t, *_ in cells} == {("zam-cpi-2014-12", P[1].tables[0].table_id), ("zam-cpi-2015-12", z152_table)}
+    batch = fabricate()
+    cmb.require_canonical_ready(batch, scope)  # complete and unconflicted
+    mutated = _without(batch, "zam-cpi-2015-12", z152_table, D(2014, 12, 1))  # drop ONLY the later validation observation
+    with pytest.raises(ZamstatsCpiError, match="incomplete") as info:
+        cmb.validate_evidence_completeness(mutated, scope)
+    assert "zam-cpi-2015-12" in str(info.value) and "2014-12" in str(info.value) and "conflict" not in str(info.value)
+    with pytest.raises(ZamstatsCpiError, match="incomplete"):
+        cmb.require_canonical_ready(mutated, scope)
+    assert cmb.reconcile(mutated).conflicts == ()  # reconcile alone would have called it resolved
+
+
+def test_suppressing_every_known_conflict_by_removing_its_non_owner_cells_fails_completeness_before_resolution():
+    """The review attack, offline: create ten conflicts in complete evidence, then delete the non-owner cells that expose them."""
+    batch = fabricate()
+    owners = cmb.canonical_owners(P)
+    # pick ten (series, month) with at least one validation overlap and corrupt that non-owner cell
+    victims = []
+    for (month, name), owner in sorted(owners.items()):
+        others = [(p.manifest_key, t.source_table, o) for p in batch for t in p.tables for o in t.observations
+                  if o.month == month and o.series == name and (o.manifest_key, o.source_table) not in set(owner)]
+        if others and len(victims) < 10:
+            victims.append((month, name, others))
+    assert len(victims) == 10
+    exposed = []
+    for month, name, others in victims:
+        for key, table, cell in others:
+            exposed.append((key, table, cell.month, cell.metric, cell.category))
+    def corrupt(batch_, replace_value):
+        by_cell = {(k, t, m, me, c) for k, t, m, me, c in exposed}
+        out = []
+        for p in batch_:
+            tables = []
+            for t in p.tables:
+                obs_ = []
+                for o in t.observations:
+                    if (o.manifest_key, o.source_table, o.month, o.metric, o.category) in by_cell:
+                        if replace_value == "drop":
+                            continue
+                        o = dataclasses.replace(o, number=parse_index_number("999.99") if o.metric == "index" else parse_rate_number_("9.9"))
+                    obs_.append(o)
+                tables.append(dataclasses.replace(t, observations=tuple(obs_)))
+            out.append(ParsedPublication(p.manifest_key, p.reference_month, tuple(tables)))
+        return out
+    conflicted = corrupt(batch, "corrupt")
+    assert len(cmb.reconcile(conflicted).conflicts) >= 10
+    cmb.validate_evidence_completeness(conflicted)  # complete: the evidence that exposes the conflicts is present...
+    with pytest.raises(ZamstatsCpiError, match="conflicting source cells"):
+        cmb.require_canonical_ready(conflicted)  # ...so readiness is refused for the real reason
+    suppressed = corrupt(batch, "drop")
+    assert cmb.reconcile(suppressed).conflicts == ()  # numerically the attack "works" in a diagnostic reconcile...
+    with pytest.raises(ZamstatsCpiError, match="incomplete"):
+        cmb.validate_evidence_completeness(suppressed)  # ...but completeness fails first
+    with pytest.raises(ZamstatsCpiError, match="incomplete"):
+        cmb.require_canonical_ready(suppressed)
+    assert cmb.require_canonical_ready(batch)  # the untouched complete evidence is ready
+
+
+def parse_rate_number_(text):
+    from app.services.zamstats_cpi_models import parse_rate_number
+    return parse_rate_number(text)
+
+
+def test_mutation_remove_then_restore_a_validation_observation():
+    scope = cmb.scope_for(["index_food"], D(2021, 1, 1), D(2021, 12, 1))
+    batch = fabricate()
+    cmb.validate_evidence_completeness(batch, scope)
+    mutated = _without(batch, "zam-cpi-2025-12", P[12].tables[0].table_id, D(2021, 6, 1))
+    with pytest.raises(ZamstatsCpiError, match="incomplete"):
+        cmb.validate_evidence_completeness(mutated, scope)
+    with pytest.raises(ZamstatsCpiError, match="incomplete"):
+        cmb.require_canonical_ready(mutated, scope)
+    assert len(cmb.require_canonical_ready(batch, scope)) == 12  # restored: ready
+
+
+def test_narrow_real_manifest_scope_does_not_need_the_other_publications():
+    scope = cmb.scope_for(["index_food"], D(2021, 1, 1), D(2021, 12, 1))
+    needed = {k for k, _t, *_ in cmb.required_evidence_cells(scope)}
+    assert needed == {"zam-cpi-2023-12", "zam-cpi-2025-12"}
+    only_two = [p for p in fabricate() if p.manifest_key in needed]
+    assert len(cmb.require_canonical_ready(only_two, scope)) == 12

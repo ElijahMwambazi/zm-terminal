@@ -25,13 +25,13 @@ manifest (committed pins) -> verify bytes (size, %PDF, SHA-256) -> extract ONLY 
 | gate | function | what it proves | state today |
 |---|---|---|---|
 | 1. manifest coverage | `manifest_problems` / `validate_manifest` | the committed manifest names exactly one canonical owner for every month of every series | **complete** |
-| 2. parsed-evidence completeness | `validate_evidence_completeness` | every manifest table whose printed extent touches the requested scope (owners AND validation overlaps) was actually parsed and supplied, and each supplied table is the manifest's table | **complete** once all 14 PDFs are parsed |
+| 2. parsed-evidence completeness | `validate_evidence_completeness` | **cell-level**: every source cell the manifest requires for the requested scope (owner AND validation-overlap cells, identified by manifest key, table, metric, category and month) exists exactly once with the right provenance | **complete** once all 14 PDFs are parsed |
 | 3. canonical resolution | `require_resolved` / `require_canonical_ready` | no conflicting source cells remain (and, for `require_canonical_ready`, gate 2 as well) | **incomplete: 10 observations conflict** |
 
-Static ownership alone is not enough: an observation (for example December 2014 monthly inflation) can look resolved until the later
+Static ownership alone is not enough, and neither is the presence of a table: an observation (for example December 2014 monthly inflation) can look resolved until the later
 publication that contradicts it is supplied. `reconcile` on its own is a diagnostic over whatever evidence it is given and is never
 canonical-ready; only `require_canonical_ready(parsed, scope)` proves completeness and resolution together, and conflicts outside
-the requested scope do not block it. The required tables are derived from the manifest, not from month lists. An empty reconciliation
+the requested scope do not block it. `required_evidence_cells(scope)` is derived purely from the manifest's tables, printed extents and columns (never from what happened to parse and never from hard-coded months), so it covers any future validation overlap. A missing cell, a repeated cell, or a cell with the wrong key, table, page, layout, column role, metric, category or month fails; removing only the later validation observation that would reveal a disagreement (for example December 2014 monthly inflation) fails completeness for missing evidence rather than looking resolved. `require_canonical_ready` runs in a fixed order: validate the scope, validate cell-level completeness, reconcile, require resolution; a missing cell is never converted into a resolved observation. `reconcile` alone is only a diagnostic: reconcile != canonical readiness. An empty reconciliation
 is not "resolved", and an empty requested scope is an error. **A controlled real import stays blocked** until the ten conflicts have a
 reviewed resolution rule.
 
@@ -146,8 +146,9 @@ with no authorisation) and the Vol 176 monthly table (wrapped continuation lines
 - The optional gate `tests/test_zamstats_cpi_real_source.py` (env var `ZM_ZAMSTATS_CPI_PDF_DIR`, no network, skipped by default)
   re-checks every publication, known edge values (October 2026; a printed `(0.0)`) and the full reconciliation: 1,356 resolved, 10
   conflicts (the table above), 8 formatting variants.
-- The optional gate is explicit: with `ZM_ZAMSTATS_CPI_PDF_DIR` unset the suite is skipped; with it set, **every manifest PDF must be
-  present or the suite fails** (never skips), including the aggregate tests. It also demonstrates the three gates on the real data:
+- The optional gate is explicit: only an UNSET `ZM_ZAMSTATS_CPI_PDF_DIR` skips the suite; an empty or whitespace-only value is a
+  configuration error and fails; with a real value, **every manifest PDF must be present or the suite fails** (never skips),
+  including the aggregate tests. It also demonstrates the three gates on the real data:
   coverage complete, evidence completeness complete, resolution rejected (10 conflicts), and a conflict-free scope (Food index 2021)
   that becomes canonical-ready with only the two tables it needs.
 - **Fixture policy.** The normal suite is offline and uses small fixtures (`tests/fixtures/zamstats_cpi_*.txt`) whose numeric VALUES

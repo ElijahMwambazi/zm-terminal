@@ -83,13 +83,59 @@ def test_three_gates_manifest_coverage_evidence_completeness_and_resolution():
     assert src.manifest_problems() == []  # 1. manifest coverage: complete
     parsed = load_all()
     required = cmb.validate_evidence_completeness(parsed)  # 2. parsed evidence completeness: complete
-    assert required == {(p.key, t.table_id) for p in src.PUBLICATIONS for t in p.tables}
+    assert {(key, table) for key, table, *_ in required} == {(p.key, t.table_id) for p in src.PUBLICATIONS for t in p.tables}
+    assert len(required) > 1366  # cell-level: every owner cell plus every validation-overlap cell
     result = cmb.reconcile(parsed)  # 3. canonical resolution: INCOMPLETE (ten source conflicts)
     assert len(result.conflicts) == 10
     with pytest.raises(ZamstatsCpiError, match="conflicting source cells"):
         cmb.require_resolved(result)
     with pytest.raises(ZamstatsCpiError, match="conflicting source cells"):
         cmb.require_canonical_ready(parsed)
+
+
+def _without_cells(parsed, doomed):
+    """The same parsed batch without the given observations (tables stay present)."""
+    out = []
+    for p in parsed:
+        tables = [t.__class__(t.source_table, t.pdf_page, t.layout_family, t.first_month, t.last_month,
+                              tuple(o for o in t.observations if id(o) not in doomed), t.duplicate_rows) for t in p.tables]
+        out.append(p.__class__(p.manifest_key, p.reference_month, tuple(tables)))
+    return out
+
+
+def test_cell_level_completeness_on_the_real_evidence_mutation_and_restore():
+    parsed = load_all()
+    cmb.validate_evidence_completeness(parsed)  # complete
+    # December 2014 monthly inflation: remove only the later publication's validation observation
+    scope = cmb.scope_for(["monthly_inflation_all_items"], D(2014, 12, 1), D(2014, 12, 1))
+    doomed = {id(o) for p in parsed if p.manifest_key == "zam-cpi-2015-12" for o in p.observations
+              if o.series == "monthly_inflation_all_items" and o.month == D(2014, 12, 1)}
+    assert len(doomed) == 1
+    mutated = _without_cells(parsed, doomed)
+    for gate in (lambda: cmb.validate_evidence_completeness(mutated, scope), lambda: cmb.require_canonical_ready(mutated, scope)):
+        with pytest.raises(ZamstatsCpiError, match="incomplete"):
+            gate()
+    with pytest.raises(ZamstatsCpiError, match="conflicting source cells"):  # restored: refused only because of the real conflict
+        cmb.require_canonical_ready(parsed, scope)
+    cmb.validate_evidence_completeness(parsed, scope)
+
+
+def test_suppressing_the_non_owner_cells_of_all_ten_real_conflicts_fails_completeness():
+    parsed = load_all()
+    owners = cmb.canonical_owners()
+    result = cmb.reconcile(parsed)
+    doomed = set()
+    for conflict in result.conflicts:
+        pinned = set(owners[(conflict.month, conflict.series)])
+        doomed |= {id(o) for o in conflict.evidence if not (o.canonical_for_table and (o.manifest_key, o.source_table) in pinned)}
+    assert doomed
+    suppressed = _without_cells(parsed, doomed)
+    assert cmb.reconcile(suppressed).conflicts == ()  # a diagnostic reconcile alone would show no conflict at all
+    scope = frozenset((c.series, c.month) for c in result.conflicts)
+    for gate in (lambda: cmb.validate_evidence_completeness(suppressed, scope), lambda: cmb.require_canonical_ready(suppressed, scope),
+                 lambda: cmb.require_canonical_ready(suppressed)):
+        with pytest.raises(ZamstatsCpiError, match="incomplete"):
+            gate()
 
 
 def test_full_reconciliation_resolves_every_observation_except_the_pinned_source_conflicts():
