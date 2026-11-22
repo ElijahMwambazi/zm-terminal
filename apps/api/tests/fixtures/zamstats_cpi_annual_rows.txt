@@ -1,0 +1,8 @@
+                                                         CONSUMER PRICE INDICES (2009=100)
+                   Year                                     Month                 Annual CPI   Annual Inflation Rate
+                  2022                                     November                 150.11             6.3
+                  2022                                     December                 151.22             (0.6)
+                  2023                                     January                  152.33             -0.3
+                  2023                                     February                 153.44             (0.0)
+ Note: Inflation rates are computed using unrounded consumer price indices
+ Source: ZamStats, Prices Statistics, 2099

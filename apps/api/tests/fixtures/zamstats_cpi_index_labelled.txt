@@ -1,0 +1,17 @@
+                       Volume 900 - The Monthly - December               2099
+                                          ANNEX 1: CONSUMER PRICE INDEX
+ Table 1.1: Consumer Price Index - Food and Non-Food (National), 2022-2023
+ Period                                                        Total        Food CPI       Non-Food CPI
+                                     Month
+ Weight                                                        1000           534.9           465.2
+                                     October                  100.11          200.5          300.33
+                                     November                 101.22         201.25          301.44
+  2022
+                                     December                 102.33         202.36          302.55
+                                     January                  103.44         203.47          303.66
+                                     February                 104.55         204.58          304.77
+  2023
+                                     March                    105.66         205.69          305.88
+ Source: ZamStats, Prices Statistics, 2099
+ Note: 2009 = 100
+                                                                                                         23
