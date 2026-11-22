@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import text
 
 from app.db import database_is_ready, get_engine
+from app.schemas.bank_fx import BankFxLatest, BankFxSnapshotRead
 from app.schemas.btc import BtcRange, BtcUsdHistory, BtcUsdQuote, BtcZmwHistory, BtcZmwQuote
 from app.schemas.copper import CopperHistory, CopperLatest, CopperRange
 from app.schemas.copper_kwacha import CopperKwachaCorrelation, CopperKwachaSensitivity, CorrelationWindow
@@ -35,6 +36,7 @@ from app.schemas.tbills import (
 )
 from app.services.boz import get_boz_fx_quote
 from app.services.bitstamp_btc import get_bitstamp_btc_quote
+from app.services.bank_fx_read import fetch_bank_fx_date, fetch_latest_bank_fx
 from app.services.btc_store import fetch_btc_history
 from app.services.btc_zmw import InvalidStoredFxError, derive_btc_zmw
 from app.services.btc_zmw_history import InvalidHistoryInputError, fetch_btc_zmw_history
@@ -118,6 +120,30 @@ async def fx_usdzmw_monthly(range: FxMonthlyRange = "ALL") -> FxMonthlyHistory:
     except Exception as exc:
         logger.warning("Monthly FX read failed (%s)", type_name(exc))
         raise HTTPException(status_code=503, detail="Stored monthly USD/ZMW averages unavailable") from exc
+
+
+@router.get("/fx/banks/latest", response_model=BankFxLatest)
+async def fx_banks_latest() -> BankFxLatest:
+    """Canonical stored commercial bank USD/ZMW snapshot of the newest observation date held locally (local/internal; rights review_required).
+    PostgreSQL only: BoZ is never called here. Nothing stored is a 200 with `snapshot: null`."""
+    try:
+        return await asyncio.to_thread(fetch_latest_bank_fx)
+    except Exception as exc:
+        logger.warning("Bank FX latest read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored commercial bank FX data unavailable") from exc
+
+
+@router.get("/fx/banks/history", response_model=BankFxSnapshotRead)
+async def fx_banks_history(day: Annotated[date, Query(alias="date")]) -> BankFxSnapshotRead:
+    """Canonical stored snapshot of exactly one observation date; 404 when that date is not stored (never another date). Stored data only."""
+    try:
+        snapshot = await asyncio.to_thread(fetch_bank_fx_date, day)
+    except Exception as exc:
+        logger.warning("Bank FX history read failed (%s)", type_name(exc))
+        raise HTTPException(status_code=503, detail="Stored commercial bank FX data unavailable") from exc
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="No stored commercial bank FX for that date")
+    return snapshot
 
 
 @router.get("/treasury-bills/latest", response_model=TreasuryBillsLatest)
