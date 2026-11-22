@@ -1,0 +1,9 @@
+Table 1.3: Consumer Price Indices and Annual Inflation, 2022 - 2023
+              Year                          Month                Annual CPI    Annual Inflation Rate
+                                            October                150.11              6.3
+             2022                           November               151.22              6.4
+                                            December               152.33              6.5
+                                            January                153.44              6.6
+             2023                           February               154.55              6.7
+                                            March                  155.66              6.8
+Source: SYNTHETIC fixture (invented values) Note: 2009 = 100

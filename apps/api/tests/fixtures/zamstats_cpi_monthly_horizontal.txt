@@ -1,0 +1,10 @@
+Table 7: Overall Monthly Inflation Rate for Food and Non-Food Items, December 2098- December 2099 (%)
+                     Dec -     Jan -     Feb -    Mar -     Apr -   May -    Jun -   Jul -    Aug -      Sep -      Oct -   Nov -   Dec -
+         Weight:
+                    2098      2099      2099      2099     2099     2024     2099    2099    2099       2099       2099    2099    2099
+Total    1,000.00    5.1      5.2        5.3     5.4        5.5     5.6      5.7     5.8      5.9        6.1        6.2     6.3     6.4
+Food      534.85     7.1      7.2        7.3     7.4        7.5     7.6      7.7     7.8      7.9        9.1        9.2     9.3     9.4
+Non-
+          465.15     8.1      8.2         8.3    8.4        (0.3)   8.6      8.7     8.8      8.9        -0.8       (0.0)   9.2     9.3
+Food
+Source: SYNTHETIC fixture (invented values)
