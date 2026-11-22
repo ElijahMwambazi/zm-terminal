@@ -512,11 +512,13 @@ def test_provider_policy_is_registered_and_local_internal():
     assert "no retries" in p.request_guidance and "ONE GET per requested date" in p.request_guidance
 
 
-def test_no_live_network_import_side_effects():
-    """The adapter module performs no request at import, and the importer/router are untouched by this slice."""
+def test_adapter_is_not_wired_into_the_router_or_the_read_path():
+    """The adapter performs no request at import; only the manual importer calls it, never the API router or read service."""
     root = Path(__file__).parents[1] / "app"
-    assert not (root / "jobs" / "import_bank_fx.py").exists()
-    assert "bank_fx" not in (root / "api" / "router.py").read_text().lower()
+    for rel in ("api/router.py", "services/bank_fx_read.py"):
+        assert "boz_bank_fx" not in (root / rel).read_text()
+    callers = [p.name for p in root.rglob("*.py") if "boz_bank_fx" in p.read_text() and p.name not in ("boz_bank_fx.py", "bank_fx_models.py")]
+    assert callers == ["import_bank_fx.py"]
 
 
 # ----------------------------------------------------------------------------------------------- bounded raw streaming
