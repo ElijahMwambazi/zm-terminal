@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getBankFxDate, getBankFxLatest, parseBankFxLatest, parseBankFxSnapshot } from "./api";
+import { ApiError, getBankFxDate, getBankFxLatest, parseBankFxLatest, parseBankFxSnapshot } from "./api";
 import { row, slot, snapshot } from "./bankFxFixtures";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -77,7 +77,72 @@ describe("Bank FX response validation", () => {
   });
 });
 
+describe("Bank FX strict timestamps", () => {
+  const TS = ["source_created", "source_changed", "source_revision_timestamp", "source_rates_datetime", "retrieved_at"];
+  const BAD_TS = ["1", "January 2, 2030", "2026-02-30T00:00:00Z", "2026-13-01T00:00:00Z", "2026-01-01", "2026-01-01T00:00:00", "2026-01-01T25:00:00Z", "2026-01-01T00:61:00Z", "2026-01-01T00:00:61Z", "2026-01-01T00:00:00+24:00", "2026-01-01T00:00:00+02:60", "2026-01-01 00:00:00Z", "0099-02-29T00:00:00Z"];
+  const GOOD_TS = ["2026-11-20T08:30:00Z", "2026-11-20T08:30:00+00:00", "2026-11-20T10:30:00+02:00", "2026-11-20T08:30:00.123456+00:00", "2026-11-20T08:30:00.5Z"];
+  for (const key of TS) {
+    it.each(BAD_TS)(`rejects ${key}=%j`, (v) => {
+      expect(() => parseBankFxSnapshot(snapshot({ [key]: v }))).toThrow();
+    });
+    it.each(GOOD_TS)(`accepts ${key}=%j unchanged`, (v) => {
+      expect((parseBankFxSnapshot(snapshot({ [key]: v })) as unknown as Record<string, string>)[key]).toBe(v);
+    });
+  }
+  it("keeps the raw source datetime unnormalised and does not order created/changed/revision", () => {
+    const s = parseBankFxSnapshot(snapshot({ source_rates_datetime_raw: "whatever the source said", source_created: "2031-01-01T00:00:00Z", source_changed: "2030-01-01T00:00:00Z" }));
+    expect(s.source_rates_datetime_raw).toBe("whatever the source said");
+  });
+});
+
+describe("Bank FX calendar dates", () => {
+  it.each(["0001-01-01", "0099-01-01", "0100-01-01", "2000-02-29", "2024-02-29"])("accepts %s", (d) => {
+    expect(parseBankFxSnapshot(snapshot({ observation_date: d })).observation_date).toBe(d);
+  });
+  it.each(["0099-02-29", "1900-02-29", "2026-02-29", "2026-02-30", "0000-13-01", "12345-01-01", "99-01-01"])("rejects %s", (d) => {
+    expect(() => parseBankFxSnapshot(snapshot({ observation_date: d }))).toThrow();
+  });
+});
+
+describe("Bank FX market average identity and row index", () => {
+  it("rejects an arbitrary institution as the market average", () => {
+    expect(() => parseBankFxSnapshot(withSlot({ ...slot("09:30", 10), market_average: row(6, "ARBITRARY TEST BANK", 9) }))).toThrow();
+  });
+  it.each(["Market Average", "MARKET AVERAGE", "market average"])("accepts the market average identity %j and keeps raw spacing", (name) => {
+    const s = parseBankFxSnapshot(withSlot({ ...slot("09:30", 10), market_average: row(6, name, 9, { institution_name_raw: "  Market   AVERAGE " }) }));
+    expect(s.slots[0].market_average?.institution_name_raw).toBe("  Market   AVERAGE ");
+  });
+  it.each([1, 2])("rejects bank and average source_row_index %j", (i) => {
+    expect(() => parseBankFxSnapshot(withSlot({ ...slot("09:30", 10, false), banks: [row(i, "A", 9)] }))).toThrow();
+    expect(() => parseBankFxSnapshot(withSlot({ ...slot("09:30", 10, false), market_average: row(i, "MARKET AVERAGE", 9) }))).toThrow();
+  });
+  it("accepts source_row_index 3 for a bank and for the average", () => {
+    expect(() => parseBankFxSnapshot(withSlot({ ...slot("09:30", 10, false), banks: [row(3, "A", 9)] }))).not.toThrow();
+    expect(() => parseBankFxSnapshot(withSlot({ ...slot("09:30", 10, false), banks: [], market_average: row(3, "MARKET AVERAGE", 9) }))).not.toThrow();
+  });
+  it("still rejects an average sharing a bank's row index", () => {
+    expect(() => parseBankFxSnapshot(withSlot({ ...slot("09:30", 10, false), banks: [row(3, "A", 9)], market_average: row(3, "MARKET AVERAGE", 9) }))).toThrow();
+  });
+  it("does not accept a null snapshot", () => {
+    expect(() => parseBankFxSnapshot(null)).toThrow();
+  });
+});
+
 describe("Bank FX API client", () => {
+  it("history: 404 is null, valid 200 is a snapshot, 200 null or malformed object is an ApiError", async () => {
+    stub(404, { detail: "x" });
+    expect(await getBankFxDate("2030-01-02")).toBeNull();
+    stub(200, snapshot());
+    expect((await getBankFxDate("2030-01-02"))?.observation_date).toBe("2030-01-02");
+    for (const body of ["null", {}, { observation_date: "2030-01-02" }, []]) {
+      stub(200, body);
+      const error = await getBankFxDate("2030-01-02").then((v) => v, (e: Error) => e);
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).kind).toBe("api");
+      expect((error as Error).message).toBe("Unexpected Bank FX response");
+    }
+  });
+
   it("reads only the stored latest endpoint", async () => {
     const f = stub(200, { snapshot: snapshot() });
     expect((await getBankFxLatest()).snapshot?.slots).toHaveLength(3);

@@ -1087,20 +1087,35 @@ const BANK_FX_RATE = /^[0-9]+\.[0-9]{1,4}$/;
 const BANK_FX_RETAIL_LABEL: Record<BankFxLayout, BankFxSlotSnapshot["retail_source_label"]> = { v1: "Retail Rates", v2: "BOARD RATES" };
 const nonEmpty = (v: unknown, what: string): string => (typeof v === "string" && v.length > 0 ? v : bad(what));
 const rate = (v: unknown, what: string): string => (typeof v === "string" && BANK_FX_RATE.test(v) && /[1-9]/.test(v) ? v : bad(what));
-const instant = (v: unknown, what: string): string => (typeof v === "string" && v.length > 0 && !Number.isNaN(Date.parse(v)) ? v : bad(what));
+/** Explicit Gregorian validation (no `Date`, so years 0000-0099 are not remapped to 1900-1999). */
+function validGregorian(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+  return day <= days;
+}
 function calendarDate(v: unknown, what: string): string {
   const text = nonEmpty(v, what);
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
   if (!m) return bad(what);
-  const probe = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-  return probe.getUTCFullYear() === Number(m[1]) && probe.getUTCMonth() === Number(m[2]) - 1 && probe.getUTCDate() === Number(m[3]) ? text : bad(what);
+  return validGregorian(Number(m[1]), Number(m[2]), Number(m[3])) ? text : bad(what);
+}
+// Backend (pydantic) datetimes: ISO date + "T" + time, optional 1-6 digit fraction, mandatory "Z" or numeric UTC offset.
+const BANK_FX_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|[+-](\d{2}):(\d{2}))$/;
+function instant(v: unknown, what: string): string {
+  const text = nonEmpty(v, what);
+  const m = BANK_FX_INSTANT.exec(text);
+  if (!m) return bad(what);
+  const [year, month, day, hour, minute, second] = m.slice(1, 7).map(Number);
+  const offsetOk = m[7] === undefined || (Number(m[7]) <= 23 && Number(m[8]) <= 59);
+  return validGregorian(year, month, day) && hour <= 23 && minute <= 59 && second <= 59 && offsetOk ? text : bad(what);
 }
 const isMarketAverageName = (name: string) => name.trim().replace(/\s+/g, " ").toLowerCase() === "market average";
 
 function institution(raw: unknown, what: string): BankFxInstitutionRate {
   const o = rec(raw, what);
   return {
-    source_row_index: int(o.source_row_index, "source_row_index", 1), institution_name: nonEmpty(o.institution_name, "institution_name"),
+    source_row_index: int(o.source_row_index, "source_row_index", 3), institution_name: nonEmpty(o.institution_name, "institution_name"),
     institution_name_raw: nonEmpty(o.institution_name_raw, "institution_name_raw"),
     interbank_buy: rate(o.interbank_buy, "interbank_buy"), interbank_sell: rate(o.interbank_sell, "interbank_sell"),
     retail_buy: rate(o.retail_buy, "retail_buy"), retail_sell: rate(o.retail_sell, "retail_sell"),
@@ -1113,6 +1128,7 @@ function slotSnapshot(raw: unknown, layout: BankFxLayout): BankFxSlotSnapshot {
   if (o.retail_source_label !== BANK_FX_RETAIL_LABEL[layout]) bad("retail_source_label does not match the layout");
   const banks = arr(o.banks, "banks").map((b) => institution(b, "bank"));
   const average = o.market_average === null || o.market_average === undefined ? null : institution(o.market_average, "market_average");
+  if (average && !isMarketAverageName(average.institution_name)) bad("market_average is not the Market Average row");
   const names = new Set<string>();
   const rows = new Set<number>();
   let previous = 0;
@@ -1154,7 +1170,9 @@ export function parseBankFxLatest(raw: unknown): BankFxLatest {
   return { snapshot: o.snapshot === null ? null : parseBankFxSnapshot(o.snapshot) };
 }
 
-async function getBankFxJson(path: string, allowNotFound: boolean): Promise<unknown | null> {
+const BANK_FX_NOT_FOUND = Symbol("bank-fx-not-found");
+
+async function getBankFxJson(path: string, allowNotFound: boolean): Promise<unknown> {
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`);
@@ -1162,7 +1180,7 @@ async function getBankFxJson(path: string, allowNotFound: boolean): Promise<unkn
     throw new ApiError("api", "ZM Terminal API is unreachable");
   }
   if (response.status === 503) throw new ApiError("api", "Stored commercial bank FX data is unavailable (database)");
-  if (response.status === 404 && allowNotFound) return null;
+  if (response.status === 404 && allowNotFound) return BANK_FX_NOT_FOUND;
   if (response.status === 422) throw new ApiError("api", "Invalid date for the stored Bank FX lookup");
   if (!response.ok) throw new ApiError("api", `ZM Terminal API error (${response.status})`);
   try {
@@ -1185,7 +1203,7 @@ export async function getBankFxLatest(): Promise<BankFxLatest> {
 /** Exactly this stored date; `null` when it is not stored (never another date). Never contacts BoZ. */
 export async function getBankFxDate(day: string): Promise<BankFxSnapshot | null> {
   const body = await getBankFxJson(`/api/v1/fx/banks/history?${new URLSearchParams({ date: day })}`, true);
-  if (body === null) return null;
+  if (body === BANK_FX_NOT_FOUND) return null;
   try {
     const snapshot = parseBankFxSnapshot(body);
     if (snapshot.observation_date !== day) bad("observation_date differs from the requested date");

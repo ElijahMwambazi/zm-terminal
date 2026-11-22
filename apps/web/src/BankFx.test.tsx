@@ -218,6 +218,17 @@ describe("exact stored date", () => {
     expect(calls).toEqual(["/api/v1/fx/banks/history?date=2029-11-19"]); // exactly one request, for exactly that date
     expect(screen.getByText(/\(2030-01-02\)/)).toBeTruthy(); // the earlier snapshot is still what is displayed
   });
+  it("treats an HTTP 200 null history body as a malformed response, not a missing date, and keeps the snapshot", async () => {
+    routes["/api/v1/fx/banks/history"] = () => new Response("null", { status: 200 });
+    const user = userEvent.setup();
+    detail();
+    await user.clear(screen.getByLabelText("STORED DATE")); await user.type(screen.getByLabelText("STORED DATE"), "2029-11-19");
+    await user.click(screen.getByRole("button", { name: "LOAD DATE" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Unexpected Bank FX response");
+    expect(screen.queryByText(/No stored commercial-bank FX snapshot/)).toBeNull();
+    expect(screen.getByText(/\(2030-01-02\)/)).toBeTruthy();
+  });
   it("shows a safe error for a database failure", async () => {
     routes["/api/v1/fx/banks/history"] = () => json({ detail: "postgresql://secret" }, 503);
     const user = userEvent.setup();

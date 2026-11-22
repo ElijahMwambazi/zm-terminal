@@ -330,5 +330,6 @@ th { text-align: left; color: #8c8c8c; font-weight: normal; padding: 6px 4px; }
 @media (max-width: 640px) {
   .bank-fx-controls, .bank-fx-slots { padding-left: 12px; padding-right: 12px; }
   .bank-fx-controls input[type="date"] { flex: 1 1 140px; min-width: 0; }
+  .bank-fx-controls button { min-height: 40px; }
   .bank-fx-table .bank-fx-bank { min-width: 130px; max-width: 160px; }
 }
