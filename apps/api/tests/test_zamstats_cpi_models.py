@@ -80,3 +80,37 @@ def test_non_string_input_is_rejected_not_coerced():
         parse_number("percent", "6.3")
     assert parse_number("rate", "6.3").value == Decimal("6.3")
     assert parse_number("index", "564.62").value == Decimal("564.62")
+
+
+# ------------------------------------------------------------------ the closed seven-series space holds for every instance
+from datetime import date  # noqa: E402
+
+from app.services.zamstats_cpi_models import SourceObservation  # noqa: E402
+
+_VALID = [("index", "all_items"), ("index", "food"), ("index", "non_food"), ("monthly_inflation", "all_items"),
+          ("monthly_inflation", "food"), ("monthly_inflation", "non_food"), ("annual_inflation", "all_items")]
+
+
+def _obs(metric: str, category: str, month: date = date(2020, 1, 1)) -> SourceObservation:
+    number = parse_index_number("1.0") if metric == "index" else parse_rate_number("1.0")
+    return SourceObservation(month, metric, category, number, "2009=100", "k", "t", 1, 1, "vertical_labelled")
+
+
+@pytest.mark.parametrize("metric,category", _VALID)
+def test_every_approved_series_can_be_constructed_directly(metric, category):
+    assert _obs(metric, category).series == f"{metric}_{category}"
+    assert (metric, category) in PHASE1_SERIES
+
+
+@pytest.mark.parametrize("metric,category", [
+    ("annual_inflation", "food"), ("annual_inflation", "non_food"), ("division", "food"), ("index", "province"),
+    ("monthly_inflation", "division_1"), ("contribution", "all_items"), ("", ""), ("index", "ALL_ITEMS"),
+])
+def test_unsupported_metric_category_combinations_cannot_be_constructed(metric, category):
+    with pytest.raises(ZamstatsCpiError):
+        _obs(metric, category)
+
+
+def test_observation_month_must_be_first_of_month():
+    with pytest.raises(ZamstatsCpiError, match="first-of-month"):
+        _obs("index", "food", date(2020, 1, 15))

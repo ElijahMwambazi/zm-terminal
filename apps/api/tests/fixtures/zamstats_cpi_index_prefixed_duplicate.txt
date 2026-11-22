@@ -2,11 +2,11 @@
                                                                                          2009 = 100
      Period                                     Total         Food CPI          Non-Food CPI
      Weight                                    1000.0          534.9                465.2
-             2010    October                    105.01         104.43               105.67
-                     November                   105.47         104.87               106.15
-                     December                   106.55         106.13               107.03
-                     December                   106.55         106.13               107.03
-             2011    January                    107.48         107.11                107.9
-                     February                   107.74         107.23               108.34
- Source: ZamStats, Prices Statistics, 2099
+             2010    October                    211.11         212.22               213.33
+                     November                   211.44         212.55               213.66
+                     December                   211.77         212.88               213.99
+                     December                   211.77         212.88               213.99
+             2011    January                    212.1           213.2                214.3
+                     February                   212.44         213.55                214.6
+ Source: SYNTHETIC fixture (invented values)
                                                                                               23 | P a g e

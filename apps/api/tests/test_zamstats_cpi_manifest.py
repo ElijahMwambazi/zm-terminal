@@ -174,3 +174,32 @@ def test_manifest_contains_no_database_bo_z_or_discovery_dependency():
     source = inspect.getsource(src)
     for forbidden in ("boz.zm", "sqlalchemy", "psycopg", "crawl(", "find_newest", "datetime.now", "date.today"):
         assert forbidden not in source
+
+
+# ------------------------------------------------------------------ structural pins added after review
+def test_every_non_horizontal_table_pins_its_ordered_headings_and_every_table_pins_its_boundary():
+    for p in P:
+        for t in p.tables:
+            assert t.boundary_regex and t.boundary_count >= 1
+            if t.family != "horizontal_13":
+                assert t.header_regex, (p.key, t.table_id)
+
+
+def test_the_real_boundary_variants_are_pinned_not_assumed():
+    by = {p.key: p for p in P}
+    z152 = by["zam-cpi-2015-12"].tables[1]
+    assert "Source" not in z152.boundary_regex and "Percentage Point Contribution" in z152.boundary_regex  # no Source: line follows
+    assert by["zam-cpi-2023-12"].tables[1].boundary_count == 2  # two consecutive Source lines are printed after Table 1.3
+    assert by["zam-cpi-2026-10"].tables[0].header_regex == r"Period Total Food Non-Food"  # the newest layout's wording
+
+
+def test_a_missing_heading_pin_is_a_manifest_problem():
+    assert any("headings are not pinned" in p for p in src.manifest_problems(table_replaced(3, 0, header_regex=None)))
+    assert any("closing boundary is not pinned" in p for p in src.manifest_problems(table_replaced(3, 0, boundary_regex="")))
+
+
+def test_the_duplicate_row_exception_is_registered_for_exactly_the_vetted_context():
+    from app.services.zamstats_cpi_table import AUTHORIZED_DUPLICATE_ROWS
+    authorised = [(p.key, t.table_id, m) for p in P for t in p.tables for m in t.authorized_duplicate_months]
+    assert authorised == [("zam-cpi-2012-12", P[0].tables[0].table_id, D(2010, 12, 1))]
+    assert set(authorised) == AUTHORIZED_DUPLICATE_ROWS

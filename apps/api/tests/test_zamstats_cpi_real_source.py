@@ -1,6 +1,11 @@
-"""OPTIONAL real-source fidelity gate for the ZamStats CPI manifest. Skipped unless ZM_ZAMSTATS_CPI_PDF_DIR points at a local
-directory holding the vetted Monthly Bulletin PDFs under their manifest file names. Makes no network request, commits no PDF, and is
-never required by the normal offline suite (rights status review_required: the files stay local)."""
+"""OPTIONAL real-source fidelity gate for the ZamStats CPI manifest.
+
+- ZM_ZAMSTATS_CPI_PDF_DIR unset: the whole suite is skipped (not enabled).
+- ZM_ZAMSTATS_CPI_PDF_DIR set: the suite is explicitly enabled and REQUIRES the complete set of manifest PDFs under their manifest
+  file names; a missing file or directory FAILS (it is never skipped), in the per-publication tests and the aggregate ones alike.
+No network request is made, no PDF is committed and the normal offline suite never needs the files (rights status
+review_required: the files stay local).
+"""
 
 import os
 from datetime import date
@@ -9,12 +14,14 @@ from pathlib import Path
 
 import pytest
 
+from app.services import zamstats_cpi_combine as cmb
 from app.services import zamstats_cpi_source as src
-from app.services.zamstats_cpi_combine import reconcile
 from app.services.zamstats_cpi_models import ZamstatsCpiError
+from zamstats_cpi_real_gate import ENV_VAR, gate_state
 
-DIRECTORY = os.environ.get("ZM_ZAMSTATS_CPI_PDF_DIR")
-pytestmark = pytest.mark.skipif(not DIRECTORY, reason="set ZM_ZAMSTATS_CPI_PDF_DIR to a folder of the vetted ZamStats PDFs")
+DIRECTORY = os.environ.get(ENV_VAR)
+STATE, MISSING = gate_state(DIRECTORY, [p.filename for p in src.PUBLICATIONS])
+pytestmark = pytest.mark.skipif(STATE == "skip", reason=f"set {ENV_VAR} to a folder of the vetted ZamStats PDFs to enable")
 D = date
 
 # The ten logical observations whose source cells disagree in the vetted publications. They are preserved as conflicts and are NOT
@@ -27,16 +34,29 @@ KNOWN_CONFLICTS = {
 }
 SAME_PUBLICATION = {("index_all_items", D(2013, 2, 1)), ("index_all_items", D(2014, 2, 1)), ("index_all_items", D(2014, 8, 1)),
                     ("index_all_items", D(2022, 10, 1))}
+_CACHE: dict[str, object] = {}
 
 
 def load(publication: src.Publication):
+    """Parse one manifest PDF (verified against its pinned size and SHA-256). A missing file FAILS the test."""
+    if publication.key in _CACHE:
+        return _CACHE[publication.key]
     path = Path(DIRECTORY) / publication.filename
-    if not path.exists():
-        pytest.skip(f"{publication.filename} is not in ZM_ZAMSTATS_CPI_PDF_DIR")
+    if not path.is_file():
+        pytest.fail(f"required manifest PDF is missing: {publication.filename}")
     try:
-        return src.parse_publication(path.read_bytes(), publication)
+        _CACHE[publication.key] = src.parse_publication(path.read_bytes(), publication)
     except ZamstatsCpiError as exc:
         pytest.fail(str(exc))
+    return _CACHE[publication.key]
+
+
+def load_all():
+    return [load(p) for p in src.PUBLICATIONS]
+
+
+def test_the_complete_manifest_pdf_set_is_present():
+    assert STATE == "run", f"missing manifest PDFs: {MISSING}"
 
 
 @pytest.mark.parametrize("publication", src.PUBLICATIONS, ids=lambda p: p.key)
@@ -59,13 +79,38 @@ def test_known_source_edge_values():
     assert zero.source_value_text == "(0.0)" and zero.value == 0 and zero.source_negative
 
 
+def test_three_gates_manifest_coverage_evidence_completeness_and_resolution():
+    assert src.manifest_problems() == []  # 1. manifest coverage: complete
+    parsed = load_all()
+    required = cmb.validate_evidence_completeness(parsed)  # 2. parsed evidence completeness: complete
+    assert required == {(p.key, t.table_id) for p in src.PUBLICATIONS for t in p.tables}
+    result = cmb.reconcile(parsed)  # 3. canonical resolution: INCOMPLETE (ten source conflicts)
+    assert len(result.conflicts) == 10
+    with pytest.raises(ZamstatsCpiError, match="conflicting source cells"):
+        cmb.require_resolved(result)
+    with pytest.raises(ZamstatsCpiError, match="conflicting source cells"):
+        cmb.require_canonical_ready(parsed)
+
+
 def test_full_reconciliation_resolves_every_observation_except_the_pinned_source_conflicts():
-    parsed = [load(p) for p in src.PUBLICATIONS]
-    result = reconcile(parsed)
+    result = cmb.reconcile(load_all())
+    assert len(result.resolved) == 1356 and len(result.conflicts) == 10
     assert len(result.resolved) + len(result.conflicts) == 1366  # 3 x 202 index + 3 x 190 monthly + 190 annual
+    assert result.unowned == ()
     assert {(c.series, c.month) for c in result.conflicts} == KNOWN_CONFLICTS
     assert {(c.series, c.month) for c in result.conflicts if c.same_publication} == SAME_PUBLICATION
     assert not any(r.series in ("annual_inflation_food", "annual_inflation_non_food") for r in result.resolved)
     assert min(r.month for r in result.resolved if r.series == "index_food") == D(2010, 1, 1)
     formatting = {(r.series, r.month) for r in result.resolved if r.text_variants}
-    assert ("index_all_items", D(2020, 10, 1)) in formatting  # 274.2 vs 274.20: numerically equal, text different
+    assert len(formatting) == 8 and ("index_all_items", D(2020, 10, 1)) in formatting  # 274.2 vs 274.20: numerically equal
+
+
+def test_a_conflict_free_scope_is_canonical_ready_with_only_the_tables_it_needs():
+    scope = cmb.scope_for(["index_food"], D(2021, 1, 1), D(2021, 12, 1))
+    needed = cmb.required_evidence(scope)
+    assert len(needed) == 2
+    parsed = [load(p) for p in src.PUBLICATIONS if p.key in {key for key, _table in needed}]
+    ready = cmb.require_canonical_ready(parsed, scope)
+    assert len(ready) == 12 and all(r.series == "index_food" for r in ready)
+    with pytest.raises(ZamstatsCpiError, match="incomplete"):
+        cmb.require_canonical_ready(parsed[:1], scope)  # one of the two required tables missing

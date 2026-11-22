@@ -5,4 +5,4 @@
                   2023                                     January                  152.33             -0.3
                   2023                                     February                 153.44             (0.0)
  Note: Inflation rates are computed using unrounded consumer price indices
- Source: ZamStats, Prices Statistics, 2099
+ Source: SYNTHETIC fixture (invented values)

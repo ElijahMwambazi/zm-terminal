@@ -3,8 +3,8 @@
     Weight               Period
                                                              1000.0               534.9             465.2
      2011
-                         Jan '11 - Dec '10                     0.7                  1.1              0.2
-                         Feb '11 - Jan '11                     0.8                 -0.5              (0.9)
-                         Mar '11 - Feb '11                     1.1                  1.0              1.1
-     2012                Jan '12 - Dec '11                     1.2                  1.8              0.3
- Source: ZamStats, Prices Statistics, 2099
+                         Jan '11 - Dec '10                     4.1                  4.2              4.3
+                         Feb '11 - Jan '11                     4.4                 -4.5              (4.6)
+                         Mar '11 - Feb '11                     4.7                  4.8              4.9
+     2012                Jan '12 - Dec '11                     5.1                  5.2              5.3
+ Source: SYNTHETIC fixture (invented values)

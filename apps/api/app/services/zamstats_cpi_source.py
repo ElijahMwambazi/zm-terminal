@@ -81,7 +81,12 @@ _T_ANNEX_11 = r"Table 1\.1: Consumer Price Index - Food and Non-Food \(National\
 _T_ANNEX_13 = r"Table 1\.3: Consumer Price Indices and Annual Inflation"
 
 
+_H_IDX = r"Period Total Food CPI Non-Food CPI"  # the ordered column headings of the Food/Non-Food index tables
+_H_ANN = r"Year Month Annual CPI Annual Inflation Rate"
+
+
 def _idx(table_id, page, title, first, last, c_first=None, c_last=None, **kw) -> TableSpec:
+    kw.setdefault("header_regex", _H_IDX)
     return TableSpec(table_id, VERTICAL_LABELLED, page, title, first, last, _IDX, canonical_first=c_first, canonical_last=c_last, **kw)
 
 
@@ -90,6 +95,7 @@ def _mon(table_id, family, page, title, first, last, c_first, c_last, **kw) -> T
 
 
 def _ann(table_id, family, page, title, first, last, c_first, c_last, **kw) -> TableSpec:
+    kw.setdefault("header_regex", _H_ANN)
     return TableSpec(table_id, family, page, title, first, last, _ANN, canonical_first=c_first, canonical_last=c_last, **kw)
 
 
@@ -105,7 +111,8 @@ PUBLICATIONS: tuple[Publication, ...] = (
               r"Consumer Index Numbers of Consumer Prices - Food and Non-Food \(National\)", _d(2010, 1), _d(2012, 11),
               _d(2010, 1), _d(2012, 11), authorized_duplicate_months=frozenset({_d(2010, 12)})),
          _mon("Month on month Inflation Rates: Food and Non Food Items", QUOTED_MONTHS, 5,
-              r"Month on month Inflation Rates: Food and Non Food Items", _d(2011, 1), _d(2012, 12), _d(2011, 1), _d(2012, 12), base_on_page=True),),
+              r"Month on month Inflation Rates: Food and Non Food Items", _d(2011, 1), _d(2012, 12), _d(2011, 1), _d(2012, 12), base_on_page=True,
+              header_regex=r"Total Food Non-Food", extra_allowed=(r"1000\.0 534\.9 465\.2", r"Weight Period")),),
         (23,), "canonical",
         notes=('archive label Vol 117; the PDF cover reads Volume 116, December 2012', 'index table prints December 2010 twice in a row (collapsed under an explicit per-table authorisation and reported)', 'index table ends at November 2012; December 2012 is owned by the December 2015 bulletin'),
     ),
@@ -114,7 +121,8 @@ PUBLICATIONS: tuple[Publication, ...] = (
         f"{_OLD}/Vol-140-2014-The-Monthly-December.pdf", "7f4d06e23370d367e3d45d402db3b1ae7892dcb675a791bbbbbd22a9b7cbe52b",
         2_208_507, 36, (VERTICAL_LABELLED,),
         (_mon("Monthly Inflation Rates: Food and Non Food Items", VERTICAL_LABELLED, 5,
-              r"Monthly Inflation Rates: Food and Non Food Items", _d(2013, 1), _d(2014, 12), _d(2013, 1), _d(2014, 12)),),
+              r"Monthly Inflation Rates: Food and Non Food Items", _d(2013, 1), _d(2014, 12), _d(2013, 1), _d(2014, 12),
+              header_regex=r"Period Total Food Non-Food"),),
         (5,), "canonical",
     ),
     Publication(
@@ -125,7 +133,7 @@ PUBLICATIONS: tuple[Publication, ...] = (
               _d(2012, 12), _d(2015, 12)),
          _mon("Monthly Inflation Rate: Food and Non Food Items", HORIZONTAL_13, 5,
               r"Monthly Inflation Rate: Food and Non Food Items, \(2009=100\)", _d(2014, 12), _d(2015, 12), _d(2015, 1), _d(2015, 12),
-              horizontal_weights=False),),
+              horizontal_weights=False, boundary_regex=r"^\s*Percentage Point Contribution of different items to Monthly Inflation"),),
         (24,), "canonical",
         notes=('the monthly table has no weight column',),
     ),
@@ -136,7 +144,8 @@ PUBLICATIONS: tuple[Publication, ...] = (
         (_idx("Consumer Index Numbers of Consumer Prices - Food and Non-Food (National)", 29, _T_IDX_OLD, _d(2013, 1), _d(2016, 12),
               _d(2016, 1), _d(2016, 12)),
          _ann("Consumer Price Indices (2009=100)", ANNUAL_ROWS, 31, r"CONSUMER PRICE INDICES \(2009=100\)", _d(2011, 1), _d(2016, 12),
-              _d(2011, 1), _d(2016, 12)),
+              _d(2011, 1), _d(2016, 12),
+              extra_allowed=(r"Note: Inflation rates are computed using unrounded consumer price indices",)),
          _mon("Monthly Inflation Rate: Food and Non-Food Items (2009=100)", HORIZONTAL_13, 9,
               r"Monthly Inflation Rate: Food and Non-Food Items \(2009=100\)", _d(2015, 12), _d(2016, 12), _d(2016, 1), _d(2016, 12)),),
         (29,), "canonical",
@@ -207,7 +216,7 @@ PUBLICATIONS: tuple[Publication, ...] = (
         (_idx("Table 1.1: Consumer Price Index - Food and Non-Food (National)", 50, _T_ANNEX_11, _d(2020, 1), _d(2023, 12), _d(2021, 1), _d(2023, 12),
               base_on_page=False),
          _ann("Table 1.3: Consumer Price Indices and Annual Inflation", ANNUAL_ROWS, 52, _T_ANNEX_13, _d(2020, 1), _d(2023, 12),
-              _d(2020, 1), _d(2023, 12)),
+              _d(2020, 1), _d(2023, 12), boundary_count=2),
          _mon("Table 8: Overall Monthly Inflation Rate", HORIZONTAL_13, 12, r"Table 8: Overall Monthly Inflation Rate for Food and Non-Food Items",
               _d(2022, 12), _d(2023, 12), _d(2023, 1), _d(2023, 12), base_on_page=False),),
         (52,), "canonical",
@@ -239,7 +248,7 @@ PUBLICATIONS: tuple[Publication, ...] = (
         f"{_U}/2026/10/Vol-283-of-2026-The-Monthly-October.pdf", "06d867a8ed2060e2a2d4d609447e9494e0c46d11d68790ba7b4de00290b7eb70",
         2_402_456, 59, (VERTICAL_LABELLED, HORIZONTAL_13),
         (_idx("Table 1.1: Consumer Price Index - Food and Non-Food (National)", 23, _T_ANNEX_11, _d(2023, 1), _d(2026, 10), _d(2026, 1), _d(2026, 10),
-              base_on_page=False),
+              base_on_page=False, header_regex=r"Period Total Food Non-Food"),
          _ann("Table 1.3: Consumer Price Indices and Annual Inflation", VERTICAL_LABELLED, 25, _T_ANNEX_13, _d(2022, 1), _d(2026, 10),
               _d(2026, 1), _d(2026, 10)),
          _mon("Table 5: Overall Monthly Inflation Rate", HORIZONTAL_13, 9, r"Table 5: Overall Monthly Inflation Rate for Food and Non-Food Items",

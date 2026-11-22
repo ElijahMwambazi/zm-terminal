@@ -12,6 +12,6 @@
                                      February                 104.55         204.58          304.77
   2023
                                      March                    105.66         205.69          305.88
- Source: ZamStats, Prices Statistics, 2099
+ Source: SYNTHETIC fixture (invented values)
  Note: 2009 = 100
                                                                                                          23

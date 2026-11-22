@@ -113,6 +113,12 @@ class SourceObservation:
     layout_family: str
     canonical_for_table: bool = True  # False: a validation-only column (for example the annual table's Annual CPI column)
 
+    def __post_init__(self) -> None:
+        # The closed seven-series space holds for every instance, however it was built (not only through the table parsers).
+        validate_series(self.metric, self.category)
+        if self.month.day != 1:
+            raise ZamstatsCpiError("observation month must be first-of-month")
+
     @property
     def series(self) -> str:
         return series_name(self.metric, self.category)

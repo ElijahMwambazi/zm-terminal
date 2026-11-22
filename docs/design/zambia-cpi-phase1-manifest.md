@@ -20,6 +20,21 @@ manifest (committed pins) -> verify bytes (size, %PDF, SHA-256) -> extract ONLY 
    -> reconcile -> resolved logical observations + conflicts (fail closed)
 ```
 
+### Three separate gates (none implies another)
+
+| gate | function | what it proves | state today |
+|---|---|---|---|
+| 1. manifest coverage | `manifest_problems` / `validate_manifest` | the committed manifest names exactly one canonical owner for every month of every series | **complete** |
+| 2. parsed-evidence completeness | `validate_evidence_completeness` | every manifest table whose printed extent touches the requested scope (owners AND validation overlaps) was actually parsed and supplied, and each supplied table is the manifest's table | **complete** once all 14 PDFs are parsed |
+| 3. canonical resolution | `require_resolved` / `require_canonical_ready` | no conflicting source cells remain (and, for `require_canonical_ready`, gate 2 as well) | **incomplete: 10 observations conflict** |
+
+Static ownership alone is not enough: an observation (for example December 2014 monthly inflation) can look resolved until the later
+publication that contradicts it is supplied. `reconcile` on its own is a diagnostic over whatever evidence it is given and is never
+canonical-ready; only `require_canonical_ready(parsed, scope)` proves completeness and resolution together, and conflicts outside
+the requested scope do not block it. The required tables are derived from the manifest, not from month lists. An empty reconciliation
+is not "resolved", and an empty requested scope is an error. **A controlled real import stays blocked** until the ten conflicts have a
+reviewed resolution rule.
+
 No runtime archive crawling, no URL construction, no "newest PDF" lookup, no BoZ call, no database, no migration. Published rates
 are authoritative: nothing is calculated, repaired, rounded or forward-filled.
 
@@ -77,6 +92,23 @@ Items index.
 Every table needs its title anchor to match exactly the pinned number of lines (normally 1; 2 for one bulletin that prints its heading
 twice), prints no base other than `2009 = 100`, and prints the base itself or relies on a pinned base-evidence page of the same PDF.
 
+**Structural validation of the whole block.** Between the title anchor and the pinned closing boundary every line must be classified:
+a month row of the right width, a year label, a wrapped continuation, an explicitly authorised duplicate row, the pinned heading line,
+or a pinned/allowed caption (weight line, `Month`, `(%)`, a table-specific footer). A malformed or extra month-like row, a row of the
+wrong width and any other unclassified text fail; nothing is silently filtered. The closing boundary is pinned per table (`Source:` by
+default; the December 2015 monthly table has no `Source:` line and is bounded by the next heading), a missing boundary fails and
+consecutive duplicate boundaries must equal the pinned count (two for one table). **Column semantics are verified, not inferred:** the
+ordered column headings of every vertical, annual and quoted table must full-match a pinned heading line exactly (a swapped, missing,
+duplicated, unknown or extra heading fails); the horizontal tables are identified by their Total/Food/Non-Food row labels and fixed weights.
+
+**Header years.** Horizontal headers print month names and years; the years contain typos (`May-2024` inside a 2025 window), so they
+are not used. Month identity is anchored independently by the manifest (exact page and table, the ordered fixed window, the pinned
+first and last month and the layout) and the header month NAMES must agree with that anchor; this independent anchor must not be loosened.
+
+**Duplicate-row exception binding.** An adjacent identical printed row is collapsed only if the table spec AND the parser's
+`AUTHORIZED_DUPLICATE_ROWS` registry both name this exact manifest key, table and month (today only December 2010 in the December 2012
+bulletin's index table). A similar spec in another publication or for another table does not inherit the permission.
+
 ## 6. Numeric grammar and sign metadata
 
 Per-family lexical contract (observed conventions, not global invariants): index values 1 to 3 digits, `.` and 1 or 2 decimals
@@ -114,15 +146,25 @@ with no authorisation) and the Vol 176 monthly table (wrapped continuation lines
 - The optional gate `tests/test_zamstats_cpi_real_source.py` (env var `ZM_ZAMSTATS_CPI_PDF_DIR`, no network, skipped by default)
   re-checks every publication, known edge values (October 2026; a printed `(0.0)`) and the full reconciliation: 1,356 resolved, 10
   conflicts (the table above), 8 formatting variants.
-- The normal suite is offline and uses small synthetic fixtures (`tests/fixtures/zamstats_cpi_*.txt`, invented numbers). No PDF is
-  committed.
+- The optional gate is explicit: with `ZM_ZAMSTATS_CPI_PDF_DIR` unset the suite is skipped; with it set, **every manifest PDF must be
+  present or the suite fails** (never skips), including the aggregate tests. It also demonstrates the three gates on the real data:
+  coverage complete, evidence completeness complete, resolution rejected (10 conflicts), and a conflict-free scope (Food index 2021)
+  that becomes canonical-ready with only the two tables it needs.
+- **Fixture policy.** The normal suite is offline and uses small fixtures (`tests/fixtures/zamstats_cpi_*.txt`) whose numeric VALUES
+  are all invented (for example 211.11 or 5.1 to 6.4). They keep only layout structure that the real tables have: title anchors, heading
+  lines, the fixed weights (1,000, 534.85, 465.15 and 1000.0 534.9 465.2), year labels, wrapped rows and the notation forms. An earlier
+  revision of three fixtures copied real source rows (one of them a complete real monthly row set); they were replaced and audited, and
+  no real numeric table remains. No PDF is committed.
 
 ## 9. Fail-closed behaviour
 
-Zero or multiple title matches, a missing base, another base period, a gap or duplicate month, unexpected first/last month,
-unauthorised duplicate rows, wrong year-label counts, unknown notation, wrong weight rows, a hash/size/magic mismatch, a redirect, a
-bad status, an oversized body, a missing text layer and any old-regime evidence all raise `ZamstatsCpiError` with a message naming
-tables, pages, months, series or keys (never source values). `require_resolved` raises on any conflict.
+Zero or multiple title matches, a missing or duplicated boundary, a changed column heading, any unclassified or malformed line inside
+a table block, a missing base, another base period, a gap or duplicate month, unexpected first/last month, unauthorised duplicate
+rows, wrong year-label counts, unknown notation, wrong weight rows, a hash/size/magic mismatch, a redirect, a bad status, an oversized
+body, a missing text layer and any old-regime evidence all raise `ZamstatsCpiError` with a message naming tables, pages, months, series
+or keys (never source values). `SourceObservation` itself rejects any metric/category outside the seven approved series (annual Food
+and Non-Food cannot be constructed), however it is built. `require_resolved` raises on any conflict or on an empty reconciliation;
+`validate_evidence_completeness` raises, naming publication keys and tables, when required evidence was not supplied.
 
 ## 10. What comes next (not in this slice)
 
